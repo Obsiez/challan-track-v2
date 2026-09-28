@@ -60,8 +60,31 @@ export function getBdOperator(phone: string): OperatorInfo {
 
   const prefix = cleaned.slice(0, 3);
   switch (prefix) {
-    case '017':
     case '013':
+      return {
+        name: 'Skitto',
+        short: 'Skitto',
+        badgeClass: 'bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300 border-violet-200 dark:border-violet-800'
+      };
+    case '014':
+      return {
+        name: 'Ryze',
+        short: 'Ryze',
+        badgeClass: 'bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300 border-teal-200 dark:border-teal-800'
+      };
+    case '015':
+      return {
+        name: 'Teletalk',
+        short: 'Teletalk',
+        badgeClass: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+      };
+    case '016':
+      return {
+        name: 'Cirkle',
+        short: 'Cirkle',
+        badgeClass: 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+      };
+    case '017':
       return {
         name: 'Grameenphone',
         short: 'GP',
@@ -71,26 +94,13 @@ export function getBdOperator(phone: string): OperatorInfo {
       return {
         name: 'Robi',
         short: 'Robi',
-        badgeClass: 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+        badgeClass: 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300 border-red-200 dark:border-red-800'
       };
     case '019':
-    case '014':
       return {
         name: 'Banglalink',
         short: 'BL',
         badgeClass: 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200 dark:border-amber-800'
-      };
-    case '016':
-      return {
-        name: 'Airtel',
-        short: 'Airtel',
-        badgeClass: 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300 border-red-200 dark:border-red-800'
-      };
-    case '015':
-      return {
-        name: 'Teletalk',
-        short: 'Teletalk',
-        badgeClass: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
       };
     default:
       return {

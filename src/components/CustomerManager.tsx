@@ -296,7 +296,8 @@ export default function CustomerManager({
  const [pendingContactChoice, setPendingContactChoice] = useState<{
    contactName: string;
    numbers: string[];
-   onSelect: (number: string) => void;
+   isNewAccount?: boolean;
+   onSelect: (number: string, finalName?: string) => void;
  } | null>(null);
  const [formError, setFormError] = useState('');
  const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
@@ -645,13 +646,58 @@ if (sortBy === 'custom') {
     return transactions.filter(t => t.customerId === selectedCustomerId);
   }, [transactions, selectedCustomerId]);
 
-  const handlePickContact = async (onPickPhone: (phone: string) => void, onPickName?: (name: string) => void) => {
+  const handleAutoCreateAndOpenCustomer = async (customerName: string, phone: string) => {
+    const trimmedName = customerName.trim() || phone;
+    setIsCreatingCustomer(true);
+    setFormError('');
+    try {
+      const [newId] = await Promise.all([
+        createCustomer(trimmedName, phone),
+        new Promise(resolve => setTimeout(resolve, 300))
+      ]);
+      if (newId) {
+        setNewName('');
+        setNewPhone('');
+        setShowAddForm(false);
+        setSelectedCustomerId(newId as string);
+        triggerHaptic('single');
+        toast.success(
+          lang === 'bn'
+            ? `"${trimmedName}"-এর হিসাব তৈরি ও খোলা হয়েছে`
+            : `Account for "${trimmedName}" created & opened`
+        );
+      }
+    } catch (err: any) {
+      if (err?.message === 'DUPLICATE_NAME') {
+        toast.error(
+          lang === 'bn'
+            ? 'এই নামের গ্রাহক ইতিমধ্যে খতিয়ানে সংরক্ষিত আছে।'
+            : 'A customer with this name already exists.'
+        );
+      } else {
+        toast.error(
+          lang === 'bn'
+            ? 'অ্যাকাউন্ট সংরক্ষণ করা সম্ভব হয়নি। পুনরায় চেষ্টা করুন।'
+            : 'Failed to create customer account. Please try again.'
+        );
+      }
+    } finally {
+      setIsCreatingCustomer(false);
+    }
+  };
+
+  const handlePickContact = async (
+    onPickPhone: (phone: string) => void, 
+    onPickName?: (name: string) => void,
+    isNewAccount: boolean = false
+  ) => {
     if (typeof navigator !== 'undefined' && 'contacts' in navigator && (navigator as any).contacts?.select) {
       try {
         const props = ['name', 'tel'];
         const options = { multiple: false };
         const contacts = await (navigator as any).contacts.select(props, options);
         if (contacts && contacts.length > 0) {
+          // Strictly limit to single contact
           const contact = contacts[0];
           const rawName = (contact.name && contact.name[0]) ? contact.name[0] : '';
           const rawTels: string[] = contact.tel || [];
@@ -668,15 +714,32 @@ if (sortBy === 'custom') {
             return;
           }
 
-          // If contact has multiple numbers, open modern choice modal!
+          // If coming from "New account details", always open the custom confirmation/number picker modal
+          if (isNewAccount) {
+            triggerHaptic('single');
+            const initialName = (newName.trim() || rawName || '').trim();
+            setPendingContactChoice({
+              contactName: initialName,
+              numbers: cleanedNumbers,
+              isNewAccount: true,
+              onSelect: async (chosenNumber: string, finalName?: string) => {
+                const targetName = (finalName || initialName || chosenNumber).trim();
+                await handleAutoCreateAndOpenCustomer(targetName, chosenNumber);
+              }
+            });
+            return;
+          }
+
+          // If contact has multiple numbers (for existing customer edit/view)
           if (cleanedNumbers.length > 1) {
             triggerHaptic('single');
             setPendingContactChoice({
               contactName: rawName,
               numbers: cleanedNumbers,
-              onSelect: (chosen: string) => {
+              isNewAccount: false,
+              onSelect: (chosen: string, finalName?: string) => {
                 onPickPhone(chosen);
-                if (onPickName && rawName) onPickName(rawName);
+                if (onPickName && (finalName || rawName)) onPickName(finalName || rawName);
                 toast.success(lang === 'bn' ? 'নম্বর সফলভাবে নেওয়া হয়েছে' : 'Contact number selected');
               }
             });
@@ -927,7 +990,7 @@ if (sortBy === 'custom') {
   />
   <button
     type="button"
-    onClick={() => handlePickContact(setNewPhone, (name) => { if (!newName.trim()) setNewName(name); })}
+    onClick={() => handlePickContact(setNewPhone, (name) => { if (!newName.trim()) setNewName(name); }, true)}
     className="px-3.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800/80 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-sm shrink-0 font-bold text-xs"
     title={lang === 'bn' ? 'কন্টাক্ট নির্বাচন করুন' : 'Pick Contact'}
   >
@@ -2394,8 +2457,9 @@ if (sortBy === 'custom') {
       isOpen={true}
       contactName={pendingContactChoice.contactName}
       numbers={pendingContactChoice.numbers}
-      onSelectNumber={(chosen) => {
-        pendingContactChoice.onSelect(chosen);
+      isNewAccount={pendingContactChoice.isNewAccount}
+      onSelectNumber={(chosen, finalName) => {
+        pendingContactChoice.onSelect(chosen, finalName);
         setPendingContactChoice(null);
       }}
       onClose={() => setPendingContactChoice(null)}
