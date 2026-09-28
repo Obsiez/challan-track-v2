@@ -428,7 +428,7 @@ export default function App() {
  }
  });
  };
-  const handleThemeChange = (newTheme: 'light' | 'dark') => {
+  const handleThemeChange = async (newTheme: 'light' | 'dark') => {
     setTheme(newTheme);
     localStorage.setItem('theme', newTheme);
   };

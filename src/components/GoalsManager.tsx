@@ -81,94 +81,7 @@ export default function GoalsManager({
 }: GoalsManagerProps) {
   const t = translations[lang];
 
-  // Real-time gesture and history protection
-  const sheetRef = useRef<HTMLDivElement>(null);
-  const backdropRef = useRef<HTMLDivElement>(null);
-  const touchStartY = useRef<number | null>(null);
-  const currentDragY = useRef<number>(0);
-  const touchStartTime = useRef<number>(0);
-  const isDraggingSheet = useRef<boolean>(false);
   const pendingHistoryPopsRef = useRef<number>(0);
-
-  const onHandlePointerDown = (e: React.PointerEvent) => {
-    if (!sheetRef.current) return;
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch {
-      // ignore
-    }
-    touchStartY.current = e.clientY;
-    touchStartTime.current = Date.now();
-    currentDragY.current = 0;
-    isDraggingSheet.current = true;
-    sheetRef.current.style.transition = 'none';
-  };
-
-  const onHandlePointerMove = (e: React.PointerEvent) => {
-    if (!isDraggingSheet.current || touchStartY.current === null || !sheetRef.current) return;
-    const deltaY = e.clientY - touchStartY.current;
-    
-    // Only pull down (positive delta)
-    const y = Math.max(0, deltaY);
-    currentDragY.current = y;
-    sheetRef.current.style.transform = `translate3d(0, ${y}px, 0)`;
-  };
-
-  const onHandlePointerUp = (e: React.PointerEvent) => {
-    if (!isDraggingSheet.current || !sheetRef.current) return;
-    isDraggingSheet.current = false;
-    touchStartY.current = null;
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      // ignore
-    }
-
-    const dragDistance = currentDragY.current;
-    const elapsed = Date.now() - touchStartTime.current;
-    const velocity = dragDistance / Math.max(1, elapsed);
-
-    // Pull down threshold: > 50px or quick swipe down (> 20px with velocity > 0.35)
-    if (dragDistance > 50 || (dragDistance > 20 && velocity > 0.35)) {
-      triggerHaptic('single');
-      sheetRef.current.style.transition = 'transform 0.15s ease-out';
-      sheetRef.current.style.transform = 'translate3d(0, 100%, 0)';
-      if (backdropRef.current) {
-        backdropRef.current.style.transition = 'opacity 0.15s ease-out';
-        backdropRef.current.style.opacity = '0';
-      }
-      setTimeout(() => {
-        closeGoalDetail();
-        if (sheetRef.current) {
-          sheetRef.current.style.transform = '';
-          sheetRef.current.style.transition = '';
-        }
-        if (backdropRef.current) {
-          backdropRef.current.style.opacity = '';
-          backdropRef.current.style.transition = '';
-        }
-      }, 150);
-    } else {
-      // Snappy snap back up
-      sheetRef.current.style.transition = 'transform 0.15s ease-out';
-      sheetRef.current.style.transform = 'translate3d(0, 0, 0)';
-    }
-    currentDragY.current = 0;
-  };
-
-  const onHandlePointerCancel = (e: React.PointerEvent) => {
-    if (!isDraggingSheet.current || !sheetRef.current) return;
-    isDraggingSheet.current = false;
-    touchStartY.current = null;
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      // ignore
-    }
-    sheetRef.current.style.transition = 'transform 0.15s ease-out';
-    sheetRef.current.style.transform = 'translate3d(0, 0, 0)';
-    currentDragY.current = 0;
-  };
 
   // Tab filter: 'active' or 'history'
   const [filterTab, setFilterTab] = useState<'active' | 'history'>('active');
@@ -242,7 +155,7 @@ export default function GoalsManager({
 
   const openGoalDetail = (goal: SavingGoal) => {
     triggerHaptic('single');
-    setSelectedGoal(goal);
+    setSelectedGoal({ ...goal });
     pushModalHistory('goalDetail');
   };
 
@@ -882,8 +795,16 @@ export default function GoalsManager({
             return (
               <div 
                 key={goal.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => openGoalDetail(goal)}
-                className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/50 dark:hover:border-emerald-500/30 p-5 rounded-3xl shadow-sm hover:shadow-md transition-all cursor-pointer relative group flex flex-col justify-between min-h-[180px]"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openGoalDetail(goal);
+                  }
+                }}
+                className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/50 dark:hover:border-emerald-500/30 p-5 rounded-3xl shadow-sm hover:shadow-md transition-all cursor-pointer relative group flex flex-col justify-between min-h-[180px] touch-manipulation select-none active:scale-[0.99]"
               >
                 <div>
                   {/* Title & Badge (Consistent Distinct Icons) */}
@@ -1422,30 +1343,18 @@ export default function GoalsManager({
       {/* ── GOAL DETAIL VIEW MODAL ── */}
       {selectedGoal && (
         <div 
-          ref={backdropRef}
+          key={selectedGoal.id}
           className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 no-select animate-in fade-in duration-150"
         >
           <div className="absolute inset-0" onClick={closeGoalDetail} />
 
           <div
-            ref={sheetRef}
             className="bg-white dark:bg-zinc-900 w-full sm:max-w-xl rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col relative z-10 animate-quick-slide-up"
           >
             
             {/* Header (Goal Title on Left & Circular Action Buttons on Right) */}
-            <div className="px-5 pt-2.5 pb-4 sm:px-6 sm:pt-3 sm:pb-4.5 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/60 shrink-0">
-              {/* Collapsible handle bar (slide down to close) */}
-              <div 
-                className="w-full flex justify-center py-3 -mt-1 cursor-grab active:cursor-grabbing touch-none select-none"
-                onPointerDown={onHandlePointerDown}
-                onPointerMove={onHandlePointerMove}
-                onPointerUp={onHandlePointerUp}
-                onPointerCancel={onHandlePointerCancel}
-              >
-                <div className="w-12 h-1.5 bg-zinc-300 dark:bg-zinc-700 rounded-full hover:bg-zinc-400 dark:hover:bg-zinc-600 transition-colors" />
-              </div>
-
-              <div className="flex items-center justify-between gap-3 mt-1">
+            <div className="px-5 py-4 sm:px-6 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/60 shrink-0">
+              <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1 flex items-center">
                   {/* Goal Title Button - Tap to Open Rename Popup */}
                   <button
