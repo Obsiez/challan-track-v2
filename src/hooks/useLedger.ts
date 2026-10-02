@@ -17,7 +17,7 @@ import {
  getDocs
 } from 'firebase/firestore';
 import { db, auth, OperationType } from '../firebase';
-import { Customer, Transaction, Reminder, UserSettings, SavingGoal, GoalContribution } from '../types';
+import { Customer, Transaction, Reminder, UserSettings, SavingGoal, GoalContribution, ImportProgress } from '../types';
 import { cleanBangladeshiPhone } from '../lib/phoneUtils';
 
 export function useLedger(
@@ -1420,8 +1420,27 @@ const lastSubmitRef = useRef<{
     }
 
     const customerDocRef = doc(db, 'users', userId, 'customers', customerId);
-    const relatedTxs = transactions.filter(t => t.customerId === customerId);
-    const relatedReminders = reminders.filter(r => r.type !== 'emi' && r.customerId === customerId);
+    let relatedTxs = transactions.filter(t => t.customerId === customerId);
+    try {
+      const qTx = query(collection(db, 'users', userId, 'transactions'), where('customerId', '==', customerId));
+      const snap = await getDocs(qTx);
+      const fetched: Transaction[] = [];
+      snap.forEach(d => fetched.push({ ...d.data(), id: d.id } as Transaction));
+      if (fetched.length > 0) relatedTxs = fetched;
+    } catch (e) {
+      console.warn("Could not query remote transactions for deletion, using cached list:", e);
+    }
+
+    let relatedReminders = reminders.filter(r => r.type !== 'emi' && r.customerId === customerId);
+    try {
+      const qRem = query(collection(db, 'users', userId, 'reminders'), where('customerId', '==', customerId));
+      const snapRem = await getDocs(qRem);
+      const fetchedRem: Reminder[] = [];
+      snapRem.forEach(d => fetchedRem.push({ ...d.data(), id: d.id } as Reminder));
+      if (fetchedRem.length > 0) relatedReminders = fetchedRem;
+    } catch (e) {
+      console.warn("Could not query remote reminders for deletion, using cached list:", e);
+    }
 
     const batch = writeBatch(db);
     batch.delete(customerDocRef);
@@ -1464,8 +1483,27 @@ const lastSubmitRef = useRef<{
     try {
       for (const customerId of idsToDelete) {
         const customerDocRef = doc(db, 'users', userId, 'customers', customerId);
-        const relatedTxs = transactions.filter(t => t.customerId === customerId);
-        const relatedReminders = reminders.filter(r => r.type !== 'emi' && r.customerId === customerId);
+        let relatedTxs = transactions.filter(t => t.customerId === customerId);
+        try {
+          const qTx = query(collection(db, 'users', userId, 'transactions'), where('customerId', '==', customerId));
+          const snap = await getDocs(qTx);
+          const fetched: Transaction[] = [];
+          snap.forEach(d => fetched.push({ ...d.data(), id: d.id } as Transaction));
+          if (fetched.length > 0) relatedTxs = fetched;
+        } catch (e) {
+          console.warn("Could not query remote transactions for deletion, using cached list:", e);
+        }
+
+        let relatedReminders = reminders.filter(r => r.type !== 'emi' && r.customerId === customerId);
+        try {
+          const qRem = query(collection(db, 'users', userId, 'reminders'), where('customerId', '==', customerId));
+          const snapRem = await getDocs(qRem);
+          const fetchedRem: Reminder[] = [];
+          snapRem.forEach(d => fetchedRem.push({ ...d.data(), id: d.id } as Reminder));
+          if (fetchedRem.length > 0) relatedReminders = fetchedRem;
+        } catch (e) {
+          console.warn("Could not query remote reminders for deletion, using cached list:", e);
+        }
 
         const batch = writeBatch(db);
         batch.delete(customerDocRef);
@@ -1707,7 +1745,8 @@ const lastSubmitRef = useRef<{
 
   const importLedgerData = async (
     backupData: any,
-    choice: 'merge' | 'clear' | 'skip'
+    choice: 'merge' | 'clear' | 'skip',
+    onProgress?: (progress: ImportProgress) => void
   ) => {
     if (!userId) return;
 
@@ -1718,6 +1757,13 @@ const lastSubmitRef = useRef<{
       throw new Error('INVALID_BACKUP_FILE');
     }
 
+    onProgress?.({
+      stage: 'parsing',
+      percent: 5,
+      message: 'ব্যাকআপ ফাইল বিশ্লেষণ করা হচ্ছে... / Parsing backup file...'
+    });
+    await new Promise(r => setTimeout(r, 40));
+
     // List of Firestore operations to commit
     const operations: { ref: any; data: any; type: 'set' | 'update' | 'delete' }[] = [];
 
@@ -1726,11 +1772,11 @@ const lastSubmitRef = useRef<{
     let newTrash: Customer[] = [...trashCustomers];
     let newTransactions: Transaction[] = [...transactions];
     let newReminders: Reminder[] = [...reminders];
+    let newGoals: SavingGoal[] = [...goals];
 
     if (choice === 'clear') {
-      // Clear Firestore references for existing customers, transactions, and reminders
+      // Clear Firestore references for existing customers, transactions, reminders, and goals
       if (!isLocal) {
-        // Collect deletes for existing customers (both active and trash)
         for (const c of customers) {
           operations.push({
             ref: doc(db, 'users', userId, 'customers', c.id),
@@ -1745,18 +1791,34 @@ const lastSubmitRef = useRef<{
             type: 'delete'
           });
         }
-        // Collect deletes for transactions
-        for (const tx of transactions) {
+        try {
+          const allRemoteTxSnap = await getDocs(collection(db, 'users', userId, 'transactions'));
+          allRemoteTxSnap.forEach(d => {
+            operations.push({
+              ref: doc(db, 'users', userId, 'transactions', d.id),
+              data: null,
+              type: 'delete'
+            });
+          });
+        } catch (e) {
+          for (const tx of transactions) {
+            operations.push({
+              ref: doc(db, 'users', userId, 'transactions', tx.id),
+              data: null,
+              type: 'delete'
+            });
+          }
+        }
+        for (const r of reminders) {
           operations.push({
-            ref: doc(db, 'users', userId, 'transactions', tx.id),
+            ref: doc(db, 'users', userId, 'reminders', r.id),
             data: null,
             type: 'delete'
           });
         }
-        // Collect deletes for reminders
-        for (const r of reminders) {
+        for (const g of goals) {
           operations.push({
-            ref: doc(db, 'users', userId, 'reminders', r.id),
+            ref: doc(db, 'users', userId, 'goals', g.id),
             data: null,
             type: 'delete'
           });
@@ -1768,6 +1830,7 @@ const lastSubmitRef = useRef<{
       newTrash = [];
       newTransactions = [];
       newReminders = [];
+      newGoals = [];
 
       // Create new customers from backup
       const customerMap = new Map<string, Customer>(); // name lowercased -> Customer object
@@ -1781,7 +1844,7 @@ const lastSubmitRef = useRef<{
           userId,
           name: bc.name.trim(),
           phone: (bc.phone || '').trim(),
-          outstandingDue: bc.outstandingDue || 0,
+          outstandingDue: Number(bc.outstandingDue) || 0,
           createdAt: cDate,
           updatedAt: new Date()
         };
@@ -1796,7 +1859,7 @@ const lastSubmitRef = useRef<{
               userId,
               name: bc.name.trim(),
               phone: (bc.phone || '').trim(),
-              outstandingDue: bc.outstandingDue || 0,
+              outstandingDue: Number(bc.outstandingDue) || 0,
               createdAt: cDate,
               updatedAt: new Date()
             },
@@ -1811,7 +1874,6 @@ const lastSubmitRef = useRef<{
         const customerNameLower = cName.trim().toLowerCase();
         let matchedCustomer = customerMap.get(customerNameLower);
         
-        // If the customer isn't in the customer list for some reason, create them
         if (!matchedCustomer) {
           const customId = doc(collection(db, 'temp')).id;
           const customerObj: Customer = {
@@ -1852,7 +1914,7 @@ const lastSubmitRef = useRef<{
           customerId: matchedCustomer.id,
           customerName: matchedCustomer.name,
           type: bt.type,
-          amount: bt.amount,
+          amount: Number(bt.amount) || 0,
           description: (bt.description || '').trim(),
           date: txDate,
           createdAt: txDate
@@ -1868,7 +1930,7 @@ const lastSubmitRef = useRef<{
               customerId: matchedCustomer.id,
               customerName: matchedCustomer.name,
               type: bt.type,
-              amount: bt.amount,
+              amount: Number(bt.amount) || 0,
               description: (bt.description || '').trim(),
               date: txDate,
               createdAt: txDate
@@ -1877,14 +1939,66 @@ const lastSubmitRef = useRef<{
           });
         }
       }
+
+      // Reconciliation for 'clear': Verify every customer's transactions sum matches their authoritative outstandingDue
+      for (const [, cust] of customerMap.entries()) {
+        const custTxs = newTransactions.filter(t => t.customerId === cust.id);
+        const txSum = custTxs.reduce((sum, t) => sum + (t.type === 'due' ? t.amount : -t.amount), 0);
+        const targetDue = cust.outstandingDue || 0;
+        const diff = Math.round((targetDue - txSum) * 100) / 100;
+
+        if (Math.abs(diff) >= 0.01) {
+          const customTxId = doc(collection(db, 'temp')).id;
+          let earliestMs = cust.createdAt ? new Date(cust.createdAt).getTime() : Date.now();
+          if (custTxs.length > 0) {
+            const minTxMs = Math.min(...custTxs.map(t => new Date(t.date).getTime()));
+            earliestMs = Math.min(earliestMs, minTxMs);
+          }
+          const adjDate = new Date(earliestMs - 1000); // 1 second earlier
+          const adjType: 'due' | 'payment' = diff > 0 ? 'due' : 'payment';
+          const adjAmount = Math.abs(diff);
+
+          const adjTx: Transaction = {
+            id: customTxId,
+            userId,
+            customerId: cust.id,
+            customerName: cust.name,
+            type: adjType,
+            amount: adjAmount,
+            description: 'পূর্ববর্তী জের সমন্বয় / Initial Balance Adjustment',
+            date: adjDate,
+            createdAt: adjDate
+          };
+          newTransactions.push(adjTx);
+
+          if (!isLocal) {
+            operations.push({
+              ref: doc(db, 'users', userId, 'transactions', customTxId),
+              data: {
+                id: customTxId,
+                userId,
+                customerId: cust.id,
+                customerName: cust.name,
+                type: adjType,
+                amount: adjAmount,
+                description: 'পূর্ববর্তী জের সমন্বয় / Initial Balance Adjustment',
+                date: adjDate,
+                createdAt: adjDate
+              },
+              type: 'set'
+            });
+          }
+        }
+      }
     } else {
       // choice === 'merge' or 'skip'
       // 1. Process customers
-      // Keep track of the current active customers by name
       const customerMap = new Map<string, Customer>();
       for (const c of newCustomers) {
         customerMap.set(c.name.trim().toLowerCase(), c);
       }
+
+      const newlyAddedCustomerIds = new Set<string>();
 
       for (const bc of backupData.customers) {
         if (!bc.name) continue;
@@ -1893,7 +2007,6 @@ const lastSubmitRef = useRef<{
 
         if (existing) {
           if (choice === 'merge') {
-            // Update phone if different
             const backupPhone = (bc.phone || '').trim();
             if (backupPhone && existing.phone !== backupPhone) {
               existing.phone = backupPhone;
@@ -1909,7 +2022,7 @@ const lastSubmitRef = useRef<{
             }
           }
         } else {
-          // Customer does not exist, create new one
+          // Brand new customer from backup: retain master balance
           const customId = doc(collection(db, 'temp')).id;
           const cDate = bc.createdAt ? new Date(bc.createdAt) : new Date();
           const customerObj: Customer = {
@@ -1917,12 +2030,13 @@ const lastSubmitRef = useRef<{
             userId,
             name: bc.name.trim(),
             phone: (bc.phone || '').trim(),
-            outstandingDue: 0, // will accumulate from new transactions
+            outstandingDue: Number(bc.outstandingDue) || 0,
             createdAt: cDate,
             updatedAt: new Date()
           };
           customerMap.set(key, customerObj);
           newCustomers.push(customerObj);
+          newlyAddedCustomerIds.add(customId);
 
           if (!isLocal) {
             operations.push({
@@ -1932,7 +2046,7 @@ const lastSubmitRef = useRef<{
                 userId,
                 name: bc.name.trim(),
                 phone: (bc.phone || '').trim(),
-                outstandingDue: 0,
+                outstandingDue: Number(bc.outstandingDue) || 0,
                 createdAt: cDate,
                 updatedAt: new Date()
               },
@@ -1942,13 +2056,20 @@ const lastSubmitRef = useRef<{
         }
       }
 
+      // Pre-build O(1) duplicate lookup index
+      const existingTxSet = new Set<string>();
+      for (const tx of newTransactions) {
+        const txDateMs = tx.date ? new Date(tx.date).getTime() : 0;
+        const roundedSec = Math.floor(txDateMs / 2000);
+        existingTxSet.add(`${tx.customerId}|${tx.type}|${tx.amount}|${(tx.description || '').trim().toLowerCase()}|${roundedSec}`);
+      }
+
       // 2. Process transactions
       for (const bt of backupData.ledgerTransactions) {
         const cName = bt.customer || (bt as any).customerName; if (!cName) continue;
         const key = cName.trim().toLowerCase();
         let matchedCustomer = customerMap.get(key);
 
-        // If customer doesn't exist (can happen if transactions contains entries for someone not in customers list)
         if (!matchedCustomer) {
           const customId = doc(collection(db, 'temp')).id;
           const customerObj: Customer = {
@@ -1963,6 +2084,7 @@ const lastSubmitRef = useRef<{
           customerMap.set(key, customerObj);
           newCustomers.push(customerObj);
           matchedCustomer = customerObj;
+          newlyAddedCustomerIds.add(customId);
 
           if (!isLocal) {
             operations.push({
@@ -1981,19 +2103,12 @@ const lastSubmitRef = useRef<{
           }
         }
 
-        // Check if transaction already exists in our live transaction list
         const btDateMs = bt.date ? new Date(bt.date).getTime() : 0;
-        const exists = newTransactions.some(tx => {
-          if (tx.customerId !== matchedCustomer!.id) return false;
-          if (tx.type !== bt.type) return false;
-          if (tx.amount !== bt.amount) return false;
-          if ((tx.description || '').trim() !== (bt.description || '').trim()) return false;
-          // Compare dates with tolerance (within 1 second)
-          const txDateMs = new Date(tx.date).getTime();
-          return Math.abs(txDateMs - btDateMs) < 1000;
-        });
+        const roundedSec = Math.floor(btDateMs / 2000);
+        const txKey = `${matchedCustomer.id}|${bt.type}|${bt.amount}|${(bt.description || '').trim().toLowerCase()}|${roundedSec}`;
 
-        if (!exists) {
+        if (!existingTxSet.has(txKey)) {
+          existingTxSet.add(txKey);
           const customTxId = doc(collection(db, 'temp')).id;
           const txDate = bt.date ? new Date(bt.date) : new Date();
           const txObj: Transaction = {
@@ -2002,7 +2117,7 @@ const lastSubmitRef = useRef<{
             customerId: matchedCustomer.id,
             customerName: matchedCustomer.name,
             type: bt.type,
-            amount: bt.amount,
+            amount: Number(bt.amount) || 0,
             description: (bt.description || '').trim(),
             date: txDate,
             createdAt: txDate
@@ -2018,7 +2133,7 @@ const lastSubmitRef = useRef<{
                 customerId: matchedCustomer.id,
                 customerName: matchedCustomer.name,
                 type: bt.type,
-                amount: bt.amount,
+                amount: Number(bt.amount) || 0,
                 description: (bt.description || '').trim(),
                 date: txDate,
                 createdAt: txDate
@@ -2027,23 +2142,75 @@ const lastSubmitRef = useRef<{
             });
           }
 
-          // Accumulate balance
-          const diff = bt.type === 'due' ? bt.amount : -bt.amount;
-          matchedCustomer.outstandingDue += diff;
-          matchedCustomer.updatedAt = new Date();
+          if (!newlyAddedCustomerIds.has(matchedCustomer.id)) {
+            const diff = bt.type === 'due' ? bt.amount : -bt.amount;
+            matchedCustomer.outstandingDue += diff;
+            matchedCustomer.updatedAt = new Date();
+          }
         }
       }
 
-      // Sync customer balance updates to Firestore for customers that had updates
+      // For newly added customers in merge/skip: verify ledger matches authoritative outstandingDue
+      for (const custId of newlyAddedCustomerIds) {
+        const cust = newCustomers.find(c => c.id === custId);
+        if (!cust) continue;
+        const custTxs = newTransactions.filter(t => t.customerId === cust.id);
+        const txSum = custTxs.reduce((sum, t) => sum + (t.type === 'due' ? t.amount : -t.amount), 0);
+        const targetDue = cust.outstandingDue || 0;
+        const diff = Math.round((targetDue - txSum) * 100) / 100;
+
+        if (Math.abs(diff) >= 0.01) {
+          const customTxId = doc(collection(db, 'temp')).id;
+          let earliestMs = cust.createdAt ? new Date(cust.createdAt).getTime() : Date.now();
+          if (custTxs.length > 0) {
+            const minTxMs = Math.min(...custTxs.map(t => new Date(t.date).getTime()));
+            earliestMs = Math.min(earliestMs, minTxMs);
+          }
+          const adjDate = new Date(earliestMs - 1000);
+          const adjType: 'due' | 'payment' = diff > 0 ? 'due' : 'payment';
+          const adjAmount = Math.abs(diff);
+
+          const adjTx: Transaction = {
+            id: customTxId,
+            userId,
+            customerId: cust.id,
+            customerName: cust.name,
+            type: adjType,
+            amount: adjAmount,
+            description: 'পূর্ববর্তী জের সমন্বয় / Initial Balance Adjustment',
+            date: adjDate,
+            createdAt: adjDate
+          };
+          newTransactions.push(adjTx);
+
+          if (!isLocal) {
+            operations.push({
+              ref: doc(db, 'users', userId, 'transactions', customTxId),
+              data: {
+                id: customTxId,
+                userId,
+                customerId: cust.id,
+                customerName: cust.name,
+                type: adjType,
+                amount: adjAmount,
+                description: 'পূর্ববর্তী জের সমন্বয় / Initial Balance Adjustment',
+                date: adjDate,
+                createdAt: adjDate
+              },
+              type: 'set'
+            });
+          }
+        }
+      }
+
+      // Sync customer balance updates to Firestore for existing customers
       if (!isLocal) {
         for (const c of newCustomers) {
           const opIndex = operations.findIndex(op => op.type === 'set' && op.ref.id === c.id);
           if (opIndex >= 0) {
-            // Update the set operation data
             operations[opIndex].data.outstandingDue = c.outstandingDue;
             operations[opIndex].data.updatedAt = c.updatedAt;
           } else {
-            // Check if customer outstandingDue changed from original.
             const original = customers.find(orig => orig.id === c.id);
             if (original && (original.outstandingDue !== c.outstandingDue || original.phone !== c.phone)) {
               operations.push({
@@ -2061,7 +2228,98 @@ const lastSubmitRef = useRef<{
       }
     }
 
-    // Execute Firestore operations in chunks of 400
+    // 3. Process Goals from backup (for all choices)
+    if (Array.isArray(backupData.goals)) {
+      const existingGoalMap = new Map<string, SavingGoal>();
+      for (const g of newGoals) {
+        existingGoalMap.set(g.title.trim().toLowerCase(), g);
+      }
+
+      for (const bg of backupData.goals) {
+        if (!bg.title) continue;
+        const goalTitleKey = bg.title.trim().toLowerCase();
+        const existingGoal = existingGoalMap.get(goalTitleKey);
+
+        let matchedCustId = bg.customerId;
+        let matchedCustName = bg.customerName;
+        if (bg.customerName) {
+          const matchedCust = newCustomers.find(c => c.name.toLowerCase() === bg.customerName.toLowerCase());
+          if (matchedCust) {
+            matchedCustId = matchedCust.id;
+            matchedCustName = matchedCust.name;
+          }
+        }
+
+        if (choice === 'clear' || !existingGoal) {
+          const customGoalId = doc(collection(db, 'temp')).id;
+          const goalDate = bg.createdAt ? new Date(bg.createdAt) : new Date();
+          const goalObj: SavingGoal = {
+            id: customGoalId,
+            userId,
+            title: bg.title.trim(),
+            targetAmount: Number(bg.targetAmount) || 0,
+            savedAmount: Number(bg.savedAmount) || 0,
+            frequency: bg.frequency || 'monthly',
+            installmentAmount: bg.installmentAmount ? Number(bg.installmentAmount) : undefined,
+            type: bg.type || 'savings',
+            status: bg.status || 'active',
+            customerId: matchedCustId || undefined,
+            customerName: matchedCustName || undefined,
+            notes: bg.notes?.trim() || undefined,
+            principalAmount: bg.principalAmount ? Number(bg.principalAmount) : undefined,
+            interestRate: bg.interestRate !== undefined ? Number(bg.interestRate) : undefined,
+            interestAmount: bg.interestAmount !== undefined ? Number(bg.interestAmount) : undefined,
+            tenure: bg.tenure ? Number(bg.tenure) : undefined,
+            createdAt: goalDate,
+            updatedAt: bg.updatedAt ? new Date(bg.updatedAt) : new Date(),
+            contributions: Array.isArray(bg.contributions) ? bg.contributions.map((c: any) => ({
+              id: c.id || doc(collection(db, 'temp')).id,
+              amount: Number(c.amount) || 0,
+              date: c.date || new Date().toISOString(),
+              note: c.note || undefined
+            })) : []
+          };
+          newGoals.push(goalObj);
+          existingGoalMap.set(goalTitleKey, goalObj);
+
+          if (!isLocal) {
+            operations.push({
+              ref: doc(db, 'users', userId, 'goals', customGoalId),
+              data: {
+                ...goalObj,
+                createdAt: goalDate,
+                updatedAt: new Date()
+              },
+              type: 'set'
+            });
+          }
+        } else if (choice === 'merge' && existingGoal) {
+          const backupSaved = Number(bg.savedAmount) || 0;
+          const backupContribs = Array.isArray(bg.contributions) ? bg.contributions : [];
+          if (backupSaved > (existingGoal.savedAmount || 0) || backupContribs.length > (existingGoal.contributions?.length || 0)) {
+            existingGoal.savedAmount = Math.max(existingGoal.savedAmount || 0, backupSaved);
+            existingGoal.contributions = backupContribs;
+            existingGoal.status = bg.status || existingGoal.status;
+            existingGoal.updatedAt = new Date();
+
+            if (!isLocal) {
+              operations.push({
+                ref: doc(db, 'users', userId, 'goals', existingGoal.id),
+                data: {
+                  savedAmount: existingGoal.savedAmount,
+                  contributions: existingGoal.contributions,
+                  status: existingGoal.status,
+                  updatedAt: new Date()
+                },
+                type: 'update'
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // 4. Execute Firestore batch commits with live progress and thread yielding
     if (!isLocal && operations.length > 0) {
       const chunkArray = <T>(arr: T[], size: number): T[][] => {
         const chunks: T[][] = [];
@@ -2072,7 +2330,20 @@ const lastSubmitRef = useRef<{
       };
 
       const chunks = chunkArray(operations, 400);
+      let batchIdx = 0;
       for (const chunk of chunks) {
+        batchIdx++;
+        const percent = 10 + Math.round((batchIdx / chunks.length) * 75);
+        onProgress?.({
+          stage: 'saving',
+          percent,
+          currentBatch: batchIdx,
+          totalBatches: chunks.length,
+          processedCount: Math.min(operations.length, batchIdx * 400),
+          totalCount: operations.length,
+          message: `ক্লাউড সার্ভারে ডাটা সংরক্ষণ হচ্ছে (ব্যাচ ${batchIdx} / ${chunks.length})...`
+        });
+
         const batch = writeBatch(db);
         for (const op of chunk) {
           if (op.type === 'set') {
@@ -2084,6 +2355,7 @@ const lastSubmitRef = useRef<{
           }
         }
         await batch.commit();
+        await new Promise(r => setTimeout(r, 25));
       }
     }
 
@@ -2092,11 +2364,13 @@ const lastSubmitRef = useRef<{
     setTrashCustomers(newTrash);
     setTransactions(newTransactions);
     setReminders(newReminders);
+    setGoals(newGoals);
 
     // Save to local storage
     saveLocalCustomers([...newCustomers, ...newTrash]);
     saveLocalTransactions(newTransactions);
     saveLocalReminders(newReminders);
+    saveLocalGoals(newGoals);
 
     if (settings) {
       const newSettings = {
@@ -2113,8 +2387,19 @@ const lastSubmitRef = useRef<{
     setArchiveTransactions([]);
 
     if (!isLocal) {
+      onProgress?.({
+        stage: 'summaries',
+        percent: 90,
+        message: 'মাসিক সারাংশ ও এনালিটিক্স তৈরি হচ্ছে... / Rebuilding monthly analytics...'
+      });
       await rebuildMonthlySummaries(userId);
     }
+
+    onProgress?.({
+      stage: 'done',
+      percent: 100,
+      message: 'ইম্পোর্ট সফলভাবে সম্পন্ন হয়েছে! / Data imported successfully!'
+    });
   };
 
   // Note: Automated full-database scans on startup were decommissioned to protect Firebase read limits.
@@ -2490,6 +2775,30 @@ const lastSubmitRef = useRef<{
         amount: t.amount,
         description: t.description,
         date: t.date
+      })),
+      goals: goals.map(g => ({
+        id: g.id,
+        title: g.title,
+        targetAmount: g.targetAmount,
+        savedAmount: g.savedAmount,
+        frequency: g.frequency,
+        installmentAmount: g.installmentAmount,
+        type: g.type,
+        status: g.status,
+        customerName: g.customerName || (g.customerId ? customers.find(c => c.id === g.customerId)?.name : undefined),
+        notes: g.notes,
+        principalAmount: g.principalAmount,
+        interestRate: g.interestRate,
+        interestAmount: g.interestAmount,
+        tenure: g.tenure,
+        createdAt: g.createdAt instanceof Date ? g.createdAt.toISOString() : (g.createdAt?.toDate ? g.createdAt.toDate().toISOString() : g.createdAt),
+        updatedAt: g.updatedAt instanceof Date ? g.updatedAt.toISOString() : (g.updatedAt?.toDate ? g.updatedAt.toDate().toISOString() : g.updatedAt),
+        contributions: (g.contributions || []).map(c => ({
+          id: c.id,
+          amount: c.amount,
+          date: c.date,
+          note: c.note
+        }))
       }))
     };
   };

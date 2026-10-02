@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef } from 'react';
 import { Customer, Transaction } from '../types';
 import { 
 	Search, UserPlus, Phone, ArrowUpRight, ArrowDownLeft, ReceiptText, ChevronDown, ChevronUp, ChevronRight, Pin, 
-	MessageSquare, Trash2, Pencil, RefreshCw, X, UserMinus, Plus, ShieldCheck, CheckCircle2, 
+	MessageSquare, Trash2, Pencil, RefreshCw, X, UserMinus, Plus, ShieldCheck, 
 	AlertTriangle, ArrowLeftRight, Check, Trash, Users, Send, ArrowLeft, ArrowUpDown, Delete,
 	BookUser, Download, Share2, Copy
 } from 'lucide-react';
@@ -1754,9 +1754,11 @@ if (sortBy === 'custom') {
 
    {/* HISTORICAL LEDGER FOR THIS CUSTOMER */}
   <div id="statements_timeline" className="space-y-3">
-    <span className="text-xs font-extrabold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
-      {t.statements} ({formatNumber(activeCustomerTxCount, lang)})
-    </span>
+    <div className="flex items-center justify-between">
+      <span className="text-xs font-extrabold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+        {t.statements} ({formatNumber(activeCustomerTxCount, lang)})
+      </span>
+    </div>
 
     <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-md">
       {selectedCustomerTransactions.length === 0 ? (

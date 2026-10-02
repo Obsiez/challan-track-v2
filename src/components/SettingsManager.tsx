@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Customer, Transaction, UserSettings } from '../types';
+import { Customer, Transaction, UserSettings, ImportProgress } from '../types';
 import { 
- Settings, Moon, Sun, Cloud, Download, Upload, LogOut, CheckCircle2, Languages, AlertTriangle, X, RotateCcw, Trash2, Contrast 
+  Settings, Moon, Sun, Cloud, Download, Upload, LogOut, CheckCircle2, Languages, AlertTriangle, X, RotateCcw, Trash2, Contrast, Clock, RefreshCw 
 } from 'lucide-react';
 import { auth } from '../firebase';
 import { toast } from 'sonner';
@@ -28,7 +28,7 @@ interface SettingsManagerProps {
   onLangChange: (lang: Language) => void;
   deferredPrompt: any;
   onInstallComplete: () => void;
-  importLedgerData: (backupData: any, choice: 'merge' | 'clear' | 'skip') => Promise<void>;
+  importLedgerData: (backupData: any, choice: 'merge' | 'clear' | 'skip', onProgress?: (progress: ImportProgress) => void) => Promise<void>;
 }
 
 export default function SettingsManager({
@@ -96,6 +96,22 @@ export default function SettingsManager({
     confirmText: '',
     loading: false
   });
+
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    let timer: any;
+    if (importState.loading) {
+      setElapsedSeconds(0);
+      timer = setInterval(() => {
+        setElapsedSeconds(s => s + 1);
+      }, 1000);
+    } else {
+      setElapsedSeconds(0);
+    }
+    return () => clearInterval(timer);
+  }, [importState.loading]);
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -774,127 +790,208 @@ export default function SettingsManager({
               <span>{lang === 'bn' ? 'লেনদেনের সংখ্যা:' : 'Total Transactions:'}</span>
               <span className="font-bold">{importState.backupData.ledgerTransactions?.length || 0}</span>
             </div>
-          </div>
-
-          <div className="space-y-3">
-            {/* Choice 1 Option Card */}
-            <button
-              onClick={() => setImportState(prev => ({ ...prev, choice: 'merge' }))}
-              className={`w-full text-left p-4 rounded-xl border-2 transition-all cursor-pointer flex gap-3 ${
-                importState.choice === 'merge'
-                  ? 'border-emerald-500 bg-emerald-50/20 dark:bg-emerald-950/10'
-                  : 'border-zinc-200 dark:border-zinc-850 bg-transparent hover:bg-zinc-50/50 dark:hover:bg-zinc-850/50'
-              }`}
-              disabled={importState.loading}
-            >
-              <div className="shrink-0 mt-0.5">
-                <input
-                  type="radio"
-                  checked={importState.choice === 'merge'}
-                  onChange={() => {}}
-                  className="accent-emerald-500 w-4 h-4 cursor-pointer"
-                />
+            {Array.isArray(importState.backupData.goals) && (
+              <div className="flex justify-between">
+                <span>{lang === 'bn' ? 'সেভিংস ও ডিপিএস লক্ষ্য:' : 'Total Goals:'}</span>
+                <span className="font-bold text-emerald-600 dark:text-emerald-400">{importState.backupData.goals.length}</span>
               </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-black text-zinc-800 dark:text-white">
-                    {lang === 'bn' ? '১. মার্জ ও আপডেট' : 'Choice 1: Merge & Update'}
-                  </span>
-                  <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-400 rounded-full">
-                    {lang === 'bn' ? 'প্রস্তাবিত' : 'Recommended'}
-                  </span>
-                </div>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-normal">
-                  {lang === 'bn' 
-                    ? 'ফাইলটি লাইভ ডাটাবেসের সাথে তুলনা করে অনুপস্থিত এন্ট্রি যোগ করবে এবং কোনো পরিবর্তন থাকলে আপডেট করবে। একাধিক ডিভাইসে সিঙ্ক করার জন্য উপযুক্ত।' 
-                    : 'Compares the file with the live database. It adds missing entries and updates existing ones if changes are found. Good for syncing across multiple devices.'}
-                </p>
-              </div>
-            </button>
-
-            {/* Choice 2 Option Card */}
-            <button
-              onClick={() => setImportState(prev => ({ ...prev, choice: 'skip' }))}
-              className={`w-full text-left p-4 rounded-xl border-2 transition-all cursor-pointer flex gap-3 ${
-                importState.choice === 'skip'
-                  ? 'border-sky-500 bg-sky-50/20 dark:bg-sky-950/10'
-                  : 'border-zinc-200 dark:border-zinc-850 bg-transparent hover:bg-zinc-50/50 dark:hover:bg-zinc-850/50'
-              }`}
-              disabled={importState.loading}
-            >
-              <div className="shrink-0 mt-0.5">
-                <input
-                  type="radio"
-                  checked={importState.choice === 'skip'}
-                  onChange={() => {}}
-                  className="accent-sky-500 w-4 h-4 cursor-pointer"
-                />
-              </div>
-              <div>
-                <span className="text-sm font-black text-zinc-800 dark:text-white">
-                  {lang === 'bn' ? '২. ডুপ্লিকেট এড়িয়ে যান' : 'Choice 2: Skip Duplicates'}
-                </span>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-normal">
-                  {lang === 'bn' 
-                    ? 'শুধুমাত্র নতুন এন্ট্রিগুলো যুক্ত করবে যা বর্তমান ডাটাবেসে নেই। বিদ্যমান রেকর্ডগুলোকে সম্পূর্ণ অপরিবর্তিত রাখবে। ভুলবশত মুছে ফেলা রেকর্ড উদ্ধারে সহায়ক।' 
-                    : 'Only imports entries from the .json file that do not exist at all in the current live database. Leaves existing records untouched. Good for recovering deleted items safely.'}
-                </p>
-              </div>
-            </button>
-
-            {/* Choice 3 Option Card */}
-            <button
-              onClick={() => setImportState(prev => ({ ...prev, choice: 'clear' }))}
-              className={`w-full text-left p-4 rounded-xl border-2 transition-all cursor-pointer flex gap-3 ${
-                importState.choice === 'clear'
-                  ? 'border-rose-500 bg-rose-50/25 dark:bg-rose-950/20'
-                  : 'border-zinc-200 dark:border-zinc-850 bg-transparent hover:bg-rose-50/10 dark:hover:bg-rose-950/10'
-              }`}
-              disabled={importState.loading}
-            >
-              <div className="shrink-0 mt-0.5">
-                <input
-                  type="radio"
-                  checked={importState.choice === 'clear'}
-                  onChange={() => {}}
-                  className="accent-rose-500 w-4 h-4 cursor-pointer"
-                />
-              </div>
-              <div>
-                <span className="text-sm font-black text-rose-600 dark:text-rose-455">
-                  {lang === 'bn' ? '৩. মুছুন ও প্রতিস্থাপন করুন (সম্পূর্ণ রিস্টোর)' : 'Choice 3: Clear & Replace (Full Restore)'}
-                </span>
-                <p className="text-xs text-rose-600/90 dark:text-rose-400/90 mt-1 leading-normal">
-                  {lang === 'bn' 
-                    ? 'সতর্কতা: বর্তমান ডাটাবেসের সমস্ত তথ্য মুছে ফেলবে এবং ব্যাকআপ ফাইল দিয়ে প্রতিস্থাপন করবে। সম্পূর্ণ নতুন ডিভাইসে স্থানান্তর বা নষ্ট ডাটাবেস মেরামতের জন্য।' 
-                    : 'WARNING: Completely wipes the existing live database and replaces it entirely with the data from the .json file. Good for new devices or fixing corrupted databases.'}
-                </p>
-              </div>
-            </button>
-
-            {/* Choice 3 Secondary Verification Input */}
-            {importState.choice === 'clear' && (
-              <motion.div 
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                className="bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 p-4 rounded-xl space-y-2.5"
-              >
-                <label className="text-xs font-bold text-rose-700 dark:text-rose-400 block leading-tight">
-                  {lang === 'bn' 
-                    ? 'ডাটাবেস সম্পূর্ণ মুছে ফেলার জন্য নিচে "RESTORE" শব্দটি টাইপ করুন:' 
-                    : 'To confirm full restore and deletion of all current data, please type "RESTORE" below:'}
-                </label>
-                <input
-                  type="text"
-                  value={importState.confirmText}
-                  onChange={(e) => setImportState(prev => ({ ...prev, confirmText: e.target.value }))}
-                  placeholder="RESTORE"
-                  className="w-full px-3 py-2 bg-white dark:bg-zinc-950 border border-rose-300 dark:border-rose-800 rounded-lg text-sm text-center font-bold tracking-widest text-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-500"
-                  disabled={importState.loading}
-                />
-              </motion.div>
             )}
           </div>
+
+          {importState.loading ? (
+            <div className="py-6 px-1 flex flex-col items-center justify-center space-y-4 text-center">
+              <div className="relative w-20 h-20 flex items-center justify-center">
+                <svg className="w-20 h-20 -rotate-90 transform" viewBox="0 0 100 100">
+                  <circle
+                    className="text-zinc-200 dark:text-zinc-800"
+                    strokeWidth="8"
+                    stroke="currentColor"
+                    fill="transparent"
+                    r="40"
+                    cx="50"
+                    cy="50"
+                  />
+                  <circle
+                    className="text-emerald-500 transition-all duration-300"
+                    strokeWidth="8"
+                    strokeDasharray={251.2}
+                    strokeDashoffset={251.2 - (251.2 * (importProgress?.percent || 5)) / 100}
+                    strokeLinecap="round"
+                    stroke="currentColor"
+                    fill="transparent"
+                    r="40"
+                    cx="50"
+                    cy="50"
+                  />
+                </svg>
+                <div className="absolute flex flex-col items-center justify-center">
+                  <span className="text-base font-black text-zinc-900 dark:text-white">
+                    {importProgress?.percent || 5}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <h4 className="text-base font-black text-zinc-900 dark:text-white flex items-center justify-center gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin text-emerald-500" />
+                  <span>{importProgress?.message || (lang === 'bn' ? 'ডাটা ইম্পোর্ট হচ্ছে...' : 'Importing data...')}</span>
+                </h4>
+                {Boolean(importProgress?.totalBatches) && (
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 font-bold">
+                    {lang === 'bn' 
+                      ? `ব্যাচ ${formatNumber(importProgress?.currentBatch || 1, 'bn')} / ${formatNumber(importProgress?.totalBatches || 1, 'bn')} (${formatNumber(importProgress?.processedCount || 0, 'bn')} / ${formatNumber(importProgress?.totalCount || 0, 'bn')} রেকর্ড)` 
+                      : `Batch ${importProgress?.currentBatch || 1} / ${importProgress?.totalBatches} (${importProgress?.processedCount || 0} / ${importProgress?.totalCount || 0} records)`}
+                  </p>
+                )}
+              </div>
+
+              {/* Linear Progress Bar */}
+              <div className="w-full bg-zinc-100 dark:bg-zinc-800 rounded-full h-3 overflow-hidden p-0.5 border border-zinc-200 dark:border-zinc-700">
+                <div 
+                  className="bg-emerald-500 h-full rounded-full transition-all duration-300"
+                  style={{ width: `${Math.max(5, importProgress?.percent || 5)}%` }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between w-full text-xs text-zinc-400 font-bold px-1">
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>{lang === 'bn' ? 'অতিবাহিত সময়:' : 'Elapsed:'} {Math.floor(elapsedSeconds / 60)}:{String(elapsedSeconds % 60).padStart(2, '0')}s</span>
+                </span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                  {importProgress?.stage === 'summaries' 
+                    ? (lang === 'bn' ? 'এনালিটিক্স তৈরি' : 'Analytics sync') 
+                    : (lang === 'bn' ? 'ক্লাউড সিঙ্ক হচ্ছে' : 'Cloud syncing')}
+                </span>
+              </div>
+
+              <div className="w-full p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-xl text-xs text-amber-700 dark:text-amber-400 text-left">
+                {lang === 'bn' 
+                  ? '⚠️ দয়া করে অপেক্ষা করুন। ব্যাকআপ রিস্টোর চলাকালীন পেজটি রিলোড বা বন্ধ করবেন না।' 
+                  : '⚠️ Please wait. Do not close or refresh this page while restore is in progress.'}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {/* Choice 1 Option Card */}
+              <button
+                onClick={() => setImportState(prev => ({ ...prev, choice: 'merge' }))}
+                className={`w-full text-left p-4 rounded-xl border-2 transition-all cursor-pointer flex gap-3 ${
+                  importState.choice === 'merge'
+                    ? 'border-emerald-500 bg-emerald-50/20 dark:bg-emerald-950/10'
+                    : 'border-zinc-200 dark:border-zinc-850 bg-transparent hover:bg-zinc-50/50 dark:hover:bg-zinc-850/50'
+                }`}
+                disabled={importState.loading}
+              >
+                <div className="shrink-0 mt-0.5">
+                  <input
+                    type="radio"
+                    checked={importState.choice === 'merge'}
+                    onChange={() => {}}
+                    className="accent-emerald-500 w-4 h-4 cursor-pointer"
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-black text-zinc-800 dark:text-white">
+                      {lang === 'bn' ? '১. মার্জ ও আপডেট' : 'Choice 1: Merge & Update'}
+                    </span>
+                    <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-400 rounded-full">
+                      {lang === 'bn' ? 'প্রস্তাবিত' : 'Recommended'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-normal">
+                    {lang === 'bn' 
+                      ? 'ফাইলটি লাইভ ডাটাবেসের সাথে তুলনা করে অনুপস্থিত এন্ট্রি যোগ করবে এবং কোনো পরিবর্তন থাকলে আপডেট করবে। একাধিক ডিভাইসে সিঙ্ক করার জন্য উপযুক্ত।' 
+                      : 'Compares the file with the live database. It adds missing entries and updates existing ones if changes are found. Good for syncing across multiple devices.'}
+                  </p>
+                </div>
+              </button>
+
+              {/* Choice 2 Option Card */}
+              <button
+                onClick={() => setImportState(prev => ({ ...prev, choice: 'skip' }))}
+                className={`w-full text-left p-4 rounded-xl border-2 transition-all cursor-pointer flex gap-3 ${
+                  importState.choice === 'skip'
+                    ? 'border-sky-500 bg-sky-50/20 dark:bg-sky-950/10'
+                    : 'border-zinc-200 dark:border-zinc-850 bg-transparent hover:bg-zinc-50/50 dark:hover:bg-zinc-850/50'
+                }`}
+                disabled={importState.loading}
+              >
+                <div className="shrink-0 mt-0.5">
+                  <input
+                    type="radio"
+                    checked={importState.choice === 'skip'}
+                    onChange={() => {}}
+                    className="accent-sky-500 w-4 h-4 cursor-pointer"
+                  />
+                </div>
+                <div>
+                  <span className="text-sm font-black text-zinc-800 dark:text-white">
+                    {lang === 'bn' ? '২. ডুপ্লিকেট এড়িয়ে যান' : 'Choice 2: Skip Duplicates'}
+                  </span>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-normal">
+                    {lang === 'bn' 
+                      ? 'শুধুমাত্র নতুন এন্ট্রিগুলো যুক্ত করবে যা বর্তমান ডাটাবেসে নেই। বিদ্যমান রেকর্ডগুলোকে সম্পূর্ণ অপরিবর্তিত রাখবে। ভুলবশত মুছে ফেলা রেকর্ড উদ্ধারে সহায়ক।' 
+                      : 'Only imports entries from the .json file that do not exist at all in the current live database. Leaves existing records untouched. Good for recovering deleted items safely.'}
+                  </p>
+                </div>
+              </button>
+
+              {/* Choice 3 Option Card */}
+              <button
+                onClick={() => setImportState(prev => ({ ...prev, choice: 'clear' }))}
+                className={`w-full text-left p-4 rounded-xl border-2 transition-all cursor-pointer flex gap-3 ${
+                  importState.choice === 'clear'
+                    ? 'border-rose-500 bg-rose-50/25 dark:bg-rose-950/20'
+                    : 'border-zinc-200 dark:border-zinc-850 bg-transparent hover:bg-rose-50/10 dark:hover:bg-rose-950/10'
+                }`}
+                disabled={importState.loading}
+              >
+                <div className="shrink-0 mt-0.5">
+                  <input
+                    type="radio"
+                    checked={importState.choice === 'clear'}
+                    onChange={() => {}}
+                    className="accent-rose-500 w-4 h-4 cursor-pointer"
+                  />
+                </div>
+                <div>
+                  <span className="text-sm font-black text-rose-600 dark:text-rose-455">
+                    {lang === 'bn' ? '৩. মুছুন ও প্রতিস্থাপন করুন (সম্পূর্ণ রিস্টোর)' : 'Choice 3: Clear & Replace (Full Restore)'}
+                  </span>
+                  <p className="text-xs text-rose-600/90 dark:text-rose-400/90 mt-1 leading-normal">
+                    {lang === 'bn' 
+                      ? 'সতর্কতা: বর্তমান ডাটাবেসের সমস্ত তথ্য মুছে ফেলবে এবং ব্যাকআপ ফাইল দিয়ে প্রতিস্থাপন করবে। সম্পূর্ণ নতুন ডিভাইসে স্থানান্তর বা নষ্ট ডাটাবেস মেরামতের জন্য।' 
+                      : 'WARNING: Completely wipes the existing live database and replaces it entirely with the data from the .json file. Good for new devices or fixing corrupted databases.'}
+                  </p>
+                </div>
+              </button>
+
+              {/* Choice 3 Secondary Verification Input */}
+              {importState.choice === 'clear' && (
+                <motion.div 
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 p-4 rounded-xl space-y-2.5"
+                >
+                  <label className="text-xs font-bold text-rose-700 dark:text-rose-400 block leading-tight">
+                    {lang === 'bn' 
+                      ? 'ডাটাবেস সম্পূর্ণ মুছে ফেলার জন্য নিচে "RESTORE" শব্দটি টাইপ করুন:' 
+                      : 'To confirm full restore and deletion of all current data, please type "RESTORE" below:'}
+                  </label>
+                  <input
+                    type="text"
+                    value={importState.confirmText}
+                    onChange={(e) => setImportState(prev => ({ ...prev, confirmText: e.target.value }))}
+                    placeholder="RESTORE"
+                    className="w-full px-3 py-2 bg-white dark:bg-zinc-950 border border-rose-300 dark:border-rose-800 rounded-lg text-sm text-center font-bold tracking-widest text-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                    disabled={importState.loading}
+                  />
+                </motion.div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800 flex flex-col gap-3">
@@ -906,13 +1003,17 @@ export default function SettingsManager({
               }
 
               setImportState(prev => ({ ...prev, loading: true }));
+              setImportProgress({
+                stage: 'parsing',
+                percent: 5,
+                message: lang === 'bn' ? 'ব্যাকআপ ফাইল প্রস্তুত করা হচ্ছে...' : 'Preparing backup data...'
+              });
               triggerHaptic('single');
 
               try {
-                await Promise.all([
-                  importLedgerData(importState.backupData, importState.choice),
-                  new Promise(resolve => setTimeout(resolve, 1000))
-                ]);
+                await importLedgerData(importState.backupData, importState.choice, (progress) => {
+                  setImportProgress(progress);
+                });
                 toast.success(lang === 'bn' ? 'ডাটা সফলভাবে ইম্পোর্ট করা হয়েছে!' : 'Data imported successfully!');
                 triggerHaptic('double');
                 setImportState(prev => ({ ...prev, showModal: false }));
@@ -921,6 +1022,7 @@ export default function SettingsManager({
                 toast.error(lang === 'bn' ? 'ইম্পোর্ট করতে সমস্যা হয়েছে!' : 'Failed to import data!');
               } finally {
                 setImportState(prev => ({ ...prev, loading: false }));
+                setImportProgress(null);
               }
             }}
             disabled={importState.loading || (importState.choice === 'clear' && importState.confirmText !== 'RESTORE')}
@@ -934,24 +1036,23 @@ export default function SettingsManager({
           >
             {importState.loading ? (
               <span className="flex items-center gap-2">
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                {typeof navigator !== 'undefined' && navigator.onLine ? (lang === 'bn' ? 'ইম্পোর্ট হচ্ছে...' : 'Importing...') : t.speedyNotice}
+                <RefreshCw className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" />
+                {importProgress?.message || (lang === 'bn' ? 'ইম্পোর্ট হচ্ছে...' : 'Importing...')}
               </span>
             ) : (
               lang === 'bn' ? 'ইম্পোর্ট শুরু করুন' : 'Confirm Import'
             )}
           </button>
 
-          <button
-            onClick={() => setImportState(prev => ({ ...prev, showModal: false }))}
-            disabled={importState.loading}
-            className="w-full py-4 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-300 font-bold rounded-xl cursor-pointer transition-colors"
-          >
-            {lang === 'bn' ? 'বাতিল' : 'Cancel'}
-          </button>
+          {!importState.loading && (
+            <button
+              onClick={() => setImportState(prev => ({ ...prev, showModal: false }))}
+              disabled={importState.loading}
+              className="w-full py-4 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-300 font-bold rounded-xl cursor-pointer transition-colors"
+            >
+              {lang === 'bn' ? 'বাতিল' : 'Cancel'}
+            </button>
+          )}
         </div>
       </motion.div>
     </div>

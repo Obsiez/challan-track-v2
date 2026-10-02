@@ -87,3 +87,14 @@ export interface SavingGoal {
   tenure?: number;
   contributions: GoalContribution[];
 }
+
+export interface ImportProgress {
+  stage: 'parsing' | 'saving' | 'summaries' | 'done';
+  percent: number;
+  currentBatch?: number;
+  totalBatches?: number;
+  processedCount?: number;
+  totalCount?: number;
+  message: string;
+}
+
