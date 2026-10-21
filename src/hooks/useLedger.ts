@@ -17,7 +17,7 @@ import {
  getDocs
 } from 'firebase/firestore';
 import { db, auth, OperationType } from '../firebase';
-import { Customer, Transaction, Reminder, UserSettings, SavingGoal, GoalContribution, ImportProgress } from '../types';
+import { Customer, Transaction, Reminder, UserSettings, SavingGoal, GoalContribution, ImportProgress, TransactionAuditEntry } from '../types';
 import { cleanBangladeshiPhone } from '../lib/phoneUtils';
 
 export function useLedger(
@@ -41,6 +41,17 @@ export function useLedger(
     if (typeof dateField.seconds === 'number') return new Date(dateField.seconds * 1000);
     const parsed = new Date(dateField);
     return isNaN(parsed.getTime()) ? new Date() : parsed;
+  };
+
+  const normalizeTxDescription = (desc: any): string => {
+    if (typeof desc !== 'string') return '';
+    if (desc === 'পূর্ববর্তী জের সমন্বয় / Initial Balance Adjustment') {
+      return 'Initial Balance Adjustment';
+    }
+    if (desc === 'Last Month Billed Statement Payment') {
+      return 'Last Month Bill Payment';
+    }
+    return desc;
   };
 
   // Atomically adjust monthly summaries state locally for instant offline sync
@@ -108,40 +119,6 @@ export function useLedger(
     });
   };
   const [activeCustomerTxCount, setActiveCustomerTxCount] = useState<number>(0);
-
-  // Sync count of total transactions for the selected customer
-  useEffect(() => {
-    if (!userId || !activeCustomerId) {
-      setActiveCustomerTxCount(0);
-      return;
-    }
-    if (userId === 'local-guest-session') {
-      try {
-        const stored = localStorage.getItem(`easy_due_transactions_${userId}`);
-        if (stored) {
-          const count = JSON.parse(stored).filter((t: any) => t.customerId === activeCustomerId).length;
-          setActiveCustomerTxCount(count);
-        }
-      } catch (e) {
-        console.warn(e);
-      }
-      return;
-    }
-    
-    const fetchCount = async () => {
-      try {
-        const txRef = collection(db, 'users', userId, 'transactions');
-        const q = query(txRef, where('customerId', '==', activeCustomerId));
-        const snap = await getCountFromServer(q);
-        setActiveCustomerTxCount(snap.data().count);
-      } catch (err) {
-        console.warn("Failed to fetch customer tx count:", err);
-      }
-    };
-    
-    fetchCount();
-  }, [userId, activeCustomerId]);
-
   const [goals, setGoals] = useState<SavingGoal[]>([]);
   const [goalsSynced, setGoalsSynced] = useState(false);
 
@@ -149,12 +126,40 @@ export function useLedger(
     localStorage.setItem(`easy_due_goals_${userId}`, JSON.stringify(list));
   };
   const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [archivedStatements, setArchivedStatements] = useState<Transaction[]>([]);
+  const archivedTxIdsRef = useRef<Set<string>>(new Set());
   const [settings, setSettings] = useState<UserSettings | null>(null);
+  const settingsRef = useRef<UserSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [customersSynced, setCustomersSynced] = useState(false);
   const [transactionsSynced, setTransactionsSynced] = useState(false);
   const [isOfflineFallback, setIsOfflineFallback] = useState(false);
   const [customerTxLimit, setCustomerTxLimit] = useState(5);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+
+  // Sync count of total transactions for the selected customer in guest/offline mode
+  useEffect(() => {
+    if (!userId || !activeCustomerId) {
+      setActiveCustomerTxCount(0);
+      return;
+    }
+    if (userId === 'local-guest-session' || isOfflineFallback) {
+      try {
+        const stored = localStorage.getItem(`easy_due_transactions_${userId}`);
+        if (stored) {
+          const count = JSON.parse(stored).filter(
+            (t: any) => t.customerId === activeCustomerId && !archivedTxIdsRef.current.has(t.id)
+          ).length;
+          setActiveCustomerTxCount(count);
+        }
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+  }, [userId, activeCustomerId, isOfflineFallback, transactions]);
 
 const lastSubmitRef = useRef<{
    timestamp: number;
@@ -173,6 +178,7 @@ const lastSubmitRef = useRef<{
  const storedSettings = localStorage.getItem(`easy_due_settings_${userId}`);
       const storedSummaries = localStorage.getItem(`easy_due_monthly_summaries_${userId}`);
       const storedGoals = localStorage.getItem(`easy_due_goals_${userId}`);
+      const storedArchived = localStorage.getItem(`easy_due_archived_statements_${userId}`);
 
  if (storedCustomers) {
  const parsed = JSON.parse(storedCustomers).map((c: any) => ({
@@ -191,6 +197,7 @@ const lastSubmitRef = useRef<{
  if (storedTxs) {
  setTransactions(JSON.parse(storedTxs).map((t: any) => ({
  ...t,
+ description: normalizeTxDescription(t.description),
  date: new Date(t.date),
  createdAt: new Date(t.createdAt)
  })));
@@ -224,6 +231,42 @@ const lastSubmitRef = useRef<{
         setGoals([]);
       }
 
+      const storedArchivedIds = localStorage.getItem(`easy_due_archived_ids_${userId}`);
+      const idSet = new Set<string>();
+      if (storedArchivedIds) {
+        try {
+          JSON.parse(storedArchivedIds).forEach((id: string) => idSet.add(id));
+        } catch {}
+      }
+
+      if (storedArchived) {
+        const parsedArch: Transaction[] = JSON.parse(storedArchived).map((t: any) => {
+          if (t.id) idSet.add(t.id);
+          return {
+            ...t,
+            date: new Date(t.date),
+            createdAt: new Date(t.createdAt)
+          };
+        });
+        archivedTxIdsRef.current = idSet;
+        setArchivedStatements(parsedArch);
+      } else {
+        archivedTxIdsRef.current = idSet;
+        setArchivedStatements([]);
+      }
+
+      if (storedTxs) {
+        const parsedTxs = JSON.parse(storedTxs)
+          .filter((t: any) => !archivedTxIdsRef.current.has(t.id))
+          .map((t: any) => ({
+            ...t,
+            description: normalizeTxDescription(t.description),
+            date: new Date(t.date),
+            createdAt: new Date(t.createdAt)
+          }));
+        setTransactions(parsedTxs);
+      }
+
  if (storedSettings) {
         const parsed = JSON.parse(storedSettings);
         if (!parsed.theme || (parsed.theme !== 'light' && parsed.theme !== 'dark')) {
@@ -236,6 +279,8 @@ const lastSubmitRef = useRef<{
           email: auth.currentUser?.email || 'guest@challantrack.local',
           theme: 'dark',
           dailyReminderTime: '09:00',
+          autoMergeStatements: false,
+          statementKeepCount: 15,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         });
@@ -257,6 +302,16 @@ const lastSubmitRef = useRef<{
  };
  const saveLocalSettings = (val: UserSettings) => {
  localStorage.setItem(`easy_due_settings_${userId}`, JSON.stringify(val));
+ };
+ const saveLocalArchivedStatements = (list: Transaction[]) => {
+   localStorage.setItem(`easy_due_archived_statements_${userId}`, JSON.stringify(list));
+   list.forEach(item => {
+     if (item?.id) archivedTxIdsRef.current.add(item.id);
+   });
+   localStorage.setItem(
+     `easy_due_archived_ids_${userId}`,
+     JSON.stringify(Array.from(archivedTxIdsRef.current))
+   );
  };
 
   // Load cache immediately on userId change to populate UI with 0ms delay, and set up sync timeout
@@ -397,12 +452,16 @@ const lastSubmitRef = useRef<{
     try {
       const cached = localStorage.getItem(`easy_due_txs_${userId}_${activeCustomerId}`);
       if (cached) {
-        const parsed: Transaction[] = JSON.parse(cached).map((t: any) => ({
-          ...t,
-          date: parseTxDate(t.date),
-          createdAt: parseTxDate(t.createdAt)
-        }));
+        const parsed: Transaction[] = JSON.parse(cached)
+          .filter((t: any) => !archivedTxIdsRef.current.has(t.id) && !t.isArchived)
+          .map((t: any) => ({
+            ...t,
+            description: normalizeTxDescription(t.description),
+            date: parseTxDate(t.date),
+            createdAt: parseTxDate(t.createdAt)
+          }));
         setAllCustomerTxs(parsed);
+        setActiveCustomerTxCount(parsed.length);
       }
     } catch (e) {
       console.warn("Failed to load cached customer txs:", e);
@@ -418,10 +477,13 @@ const lastSubmitRef = useRef<{
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list: Transaction[] = [];
       snapshot.forEach((docSnap) => {
+        if (archivedTxIdsRef.current.has(docSnap.id)) return;
         const data = docSnap.data();
+        if ((data as any).isArchived) return;
         list.push({
           ...data,
           id: docSnap.id,
+          description: normalizeTxDescription(data.description),
           date: parseTxDate(data.date),
           createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt).toISOString() : new Date()),
         } as Transaction);
@@ -433,6 +495,25 @@ const lastSubmitRef = useRef<{
         const dateB = parseTxDate(b.date).getTime();
         return dateB - dateA;
       });
+
+      const currentSettings = settingsRef.current;
+      const keepLimit = currentSettings?.autoMergeStatements
+        ? Math.max(1, Number(currentSettings.statementKeepCount) || 15)
+        : null;
+
+      if (keepLimit !== null && list.length > keepLimit) {
+        const keptList = list.slice(0, keepLimit);
+        setAllCustomerTxs(keptList);
+        setActiveCustomerTxCount(keptList.length);
+        try {
+          localStorage.setItem(`easy_due_txs_${userId}_${activeCustomerId}`, JSON.stringify(keptList));
+        } catch {}
+        // Trigger background archive of the excess entries
+        setTimeout(() => {
+          archiveCustomerExcessStatements(activeCustomerId, keepLimit);
+        }, 0);
+        return;
+      }
 
       setAllCustomerTxs(list);
       setActiveCustomerTxCount(list.length);
@@ -458,15 +539,15 @@ const lastSubmitRef = useRef<{
     }
 
     if (userId === 'local-guest-session' || isOfflineFallback) {
-      const filtered = transactions
-        .filter(t => t.customerId === activeCustomerId)
+      const allActiveForCust = transactions
+        .filter(t => t.customerId === activeCustomerId && !archivedTxIdsRef.current.has(t.id))
         .sort((a, b) => {
           const dateA = parseTxDate(a.date).getTime();
           const dateB = parseTxDate(b.date).getTime();
           return dateB - dateA;
-        })
-        .slice(0, customerTxLimit);
-      setCustomerTransactions(filtered);
+        });
+      setActiveCustomerTxCount(allActiveForCust.length);
+      setCustomerTransactions(allActiveForCust.slice(0, customerTxLimit));
     } else {
       setCustomerTransactions(allCustomerTxs.slice(0, customerTxLimit));
     }
@@ -605,7 +686,7 @@ const lastSubmitRef = useRef<{
     const q = query(summariesRef, limit(12));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = [];
+      const list: any[] = [];
       snapshot.forEach((docSnap) => {
         list.push({
           id: docSnap.id,
@@ -852,8 +933,378 @@ const lastSubmitRef = useRef<{
  }
  };
 
+  // Sync Archived Statements collection (merging remote with local cache so local archives are never lost)
+  useEffect(() => {
+    if (!userId || userId === 'local-guest-session' || isOfflineFallback) return;
+    const archRef = collection(db, 'users', userId, 'archived_transactions');
+    const unsubscribe = onSnapshot(archRef, (snapshot) => {
+      const remoteList: Transaction[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        archivedTxIdsRef.current.add(docSnap.id);
+        remoteList.push({
+          ...data,
+          id: docSnap.id,
+          date: parseTxDate(data.date),
+          createdAt: parseTxDate(data.createdAt),
+          archivedAt: (data as any).archivedAt ? parseTxDate((data as any).archivedAt) : parseTxDate(data.date)
+        } as any);
+      });
+
+      setArchivedStatements(prev => {
+        const map = new Map<string, Transaction>();
+        prev.forEach(item => {
+          if (item?.id) {
+            archivedTxIdsRef.current.add(item.id);
+            map.set(item.id, item);
+          }
+        });
+        remoteList.forEach(item => {
+          if (item?.id) {
+            map.set(item.id, item);
+          }
+        });
+        const merged = Array.from(map.values()).sort(
+          (a, b) => parseTxDate(b.date).getTime() - parseTxDate(a.date).getTime()
+        );
+        saveLocalArchivedStatements(merged);
+        return merged;
+      });
+    }, (err) => {
+      console.warn("Firestore error syncing archived_transactions:", err);
+    });
+    return () => unsubscribe();
+  }, [userId, isOfflineFallback]);
+
+  // Helper: Archive older transactions for a single customer beyond keepCount (keepCount=0 archives all for a fresh ledger)
+  const archiveCustomerExcessStatements = async (customerId: string, keepCount: number): Promise<number> => {
+    if (!userId || keepCount < 0) return 0;
+
+    // Gather all known active transactions for this customer across memory, local cache, and Firestore
+    const txMap = new Map<string, Transaction>();
+
+    // 1. From in-memory states
+    transactions.forEach(t => {
+      if (t.customerId === customerId && !archivedTxIdsRef.current.has(t.id)) {
+        txMap.set(t.id, t);
+      }
+    });
+    if (customerId === activeCustomerId) {
+      allCustomerTxs.forEach(t => {
+        if (t.customerId === customerId && !archivedTxIdsRef.current.has(t.id)) {
+          txMap.set(t.id, t);
+        }
+      });
+    }
+
+    // 2. From localStorage caches
+    try {
+      const cachedCust = localStorage.getItem(`easy_due_txs_${userId}_${customerId}`);
+      if (cachedCust) {
+        JSON.parse(cachedCust).forEach((t: any) => {
+          if (t && t.id && !archivedTxIdsRef.current.has(t.id)) {
+            txMap.set(t.id, {
+              ...t,
+              date: parseTxDate(t.date),
+              createdAt: parseTxDate(t.createdAt)
+            });
+          }
+        });
+      }
+      const cachedAll = localStorage.getItem(`easy_due_transactions_${userId}`);
+      if (cachedAll) {
+        JSON.parse(cachedAll).forEach((t: any) => {
+          if (t && t.id && t.customerId === customerId && !archivedTxIdsRef.current.has(t.id)) {
+            txMap.set(t.id, {
+              ...t,
+              date: parseTxDate(t.date),
+              createdAt: parseTxDate(t.createdAt)
+            });
+          }
+        });
+      }
+    } catch {}
+
+    // 3. From Firestore if online cloud user
+    if (userId !== 'local-guest-session' && !isOfflineFallback) {
+      try {
+        const txRef = collection(db, 'users', userId, 'transactions');
+        const q = query(txRef, where('customerId', '==', customerId));
+        const snap = await getDocs(q);
+        snap.forEach(d => {
+          if (archivedTxIdsRef.current.has(d.id)) return;
+          const data = d.data();
+          if ((data as any).isArchived) return;
+          txMap.set(d.id, {
+            ...data,
+            id: d.id,
+            date: parseTxDate(data.date),
+            createdAt: parseTxDate(data.createdAt)
+          } as Transaction);
+        });
+      } catch (err) {
+        console.warn("Firestore getDocs in archiveCustomerExcessStatements fallback to cache:", err);
+      }
+    }
+
+    const custTxs = Array.from(txMap.values()).sort(
+      (a, b) => parseTxDate(b.date).getTime() - parseTxDate(a.date).getTime()
+    );
+
+    if (custTxs.length <= keepCount) {
+      try {
+        localStorage.setItem(`easy_due_txs_${userId}_${customerId}`, JSON.stringify(custTxs));
+      } catch {}
+      if (customerId === activeCustomerId) {
+        setAllCustomerTxs(custTxs);
+        setActiveCustomerTxCount(custTxs.length);
+      }
+      return 0;
+    }
+
+    const kept = custTxs.slice(0, keepCount);
+    const nowIso = new Date().toISOString();
+    const toArchive = custTxs.slice(keepCount).map(tx => ({
+      ...tx,
+      date: parseTxDate(tx.date),
+      createdAt: parseTxDate(tx.createdAt || tx.date),
+      archivedAt: nowIso
+    })) as Transaction[];
+
+    const archiveIds = new Set(toArchive.map(t => t.id));
+    archiveIds.forEach(id => archivedTxIdsRef.current.add(id));
+    try {
+      localStorage.setItem(
+        `easy_due_archived_ids_${userId}`,
+        JSON.stringify(Array.from(archivedTxIdsRef.current))
+      );
+      localStorage.setItem(`easy_due_txs_${userId}_${customerId}`, JSON.stringify(kept));
+    } catch {}
+
+    // Update local state & cache immediately
+    setTransactions(prev => {
+      const rem = prev.filter(t => !archiveIds.has(t.id));
+      saveLocalTransactions(rem);
+      return rem;
+    });
+
+    setArchivedStatements(prev => {
+      const existingFiltered = prev.filter(a => !archiveIds.has(a.id));
+      const merged = [...toArchive, ...existingFiltered].sort(
+        (a, b) => parseTxDate(b.date).getTime() - parseTxDate(a.date).getTime()
+      );
+      saveLocalArchivedStatements(merged);
+      return merged;
+    });
+
+    if (customerId === activeCustomerId) {
+      setAllCustomerTxs(kept);
+      setActiveCustomerTxCount(kept.length);
+      setCustomerTxLimit(5);
+      setCustomerTransactions(kept.slice(0, 5));
+    }
+
+    if (userId === 'local-guest-session' || isOfflineFallback) {
+      return toArchive.length;
+    }
+
+    // Step 1: Delete excess transactions from active 'transactions' collection in isolated batches
+    try {
+      for (let i = 0; i < toArchive.length; i += 350) {
+        const chunk = toArchive.slice(i, i + 350);
+        const deleteBatch = writeBatch(db);
+        chunk.forEach(tx => {
+          const activeDocRef = doc(db, 'users', userId, 'transactions', tx.id);
+          deleteBatch.delete(activeDocRef);
+        });
+        const userDocRef = doc(db, 'users', userId);
+        deleteBatch.set(userDocRef, {
+          transactionsCount: increment(-chunk.length),
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+        await deleteBatch.commit();
+      }
+    } catch (err) {
+      console.warn("Could not delete archived transactions from remote active collection (kept hidden locally):", err);
+    }
+
+    // Step 2: Store archived transactions in 'archived_transactions' collection in isolated batches
+    try {
+      for (let i = 0; i < toArchive.length; i += 350) {
+        const chunk = toArchive.slice(i, i + 350);
+        const archBatch = writeBatch(db);
+        chunk.forEach(tx => {
+          const archDocRef = doc(db, 'users', userId, 'archived_transactions', tx.id);
+          const cleanDoc: Record<string, any> = {
+            id: tx.id,
+            userId,
+            customerId: tx.customerId,
+            customerName: tx.customerName || 'Customer',
+            type: tx.type,
+            amount: Number(tx.amount) || 0,
+            description: tx.description || '',
+            date: parseTxDate(tx.date),
+            createdAt: parseTxDate(tx.createdAt || tx.date),
+            archivedAt: serverTimestamp()
+          };
+          if (tx.isEdited) cleanDoc.isEdited = true;
+          archBatch.set(archDocRef, cleanDoc);
+        });
+        await archBatch.commit();
+      }
+    } catch (err) {
+      console.warn("Could not sync archived transactions to remote subcollection (saved in local archive):", err);
+    }
+
+    return toArchive.length;
+  };
+
+  // Update Auto-Merge / Archive Statements setting and trim excess statements across all profiles with progress reporting
+  const updateStatementAutoMerge = async (
+    enabled: boolean,
+    keepCount: number = 15,
+    onProgress?: (progress: {
+      percent: number;
+      current: number;
+      total: number;
+      customerName?: string;
+      archivedSoFar: number;
+      message: string;
+    }) => void
+  ): Promise<number> => {
+    if (!userId) return 0;
+    const validKeep = Math.max(1, Math.min(500, Number(keepCount) || 15));
+
+    const updatedSettings: UserSettings = settings
+      ? {
+          ...settings,
+          autoMergeStatements: enabled,
+          statementKeepCount: validKeep,
+          updatedAt: new Date()
+        }
+      : {
+          uid: userId,
+          email: auth.currentUser?.email || 'guest@challantrack.local',
+          theme: 'dark',
+          dailyReminderTime: '09:00',
+          autoMergeStatements: enabled,
+          statementKeepCount: validKeep,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+
+    settingsRef.current = updatedSettings;
+    setSettings(updatedSettings);
+    saveLocalSettings(updatedSettings);
+
+    if (userId !== 'local-guest-session' && !isOfflineFallback) {
+      const userDocRef = doc(db, 'users', userId);
+      try {
+        await setDoc(userDocRef, {
+          autoMergeStatements: enabled,
+          statementKeepCount: validKeep,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      } catch (err) {
+        console.warn("Firestore updateStatementAutoMerge failed, saved locally:", err);
+      }
+    }
+
+    let totalArchivedNow = 0;
+    if (enabled) {
+      const totalProfiles = customers.length;
+      if (totalProfiles === 0) {
+        onProgress?.({
+          percent: 100,
+          current: 0,
+          total: 0,
+          archivedSoFar: 0,
+          message: 'Completing setup...'
+        });
+        await new Promise(r => setTimeout(r, 250));
+      } else {
+        for (let idx = 0; idx < totalProfiles; idx++) {
+          const c = customers[idx];
+          const pct = Math.max(8, Math.round(((idx + 1) / totalProfiles) * 95));
+          onProgress?.({
+            percent: pct,
+            current: idx + 1,
+            total: totalProfiles,
+            customerName: c.name,
+            archivedSoFar: totalArchivedNow,
+            message: `${c.name} (${idx + 1}/${totalProfiles})`
+          });
+          const count = await archiveCustomerExcessStatements(c.id, validKeep);
+          totalArchivedNow += count;
+          await new Promise(r => setTimeout(r, 25));
+        }
+        onProgress?.({
+          percent: 100,
+          current: totalProfiles,
+          total: totalProfiles,
+          archivedSoFar: totalArchivedNow,
+          message: 'Completed!'
+        });
+        await new Promise(r => setTimeout(r, 150));
+      }
+    }
+    return totalArchivedNow;
+  };
+
+  const exportArchivedStatements = async (customerId?: string) => {
+    if (!userId) return [];
+    const map = new Map<string, any>();
+
+    // Include local archived statements first
+    archivedStatements.forEach((item: any) => {
+      if (!item?.id) return;
+      if (customerId && item.customerId !== customerId) return;
+      map.set(item.id, {
+        id: item.id,
+        customerId: item.customerId,
+        customerName: item.customerName || 'Customer',
+        type: item.type,
+        amount: item.amount,
+        description: item.description || '',
+        date: parseTxDate(item.date).toISOString(),
+        archivedAt: item.archivedAt ? parseTxDate(item.archivedAt).toISOString() : parseTxDate(item.date).toISOString()
+      });
+    });
+
+    if (userId !== 'local-guest-session' && !isOfflineFallback) {
+      try {
+        const archRef = collection(db, 'users', userId, 'archived_transactions');
+        const snap = await getDocs(archRef);
+        snap.forEach((docSnap) => {
+          const data = docSnap.data();
+          if (customerId && data.customerId !== customerId) return;
+          map.set(docSnap.id, {
+            id: docSnap.id,
+            customerId: data.customerId,
+            customerName: data.customerName || 'Customer',
+            type: data.type,
+            amount: data.amount,
+            description: data.description || '',
+            date: parseTxDate(data.date).toISOString(),
+            archivedAt: data.archivedAt ? parseTxDate(data.archivedAt).toISOString() : new Date().toISOString()
+          });
+        });
+      } catch (err) {
+        console.warn("Using local archive cache for export:", err);
+      }
+    }
+
+    const list = Array.from(map.values());
+    list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return list;
+  };
+
  // Create new customer
- const createCustomer = async (name: string, phone: string) => {
+ const createCustomer = async (
+   name: string,
+   phone: string,
+   options?: { accountType?: 'standard' | 'credit_card'; billingDay?: number }
+ ) => {
  if (!userId) return null;
  
  const trimmedName = name.trim();
@@ -864,6 +1315,12 @@ const lastSubmitRef = useRef<{
  }
 
  const customId = doc(collection(db, 'temp')).id;
+ const acctType = options?.accountType || 'standard';
+ const validBillingDay =
+   acctType === 'credit_card'
+     ? Math.min(31, Math.max(1, Math.round(options?.billingDay || 15)))
+     : undefined;
+
  const newCustomer: Customer = {
  id: customId,
  userId,
@@ -871,7 +1328,9 @@ const lastSubmitRef = useRef<{
  phone: cleanBangladeshiPhone(phone),
  outstandingDue: 0,
  createdAt: new Date(),
- updatedAt: new Date()
+ updatedAt: new Date(),
+ accountType: acctType,
+ ...(validBillingDay !== undefined ? { billingDay: validBillingDay } : {})
  };
 
  const updatedList = [newCustomer, ...customers];
@@ -1006,7 +1465,7 @@ const lastSubmitRef = useRef<{
       const txRef = collection(db, 'users', uid, 'transactions');
       const qSnap = await getDocs(txRef);
       
-      const summaries = {};
+      const summaries: Record<string, any> = {};
       let totalCount = 0;
       
       qSnap.forEach(docSnap => {
@@ -1081,7 +1540,7 @@ const lastSubmitRef = useRef<{
    amount: number, 
    description: string = '', 
    date: Date = new Date(),
-   fallbackCustomerInfo?: { name: string; phone: string }
+   fallbackCustomerInfo?: { name: string; phone: string; accountType?: 'standard' | 'credit_card'; billingDay?: number }
  ) => {
    if (!userId) return;
 
@@ -1133,6 +1592,11 @@ const lastSubmitRef = useRef<{
 
  // If customer was newly created and not yet in the stale customers state list, add them inline
  if (!found && fallbackCustomerInfo) {
+ const acctType = fallbackCustomerInfo.accountType || 'standard';
+ const validBillingDay =
+   acctType === 'credit_card'
+     ? Math.min(31, Math.max(1, Math.round(fallbackCustomerInfo.billingDay || 15)))
+     : undefined;
  const newCustomer: Customer = {
  id: customerId,
  userId,
@@ -1140,7 +1604,9 @@ const lastSubmitRef = useRef<{
  phone: fallbackCustomerInfo.phone.trim(),
  outstandingDue: diff,
  createdAt: new Date(),
- updatedAt: new Date()
+ updatedAt: new Date(),
+ accountType: acctType,
+ ...(validBillingDay !== undefined ? { billingDay: validBillingDay } : {})
  };
  updatedCustomers = [newCustomer, ...updatedCustomers];
  }
@@ -1171,7 +1637,10 @@ const lastSubmitRef = useRef<{
  }
 
  if (userId === 'local-guest-session' || isOfflineFallback) {
- return;
+   if (settings?.autoMergeStatements) {
+     await archiveCustomerExcessStatements(customerId, settings.statementKeepCount || 15);
+   }
+   return;
  }
 
  const txRef = collection(db, 'users', userId, 'transactions');
@@ -1202,6 +1671,9 @@ const lastSubmitRef = useRef<{
 
  try {
  await batch.commit();
+ if (settings?.autoMergeStatements) {
+   await archiveCustomerExcessStatements(customerId, settings.statementKeepCount || 15);
+ }
  } catch (err) {
  console.warn("Firestore addTransaction failed, saved locally:", err);
  }
@@ -1522,7 +1994,12 @@ const lastSubmitRef = useRef<{
     }
   };
 
-  const updateCustomerDetails = async (customerId: string, name: string, phone: string) => {
+  const updateCustomerDetails = async (
+    customerId: string,
+    name: string,
+    phone: string,
+    options?: { accountType?: 'standard' | 'credit_card'; billingDay?: number }
+  ) => {
     if (!userId) return;
     const trimmedName = name.trim();
     const trimmedPhone = cleanBangladeshiPhone(phone);
@@ -1533,9 +2010,22 @@ const lastSubmitRef = useRef<{
       throw new Error('DUPLICATE_NAME');
     }
 
-    const updatedList = customers.map(c => 
-      c.id === customerId ? { ...c, name: trimmedName, phone: trimmedPhone, updatedAt: new Date() } : c
-    );
+    const updatedList = customers.map(c => {
+      if (c.id !== customerId) return c;
+      const nextAcctType = options?.accountType ?? c.accountType ?? 'standard';
+      const nextBillingDay =
+        nextAcctType === 'credit_card'
+          ? Math.min(31, Math.max(1, Math.round(options?.billingDay ?? c.billingDay ?? 15)))
+          : undefined;
+      return {
+        ...c,
+        name: trimmedName,
+        phone: trimmedPhone,
+        accountType: nextAcctType,
+        billingDay: nextBillingDay,
+        updatedAt: new Date()
+      };
+    });
     setCustomers(updatedList);
     saveLocalCustomers(updatedList);
 
@@ -1543,13 +2033,19 @@ const lastSubmitRef = useRef<{
       return;
     }
 
+    const targetCust = updatedList.find(c => c.id === customerId);
     const customerDocRef = doc(db, 'users', userId, 'customers', customerId);
     try {
-      await updateDoc(customerDocRef, {
+      const firestoreUpdates: Record<string, any> = {
         name: trimmedName,
         phone: trimmedPhone,
+        accountType: targetCust?.accountType || 'standard',
         updatedAt: serverTimestamp()
-      });
+      };
+      if (targetCust?.accountType === 'credit_card' && targetCust.billingDay) {
+        firestoreUpdates.billingDay = targetCust.billingDay;
+      }
+      await updateDoc(customerDocRef, firestoreUpdates);
     } catch (err) {
       console.warn("Firestore updateCustomerDetails failed, saved locally:", err);
     }
@@ -1595,11 +2091,24 @@ const lastSubmitRef = useRef<{
     setCustomers(updatedCustomers);
     saveLocalCustomers(updatedCustomers);
 
+    const editedTimestamp = new Date();
+    const previousAuditEntry: TransactionAuditEntry = {
+      amount: tx.amount,
+      date: tx.date instanceof Date ? tx.date.toISOString() : (tx.date || new Date().toISOString()),
+      description: tx.description || '',
+      editedAt: (tx.editedAt instanceof Date ? tx.editedAt.toISOString() : tx.editedAt) || (tx.createdAt instanceof Date ? tx.createdAt.toISOString() : tx.createdAt) || new Date().toISOString()
+    };
+    const currentAuditHistory: TransactionAuditEntry[] = Array.isArray(tx.auditHistory) ? tx.auditHistory : [];
+    const newAuditHistory: TransactionAuditEntry[] = [previousAuditEntry, ...currentAuditHistory].slice(0, 5);
+
     const updatedTx: Transaction = {
       ...tx,
       type: newType,
       amount: newAmount,
-      description: newDescription.trim()
+      description: newDescription.trim(),
+      isEdited: true,
+      editedAt: editedTimestamp,
+      auditHistory: newAuditHistory
     };
 
     // Update local cache in localStorage
@@ -1608,16 +2117,22 @@ const lastSubmitRef = useRef<{
       if (stored) {
         const parsed = JSON.parse(stored).map((t: any) => {
           if (t.id === transactionId) {
-            return {
-              ...t,
-              type: newType,
-              amount: newAmount,
-              description: newDescription.trim()
-            };
+            return updatedTx;
           }
           return t;
         });
         localStorage.setItem(`easy_due_transactions_${userId}`, JSON.stringify(parsed));
+      }
+      const custCacheKey = `easy_due_txs_${userId}_${tx.customerId}`;
+      const storedCust = localStorage.getItem(custCacheKey);
+      if (storedCust) {
+        const parsedCust = JSON.parse(storedCust).map((t: any) => {
+          if (t.id === transactionId) {
+            return updatedTx;
+          }
+          return t;
+        });
+        localStorage.setItem(custCacheKey, JSON.stringify(parsedCust));
       }
     } catch (e) {
       console.warn("Failed to update edited tx in local cache:", e);
@@ -1637,7 +2152,10 @@ const lastSubmitRef = useRef<{
     batch.update(doc(db, 'users', userId, 'transactions', transactionId), {
       type: newType,
       amount: newAmount,
-      description: newDescription.trim()
+      description: newDescription.trim(),
+      isEdited: true,
+      editedAt: serverTimestamp(),
+      auditHistory: newAuditHistory
     });
     batch.update(doc(db, 'users', userId, 'customers', tx.customerId), {
       outstandingDue: increment(netDiff),
@@ -1839,6 +2357,14 @@ const lastSubmitRef = useRef<{
         if (!bc.name) continue;
         const customId = doc(collection(db, 'temp')).id;
         const cDate = bc.createdAt ? new Date(bc.createdAt) : new Date();
+        const acctType: 'standard' | 'credit_card' = bc.accountType === 'credit_card' ? 'credit_card' : 'standard';
+        const validBillingDay =
+          acctType === 'credit_card'
+            ? Math.min(31, Math.max(1, Math.round(Number(bc.billingDay) || 15)))
+            : bc.billingDay !== undefined
+            ? Number(bc.billingDay)
+            : undefined;
+
         const customerObj: Customer = {
           id: customId,
           userId,
@@ -1846,23 +2372,30 @@ const lastSubmitRef = useRef<{
           phone: (bc.phone || '').trim(),
           outstandingDue: Number(bc.outstandingDue) || 0,
           createdAt: cDate,
-          updatedAt: new Date()
+          updatedAt: new Date(),
+          accountType: acctType,
+          ...(validBillingDay !== undefined ? { billingDay: validBillingDay } : {})
         };
         customerMap.set(bc.name.trim().toLowerCase(), customerObj);
         newCustomers.push(customerObj);
 
         if (!isLocal) {
+          const firestoreCustData: any = {
+            id: customId,
+            userId,
+            name: bc.name.trim(),
+            phone: (bc.phone || '').trim(),
+            outstandingDue: Number(bc.outstandingDue) || 0,
+            createdAt: cDate,
+            updatedAt: new Date(),
+            accountType: acctType
+          };
+          if (validBillingDay !== undefined) {
+            firestoreCustData.billingDay = validBillingDay;
+          }
           operations.push({
             ref: doc(db, 'users', userId, 'customers', customId),
-            data: {
-              id: customId,
-              userId,
-              name: bc.name.trim(),
-              phone: (bc.phone || '').trim(),
-              outstandingDue: Number(bc.outstandingDue) || 0,
-              createdAt: cDate,
-              updatedAt: new Date()
-            },
+            data: firestoreCustData,
             type: 'set'
           });
         }
@@ -1883,7 +2416,8 @@ const lastSubmitRef = useRef<{
             phone: '',
             outstandingDue: 0,
             createdAt: new Date(),
-            updatedAt: new Date()
+            updatedAt: new Date(),
+            accountType: 'standard'
           };
           customerMap.set(customerNameLower, customerObj);
           newCustomers.push(customerObj);
@@ -1899,7 +2433,8 @@ const lastSubmitRef = useRef<{
                 phone: '',
                 outstandingDue: 0,
                 createdAt: new Date(),
-                updatedAt: new Date()
+                updatedAt: new Date(),
+                accountType: 'standard'
               },
               type: 'set'
             });
@@ -1908,6 +2443,7 @@ const lastSubmitRef = useRef<{
 
         const customTxId = doc(collection(db, 'temp')).id;
         const txDate = bt.date ? new Date(bt.date) : new Date();
+        const txCreatedAt = bt.createdAt ? new Date(bt.createdAt) : txDate;
         const txObj: Transaction = {
           id: customTxId,
           userId,
@@ -1917,24 +2453,34 @@ const lastSubmitRef = useRef<{
           amount: Number(bt.amount) || 0,
           description: (bt.description || '').trim(),
           date: txDate,
-          createdAt: txDate
+          createdAt: txCreatedAt,
+          ...(bt.isEdited ? { isEdited: true } : {}),
+          ...(bt.editedAt ? { editedAt: new Date(bt.editedAt) } : {}),
+          ...(bt.promisedDate ? { promisedDate: bt.promisedDate } : {}),
+          ...(Array.isArray(bt.auditHistory) ? { auditHistory: bt.auditHistory } : {})
         };
         newTransactions.push(txObj);
 
         if (!isLocal) {
+          const firestoreTxData: any = {
+            id: customTxId,
+            userId,
+            customerId: matchedCustomer.id,
+            customerName: matchedCustomer.name,
+            type: bt.type,
+            amount: Number(bt.amount) || 0,
+            description: (bt.description || '').trim(),
+            date: txDate,
+            createdAt: txCreatedAt
+          };
+          if (bt.isEdited) firestoreTxData.isEdited = true;
+          if (bt.editedAt) firestoreTxData.editedAt = new Date(bt.editedAt);
+          if (bt.promisedDate) firestoreTxData.promisedDate = bt.promisedDate;
+          if (Array.isArray(bt.auditHistory)) firestoreTxData.auditHistory = bt.auditHistory;
+
           operations.push({
             ref: doc(db, 'users', userId, 'transactions', customTxId),
-            data: {
-              id: customTxId,
-              userId,
-              customerId: matchedCustomer.id,
-              customerName: matchedCustomer.name,
-              type: bt.type,
-              amount: Number(bt.amount) || 0,
-              description: (bt.description || '').trim(),
-              date: txDate,
-              createdAt: txDate
-            },
+            data: firestoreTxData,
             type: 'set'
           });
         }
@@ -1965,7 +2511,7 @@ const lastSubmitRef = useRef<{
             customerName: cust.name,
             type: adjType,
             amount: adjAmount,
-            description: 'পূর্ববর্তী জের সমন্বয় / Initial Balance Adjustment',
+            description: 'Initial Balance Adjustment',
             date: adjDate,
             createdAt: adjDate
           };
@@ -1981,7 +2527,7 @@ const lastSubmitRef = useRef<{
                 customerName: cust.name,
                 type: adjType,
                 amount: adjAmount,
-                description: 'পূর্ববর্তী জের সমন্বয় / Initial Balance Adjustment',
+                description: 'Initial Balance Adjustment',
                 date: adjDate,
                 createdAt: adjDate
               },
@@ -2004,25 +2550,50 @@ const lastSubmitRef = useRef<{
         if (!bc.name) continue;
         const key = bc.name.trim().toLowerCase();
         const existing = customerMap.get(key);
+        const acctType: 'standard' | 'credit_card' = bc.accountType === 'credit_card' ? 'credit_card' : (bc.accountType || 'standard');
+        const validBillingDay =
+          acctType === 'credit_card'
+            ? Math.min(31, Math.max(1, Math.round(Number(bc.billingDay) || 15)))
+            : bc.billingDay !== undefined
+            ? Number(bc.billingDay)
+            : undefined;
 
         if (existing) {
           if (choice === 'merge') {
             const backupPhone = (bc.phone || '').trim();
+            const updatePayload: any = {};
+            let hasCustChanges = false;
+
             if (backupPhone && existing.phone !== backupPhone) {
               existing.phone = backupPhone;
+              updatePayload.phone = backupPhone;
+              hasCustChanges = true;
+            }
+            if (bc.accountType && existing.accountType !== acctType) {
+              existing.accountType = acctType;
+              updatePayload.accountType = acctType;
+              hasCustChanges = true;
+            }
+            if (validBillingDay !== undefined && existing.billingDay !== validBillingDay) {
+              existing.billingDay = validBillingDay;
+              updatePayload.billingDay = validBillingDay;
+              hasCustChanges = true;
+            }
+
+            if (hasCustChanges) {
               existing.updatedAt = new Date();
-              
+              updatePayload.updatedAt = existing.updatedAt;
               if (!isLocal) {
                 operations.push({
                   ref: doc(db, 'users', userId, 'customers', existing.id),
-                  data: { phone: backupPhone, updatedAt: new Date() },
+                  data: updatePayload,
                   type: 'update'
                 });
               }
             }
           }
         } else {
-          // Brand new customer from backup: retain master balance
+          // Brand new customer from backup: retain master balance & credit card config
           const customId = doc(collection(db, 'temp')).id;
           const cDate = bc.createdAt ? new Date(bc.createdAt) : new Date();
           const customerObj: Customer = {
@@ -2032,24 +2603,31 @@ const lastSubmitRef = useRef<{
             phone: (bc.phone || '').trim(),
             outstandingDue: Number(bc.outstandingDue) || 0,
             createdAt: cDate,
-            updatedAt: new Date()
+            updatedAt: new Date(),
+            accountType: acctType,
+            ...(validBillingDay !== undefined ? { billingDay: validBillingDay } : {})
           };
           customerMap.set(key, customerObj);
           newCustomers.push(customerObj);
           newlyAddedCustomerIds.add(customId);
 
           if (!isLocal) {
+            const firestoreCustData: any = {
+              id: customId,
+              userId,
+              name: bc.name.trim(),
+              phone: (bc.phone || '').trim(),
+              outstandingDue: Number(bc.outstandingDue) || 0,
+              createdAt: cDate,
+              updatedAt: new Date(),
+              accountType: acctType
+            };
+            if (validBillingDay !== undefined) {
+              firestoreCustData.billingDay = validBillingDay;
+            }
             operations.push({
               ref: doc(db, 'users', userId, 'customers', customId),
-              data: {
-                id: customId,
-                userId,
-                name: bc.name.trim(),
-                phone: (bc.phone || '').trim(),
-                outstandingDue: Number(bc.outstandingDue) || 0,
-                createdAt: cDate,
-                updatedAt: new Date()
-              },
+              data: firestoreCustData,
               type: 'set'
             });
           }
@@ -2079,7 +2657,8 @@ const lastSubmitRef = useRef<{
             phone: '',
             outstandingDue: 0,
             createdAt: new Date(),
-            updatedAt: new Date()
+            updatedAt: new Date(),
+            accountType: 'standard'
           };
           customerMap.set(key, customerObj);
           newCustomers.push(customerObj);
@@ -2096,7 +2675,8 @@ const lastSubmitRef = useRef<{
                 phone: '',
                 outstandingDue: 0,
                 createdAt: new Date(),
-                updatedAt: new Date()
+                updatedAt: new Date(),
+                accountType: 'standard'
               },
               type: 'set'
             });
@@ -2111,6 +2691,7 @@ const lastSubmitRef = useRef<{
           existingTxSet.add(txKey);
           const customTxId = doc(collection(db, 'temp')).id;
           const txDate = bt.date ? new Date(bt.date) : new Date();
+          const txCreatedAt = bt.createdAt ? new Date(bt.createdAt) : txDate;
           const txObj: Transaction = {
             id: customTxId,
             userId,
@@ -2120,24 +2701,34 @@ const lastSubmitRef = useRef<{
             amount: Number(bt.amount) || 0,
             description: (bt.description || '').trim(),
             date: txDate,
-            createdAt: txDate
+            createdAt: txCreatedAt,
+            ...(bt.isEdited ? { isEdited: true } : {}),
+            ...(bt.editedAt ? { editedAt: new Date(bt.editedAt) } : {}),
+            ...(bt.promisedDate ? { promisedDate: bt.promisedDate } : {}),
+            ...(Array.isArray(bt.auditHistory) ? { auditHistory: bt.auditHistory } : {})
           };
           newTransactions.push(txObj);
 
           if (!isLocal) {
+            const firestoreTxData: any = {
+              id: customTxId,
+              userId,
+              customerId: matchedCustomer.id,
+              customerName: matchedCustomer.name,
+              type: bt.type,
+              amount: Number(bt.amount) || 0,
+              description: (bt.description || '').trim(),
+              date: txDate,
+              createdAt: txCreatedAt
+            };
+            if (bt.isEdited) firestoreTxData.isEdited = true;
+            if (bt.editedAt) firestoreTxData.editedAt = new Date(bt.editedAt);
+            if (bt.promisedDate) firestoreTxData.promisedDate = bt.promisedDate;
+            if (Array.isArray(bt.auditHistory)) firestoreTxData.auditHistory = bt.auditHistory;
+
             operations.push({
               ref: doc(db, 'users', userId, 'transactions', customTxId),
-              data: {
-                id: customTxId,
-                userId,
-                customerId: matchedCustomer.id,
-                customerName: matchedCustomer.name,
-                type: bt.type,
-                amount: Number(bt.amount) || 0,
-                description: (bt.description || '').trim(),
-                date: txDate,
-                createdAt: txDate
-              },
+              data: firestoreTxData,
               type: 'set'
             });
           }
@@ -2177,7 +2768,7 @@ const lastSubmitRef = useRef<{
             customerName: cust.name,
             type: adjType,
             amount: adjAmount,
-            description: 'পূর্ববর্তী জের সমন্বয় / Initial Balance Adjustment',
+            description: 'Initial Balance Adjustment',
             date: adjDate,
             createdAt: adjDate
           };
@@ -2193,7 +2784,7 @@ const lastSubmitRef = useRef<{
                 customerName: cust.name,
                 type: adjType,
                 amount: adjAmount,
-                description: 'পূর্ববর্তী জের সমন্বয় / Initial Balance Adjustment',
+                description: 'Initial Balance Adjustment',
                 date: adjDate,
                 createdAt: adjDate
               },
@@ -2228,7 +2819,7 @@ const lastSubmitRef = useRef<{
       }
     }
 
-    // 3. Process Goals from backup (for all choices)
+    // 3. Process Goals from backup (for all choices, including Flexible Savings & EMI)
     if (Array.isArray(backupData.goals)) {
       const existingGoalMap = new Map<string, SavingGoal>();
       for (const g of newGoals) {
@@ -2250,18 +2841,35 @@ const lastSubmitRef = useRef<{
           }
         }
 
+        const isOpenEndedGoal = Boolean(
+          bg.isOpenEnded ||
+          (bg.frequency === 'flexible' && (bg.type || 'savings') === 'savings' && (!bg.targetAmount || Number(bg.targetAmount) === 0))
+        );
+
+        const normalizedContribs: GoalContribution[] = Array.isArray(bg.contributions)
+          ? bg.contributions.map((c: any) => ({
+              id: c.id || doc(collection(db, 'temp')).id,
+              amount: Number(c.amount) || 0,
+              date: c.date || new Date().toISOString(),
+              ...(c.note ? { note: String(c.note) } : {}),
+              type: c.type === 'withdrawal' ? 'withdrawal' : 'deposit'
+            }))
+          : [];
+
         if (choice === 'clear' || !existingGoal) {
           const customGoalId = doc(collection(db, 'temp')).id;
           const goalDate = bg.createdAt ? new Date(bg.createdAt) : new Date();
+          const goalUpdatedDate = bg.updatedAt ? new Date(bg.updatedAt) : new Date();
           const goalObj: SavingGoal = {
             id: customGoalId,
             userId,
             title: bg.title.trim(),
             targetAmount: Number(bg.targetAmount) || 0,
             savedAmount: Number(bg.savedAmount) || 0,
-            frequency: bg.frequency || 'monthly',
+            frequency: bg.frequency || (isOpenEndedGoal ? 'flexible' : 'monthly'),
             installmentAmount: bg.installmentAmount ? Number(bg.installmentAmount) : undefined,
             type: bg.type || 'savings',
+            isOpenEnded: isOpenEndedGoal,
             status: bg.status || 'active',
             customerId: matchedCustId || undefined,
             customerName: matchedCustName || undefined,
@@ -2271,34 +2879,60 @@ const lastSubmitRef = useRef<{
             interestAmount: bg.interestAmount !== undefined ? Number(bg.interestAmount) : undefined,
             tenure: bg.tenure ? Number(bg.tenure) : undefined,
             createdAt: goalDate,
-            updatedAt: bg.updatedAt ? new Date(bg.updatedAt) : new Date(),
-            contributions: Array.isArray(bg.contributions) ? bg.contributions.map((c: any) => ({
-              id: c.id || doc(collection(db, 'temp')).id,
-              amount: Number(c.amount) || 0,
-              date: c.date || new Date().toISOString(),
-              note: c.note || undefined
-            })) : []
+            updatedAt: goalUpdatedDate,
+            contributions: normalizedContribs
           };
           newGoals.push(goalObj);
           existingGoalMap.set(goalTitleKey, goalObj);
 
           if (!isLocal) {
+            const firestoreGoalData: any = {
+              id: customGoalId,
+              userId,
+              title: goalObj.title,
+              targetAmount: goalObj.targetAmount,
+              savedAmount: goalObj.savedAmount,
+              frequency: goalObj.frequency,
+              type: goalObj.type,
+              isOpenEnded: isOpenEndedGoal,
+              status: goalObj.status,
+              createdAt: goalDate,
+              updatedAt: goalUpdatedDate,
+              contributions: normalizedContribs
+            };
+            if (goalObj.installmentAmount !== undefined) firestoreGoalData.installmentAmount = goalObj.installmentAmount;
+            if (goalObj.customerId) firestoreGoalData.customerId = goalObj.customerId;
+            if (goalObj.customerName) firestoreGoalData.customerName = goalObj.customerName;
+            if (goalObj.notes) firestoreGoalData.notes = goalObj.notes;
+            if (goalObj.principalAmount !== undefined) firestoreGoalData.principalAmount = goalObj.principalAmount;
+            if (goalObj.interestRate !== undefined) firestoreGoalData.interestRate = goalObj.interestRate;
+            if (goalObj.interestAmount !== undefined) firestoreGoalData.interestAmount = goalObj.interestAmount;
+            if (goalObj.tenure !== undefined) firestoreGoalData.tenure = goalObj.tenure;
+
             operations.push({
               ref: doc(db, 'users', userId, 'goals', customGoalId),
-              data: {
-                ...goalObj,
-                createdAt: goalDate,
-                updatedAt: new Date()
-              },
+              data: firestoreGoalData,
               type: 'set'
             });
           }
         } else if (choice === 'merge' && existingGoal) {
           const backupSaved = Number(bg.savedAmount) || 0;
-          const backupContribs = Array.isArray(bg.contributions) ? bg.contributions : [];
-          if (backupSaved > (existingGoal.savedAmount || 0) || backupContribs.length > (existingGoal.contributions?.length || 0)) {
-            existingGoal.savedAmount = Math.max(existingGoal.savedAmount || 0, backupSaved);
-            existingGoal.contributions = backupContribs;
+          const shouldUpdateGoal =
+            normalizedContribs.length > (existingGoal.contributions?.length || 0) ||
+            (isOpenEndedGoal && backupSaved !== (existingGoal.savedAmount || 0)) ||
+            (!isOpenEndedGoal && backupSaved > (existingGoal.savedAmount || 0)) ||
+            Boolean(existingGoal.isOpenEnded) !== isOpenEndedGoal;
+
+          if (shouldUpdateGoal) {
+            existingGoal.isOpenEnded = isOpenEndedGoal;
+            if (normalizedContribs.length >= (existingGoal.contributions?.length || 0)) {
+              existingGoal.contributions = normalizedContribs;
+              existingGoal.savedAmount = isOpenEndedGoal
+                ? backupSaved
+                : Math.max(existingGoal.savedAmount || 0, backupSaved);
+            } else {
+              existingGoal.savedAmount = Math.max(existingGoal.savedAmount || 0, backupSaved);
+            }
             existingGoal.status = bg.status || existingGoal.status;
             existingGoal.updatedAt = new Date();
 
@@ -2306,6 +2940,7 @@ const lastSubmitRef = useRef<{
               operations.push({
                 ref: doc(db, 'users', userId, 'goals', existingGoal.id),
                 data: {
+                  isOpenEnded: existingGoal.isOpenEnded,
                   savedAmount: existingGoal.savedAmount,
                   contributions: existingGoal.contributions,
                   status: existingGoal.status,
@@ -2314,6 +2949,79 @@ const lastSubmitRef = useRef<{
                 type: 'update'
               });
             }
+          }
+        }
+      }
+    }
+
+    // 3b. Process Reminders from backup (Customer & EMI reminders)
+    if (Array.isArray(backupData.reminders)) {
+      for (const br of backupData.reminders) {
+        const remType: 'customer' | 'emi' = br.type === 'emi' ? 'emi' : 'customer';
+        const remCustName = (br.customerName || '').trim();
+        let matchedCustId = br.customerId || '';
+        let matchedGoalId = br.goalId;
+
+        if (remCustName) {
+          const foundCust = newCustomers.find(c => c.name.toLowerCase() === remCustName.toLowerCase());
+          if (foundCust) matchedCustId = foundCust.id;
+        }
+        if (remType === 'emi') {
+          const goalTitleToMatch = (br.goalTitle || remCustName).toLowerCase();
+          const foundGoal = newGoals.find(g => g.title.toLowerCase() === goalTitleToMatch);
+          if (foundGoal) {
+            matchedGoalId = foundGoal.id;
+            if (!matchedCustId) matchedCustId = foundGoal.id;
+          }
+        }
+
+        const alreadyExists = newReminders.some(r =>
+          r.type === remType &&
+          r.customerName?.toLowerCase() === remCustName.toLowerCase() &&
+          (remType === 'emi' ? r.emiDayOfMonth === br.emiDayOfMonth : true)
+        );
+
+        if (choice === 'clear' || !alreadyExists) {
+          const customRemId = doc(collection(db, 'temp')).id;
+          const remDueDate = br.dueDate ? new Date(br.dueDate) : new Date();
+          const remCreatedAt = br.createdAt ? new Date(br.createdAt) : new Date();
+          const remObj: Reminder = {
+            id: customRemId,
+            userId,
+            customerId: matchedCustId,
+            customerName: remCustName || 'Reminder',
+            notes: (br.notes || '').trim(),
+            dueDate: remDueDate,
+            active: br.active !== undefined ? Boolean(br.active) : true,
+            createdAt: remCreatedAt,
+            type: remType,
+            ...(matchedGoalId ? { goalId: matchedGoalId } : {}),
+            ...(br.emiDayOfMonth !== undefined ? { emiDayOfMonth: Number(br.emiDayOfMonth) } : {}),
+            ...(br.installmentAmount !== undefined ? { installmentAmount: Number(br.installmentAmount) } : {})
+          };
+          newReminders.push(remObj);
+
+          if (!isLocal) {
+            const firestoreRemData: any = {
+              id: customRemId,
+              userId,
+              customerId: remObj.customerId,
+              customerName: remObj.customerName,
+              notes: remObj.notes,
+              dueDate: remDueDate,
+              active: remObj.active,
+              createdAt: remCreatedAt,
+              type: remType
+            };
+            if (matchedGoalId) firestoreRemData.goalId = matchedGoalId;
+            if (br.emiDayOfMonth !== undefined) firestoreRemData.emiDayOfMonth = Number(br.emiDayOfMonth);
+            if (br.installmentAmount !== undefined) firestoreRemData.installmentAmount = Number(br.installmentAmount);
+
+            operations.push({
+              ref: doc(db, 'users', userId, 'reminders', customRemId),
+              data: firestoreRemData,
+              type: 'set'
+            });
           }
         }
       }
@@ -2371,6 +3079,42 @@ const lastSubmitRef = useRef<{
     saveLocalTransactions(newTransactions);
     saveLocalReminders(newReminders);
     saveLocalGoals(newGoals);
+
+    // Restore and retain pinned customers from backup
+    try {
+      const importedPinned = new Set<string>();
+      if (Array.isArray(backupData.pinnedCustomerNames)) {
+        backupData.pinnedCustomerNames.forEach((n: any) => typeof n === 'string' && importedPinned.add(n));
+      }
+      if (Array.isArray(backupData.customers)) {
+        backupData.customers.forEach((c: any) => {
+          if (c.isPinned && c.name) importedPinned.add(c.name);
+        });
+      }
+      if (importedPinned.size > 0) {
+        let existingPinned: string[] = [];
+        try {
+          const stored = localStorage.getItem('pinned_customers_names');
+          if (stored) existingPinned = JSON.parse(stored);
+        } catch {}
+        const mergedPinned = choice === 'clear'
+          ? Array.from(importedPinned)
+          : Array.from(new Set([...existingPinned, ...Array.from(importedPinned)]));
+        localStorage.setItem('pinned_customers_names', JSON.stringify(mergedPinned));
+        window.dispatchEvent(new Event('storage'));
+      }
+    } catch (e) {
+      console.warn("Failed to restore pinned customers from backup:", e);
+    }
+
+    try {
+      if (backupData.preferences?.searchBanglaInEnglish !== undefined) {
+        localStorage.setItem('search_bangla_in_english', String(backupData.preferences.searchBanglaInEnglish));
+        window.dispatchEvent(new CustomEvent('phonetic-search-toggle', { detail: { enabled: Boolean(backupData.preferences.searchBanglaInEnglish) } }));
+      }
+    } catch (e) {
+      // ignore
+    }
 
     if (settings) {
       const newSettings = {
@@ -2438,7 +3182,8 @@ const lastSubmitRef = useRef<{
     principalAmount?: number,
     interestRate?: number,
     interestAmount?: number,
-    tenure?: number
+    tenure?: number,
+    isOpenEnded?: boolean
   ) => {
     if (!userId) return null;
     const customGoalId = doc(collection(db, 'temp')).id;
@@ -2451,6 +3196,7 @@ const lastSubmitRef = useRef<{
       frequency,
       installmentAmount: installmentAmount && installmentAmount > 0 ? Number(installmentAmount) : undefined,
       type,
+      isOpenEnded: Boolean(isOpenEnded),
       customerId: customerId || undefined,
       customerName: customerName || undefined,
       notes: notes?.trim() || undefined,
@@ -2486,6 +3232,7 @@ const lastSubmitRef = useRef<{
       updatedAt: serverTimestamp(),
       contributions: []
     };
+    if (isOpenEnded) firestoreGoal.isOpenEnded = true;
     if (installmentAmount && installmentAmount > 0) firestoreGoal.installmentAmount = Number(installmentAmount);
     if (customerId) firestoreGoal.customerId = customerId;
     if (customerName) firestoreGoal.customerName = customerName;
@@ -2508,7 +3255,8 @@ const lastSubmitRef = useRef<{
     goalId: string,
     amount: number,
     note: string = '',
-    recordAsCustomerTransaction: boolean = false
+    recordAsCustomerTransaction: boolean = false,
+    contributionType: 'deposit' | 'withdrawal' = 'deposit'
   ): Promise<SavingGoal | null> => {
     if (!userId || !amount || amount <= 0) return null;
 
@@ -2520,14 +3268,24 @@ const lastSubmitRef = useRef<{
       id: contributionId,
       amount,
       date: new Date().toISOString(),
-      note: note.trim()
+      note: note.trim(),
+      type: contributionType
     };
 
     const currentContributions = Array.isArray(goal.contributions) ? goal.contributions : [];
     const updatedContributions = [...currentContributions, newContribution];
-    const newSavedAmount = (Number(goal.savedAmount) || 0) + amount;
-    const isCompleted = newSavedAmount >= (Number(goal.targetAmount) || 0);
-    const newStatus = isCompleted ? ('completed' as const) : goal.status;
+    
+    let newSavedAmount = Number(goal.savedAmount) || 0;
+    if (contributionType === 'withdrawal') {
+      newSavedAmount = Math.max(0, newSavedAmount - amount);
+    } else {
+      newSavedAmount = newSavedAmount + amount;
+    }
+
+    const isCompleted = (!goal.isOpenEnded && (Number(goal.targetAmount) || 0) > 0)
+      ? newSavedAmount >= (Number(goal.targetAmount) || 0)
+      : false;
+    const newStatus = isCompleted ? ('completed' as const) : (goal.status === 'completed' && !isCompleted ? 'active' : goal.status);
 
     const updatedGoal: SavingGoal = {
       ...goal,
@@ -2542,18 +3300,22 @@ const lastSubmitRef = useRef<{
     setGoals(updatedGoals);
     saveLocalGoals(updatedGoals);
 
-    // Handle optional ledger recording (log as payment transaction in customer's account)
+    // Handle optional ledger recording (log as payment/due transaction in customer's account)
     if (recordAsCustomerTransaction && goal.customerId) {
       const linkedCust = customers.find(c => c.id === goal.customerId);
       const cName = goal.customerName || linkedCust?.name || 'Customer';
       const cPhone = linkedCust?.phone || '';
       const txDesc = note.trim()
         ? `${note.trim()} (${goal.title})`
-        : `Goal: ${goal.title}`;
+        : `${contributionType === 'withdrawal' ? 'Flexible Savings Withdrawal' : 'Flexible Savings Deposit'}: ${goal.title}`;
+
+      // Deposits reduce customer due or represent payment received ('payment')
+      // Withdrawals represent funds taken out or cash given ('due')
+      const ledgerTxType = contributionType === 'withdrawal' ? 'due' : 'payment';
 
       await addTransaction(
         goal.customerId,
-        'payment',
+        ledgerTxType,
         amount,
         txDesc,
         new Date(),
@@ -2641,6 +3403,28 @@ const lastSubmitRef = useRef<{
     }
   };
 
+  const updateGoalNotes = async (goalId: string, newNotes: string) => {
+    if (!userId) return;
+    const trimmed = newNotes.trim();
+    const updatedGoals = goals.map(g => 
+      g.id === goalId ? { ...g, notes: trimmed || undefined, updatedAt: new Date() } : g
+    );
+    setGoals(updatedGoals);
+    saveLocalGoals(updatedGoals);
+
+    if (userId === 'local-guest-session' || isOfflineFallback) return;
+
+    const goalDocRef = doc(db, 'users', userId, 'goals', goalId);
+    try {
+      await updateDoc(goalDocRef, {
+        notes: trimmed,
+        updatedAt: serverTimestamp()
+      });
+    } catch (err) {
+      console.warn("Firestore updateGoalNotes failed, saved locally:", err);
+    }
+  };
+
   const editGoalContribution = async (
     goalId: string,
     contributionId: string,
@@ -2655,15 +3439,20 @@ const lastSubmitRef = useRef<{
     const targetContrib = currentContribs.find(c => (c.id && c.id === contributionId) || (!c.id && c.date === contributionId));
     if (!targetContrib) return;
 
-    const diff = newAmount - targetContrib.amount;
+    const isWithdrawal = targetContrib.type === 'withdrawal';
+    const oldAmt = targetContrib.amount;
+    const netDelta = isWithdrawal ? (oldAmt - newAmount) : (newAmount - oldAmt);
+
     const updatedContribs = currentContribs.map(c => 
       ((c.id && c.id === contributionId) || (!c.id && c.date === contributionId))
         ? { ...c, id: c.id || contributionId, amount: newAmount, note: newNote.trim() }
         : c
     );
-    const newSaved = Math.max(0, (goal.savedAmount || 0) + diff);
-    const isCompleted = newSaved >= (Number(goal.targetAmount) || 0);
-    const newStatus = isCompleted ? ('completed' as const) : (goal.status === 'completed' ? 'active' : goal.status);
+    const newSaved = Math.max(0, (goal.savedAmount || 0) + netDelta);
+    const isCompleted = (!goal.isOpenEnded && (Number(goal.targetAmount) || 0) > 0)
+      ? newSaved >= (Number(goal.targetAmount) || 0)
+      : false;
+    const newStatus = isCompleted ? ('completed' as const) : (goal.status === 'completed' && !isCompleted ? 'active' : goal.status);
 
     const updatedGoal: SavingGoal = {
       ...goal,
@@ -2704,9 +3493,15 @@ const lastSubmitRef = useRef<{
     const updatedContribs = currentContribs.filter(c => 
       !((c.id && c.id === contributionId) || (!c.id && c.date === contributionId))
     );
-    const newSaved = Math.max(0, (goal.savedAmount || 0) - targetContrib.amount);
-    const isCompleted = newSaved >= (Number(goal.targetAmount) || 0);
-    const newStatus = isCompleted ? ('completed' as const) : (goal.status === 'completed' ? 'active' : goal.status);
+    const isWithdrawal = targetContrib.type === 'withdrawal';
+    const newSaved = isWithdrawal
+      ? ((goal.savedAmount || 0) + targetContrib.amount)
+      : Math.max(0, (goal.savedAmount || 0) - targetContrib.amount);
+
+    const isCompleted = (!goal.isOpenEnded && (Number(goal.targetAmount) || 0) > 0)
+      ? newSaved >= (Number(goal.targetAmount) || 0)
+      : false;
+    const newStatus = isCompleted ? ('completed' as const) : (goal.status === 'completed' && !isCompleted ? 'active' : goal.status);
 
     const updatedGoal: SavingGoal = {
       ...goal,
@@ -2760,21 +3555,40 @@ const lastSubmitRef = useRef<{
       }
     }
 
+    let pinnedNames: string[] = [];
+    try {
+      const storedPinned = localStorage.getItem('pinned_customers_names');
+      if (storedPinned) pinnedNames = JSON.parse(storedPinned);
+    } catch {}
+
     return {
       backupTimestamp: new Date().toISOString(),
       ownerEmail: settings?.email || 'unknown',
+      pinnedCustomerNames: pinnedNames,
       customers: customers.map(c => ({
         name: c.name,
         phone: c.phone,
         outstandingDue: c.outstandingDue,
-        createdAt: c.createdAt
+        accountType: c.accountType || 'standard',
+        ...(c.accountType === 'credit_card' || c.billingDay !== undefined
+          ? { billingDay: c.accountType === 'credit_card' ? (c.billingDay || 15) : c.billingDay }
+          : {}),
+        createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : (c.createdAt?.toDate ? c.createdAt.toDate().toISOString() : c.createdAt),
+        updatedAt: c.updatedAt instanceof Date ? c.updatedAt.toISOString() : (c.updatedAt?.toDate ? c.updatedAt.toDate().toISOString() : c.updatedAt),
+        isPinned: pinnedNames.includes(c.name) || !!c.isPinned
       })),
       ledgerTransactions: allTxs.map(t => ({
         customer: t.customerName,
+        customerName: t.customerName,
         type: t.type,
         amount: t.amount,
         description: t.description,
-        date: t.date
+        date: t.date instanceof Date ? t.date.toISOString() : (t.date?.toDate ? t.date.toDate().toISOString() : t.date),
+        createdAt: t.createdAt instanceof Date ? t.createdAt.toISOString() : (t.createdAt?.toDate ? t.createdAt.toDate().toISOString() : t.createdAt),
+        ...(t.isEdited ? { isEdited: true } : {}),
+        ...(t.editedAt ? { editedAt: t.editedAt instanceof Date ? t.editedAt.toISOString() : (t.editedAt?.toDate ? t.editedAt.toDate().toISOString() : t.editedAt) } : {}),
+        ...(t.promisedDate ? { promisedDate: t.promisedDate } : {}),
+        ...(Array.isArray(t.auditHistory) && t.auditHistory.length > 0 ? { auditHistory: t.auditHistory } : {})
       })),
       goals: goals.map(g => ({
         id: g.id,
@@ -2784,7 +3598,9 @@ const lastSubmitRef = useRef<{
         frequency: g.frequency,
         installmentAmount: g.installmentAmount,
         type: g.type,
+        isOpenEnded: Boolean(g.isOpenEnded),
         status: g.status,
+        customerId: g.customerId,
         customerName: g.customerName || (g.customerId ? customers.find(c => c.id === g.customerId)?.name : undefined),
         notes: g.notes,
         principalAmount: g.principalAmount,
@@ -2797,9 +3613,32 @@ const lastSubmitRef = useRef<{
           id: c.id,
           amount: c.amount,
           date: c.date,
-          note: c.note
+          note: c.note,
+          type: c.type || 'deposit'
         }))
-      }))
+      })),
+      reminders: reminders.map(r => ({
+        id: r.id,
+        customerName: r.customerName,
+        notes: r.notes,
+        dueDate: r.dueDate instanceof Date ? r.dueDate.toISOString() : (r.dueDate?.toDate ? r.dueDate.toDate().toISOString() : r.dueDate),
+        active: r.active,
+        createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : (r.createdAt?.toDate ? r.createdAt.toDate().toISOString() : r.createdAt),
+        type: r.type || 'customer',
+        goalId: r.goalId,
+        goalTitle: r.goalId ? goals.find(g => g.id === r.goalId)?.title : undefined,
+        emiDayOfMonth: r.emiDayOfMonth,
+        installmentAmount: r.installmentAmount
+      })),
+      preferences: {
+        searchBanglaInEnglish: (() => {
+          try {
+            return localStorage.getItem('search_bangla_in_english') === 'true';
+          } catch {
+            return false;
+          }
+        })()
+      }
     };
   };
 
@@ -2841,9 +3680,14 @@ const lastSubmitRef = useRef<{
     deleteGoal,
     updateGoalStatus,
     updateGoalTitle,
+    updateGoalNotes,
     editGoalContribution,
     deleteGoalContribution,
     exportBackup,
-    rebuildMonthlySummaries: () => rebuildMonthlySummaries(userId)
+    rebuildMonthlySummaries: async () => { if (userId) await rebuildMonthlySummaries(userId); },
+    archivedStatements,
+    updateStatementAutoMerge,
+    archiveCustomerExcessStatements,
+    exportArchivedStatements
   };
 }

@@ -6,30 +6,49 @@ export interface UserSettings {
   createdAt: any; // Firestore Timestamp or ISO string
   updatedAt: any;
   transactionsCount?: number;
+  autoMergeStatements?: boolean;
+  statementKeepCount?: number;
+  biometricEnabled?: boolean;
 }
 
 export interface Customer {
- id: string;
- userId: string;
- name: string;
- phone: string;
- outstandingDue: number; // calculated balance sum
- createdAt: any;
- updatedAt: any;
- isDeleted?: boolean;
- deletedAt?: any;
+  id: string;
+  userId: string;
+  name: string;
+  phone: string;
+  outstandingDue: number; // calculated balance sum
+  createdAt: any;
+  updatedAt: any;
+  isDeleted?: boolean;
+  deletedAt?: any;
+  isPinned?: boolean;
+  accountType?: 'standard' | 'credit_card';
+  billingDay?: number; // 1-31 day of month for credit card statement cycle
+}
+
+export interface TransactionAuditEntry {
+  amount: number;
+  date: any;
+  description?: string;
+  editedAt: any;
 }
 
 export interface Transaction {
- id: string;
- userId: string;
- customerId: string;
- customerName: string;
- type: 'due' | 'payment';
- amount: number;
- description: string;
- date: any;
- createdAt: any;
+  id: string;
+  userId: string;
+  customerId: string;
+  customerName: string;
+  type: 'due' | 'payment';
+  amount: number;
+  description: string;
+  date: any;
+  createdAt: any;
+  isEdited?: boolean;
+  editedAt?: any;
+  promisedDate?: string | null;
+  voiceNoteUrl?: string | null;
+  voiceDuration?: number | null;
+  auditHistory?: TransactionAuditEntry[];
 }
 
 export interface Reminder {
@@ -64,6 +83,7 @@ export interface GoalContribution {
   amount: number;
   date: string; // ISO string
   note?: string;
+  type?: 'deposit' | 'withdrawal';
 }
 
 export interface SavingGoal {
@@ -81,6 +101,7 @@ export interface SavingGoal {
   createdAt: any;
   updatedAt: any;
   type: 'savings' | 'deposit';
+  isOpenEnded?: boolean;
   principalAmount?: number;
   interestRate?: number;
   interestAmount?: number;

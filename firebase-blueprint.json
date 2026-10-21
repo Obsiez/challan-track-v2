@@ -62,6 +62,26 @@
         "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
       },
       "required": ["id", "userId", "customerId", "customerName", "active", "dueDate", "createdAt"]
+    },
+    "Goal": {
+      "title": "SavingGoal",
+      "description": "Flexible savings accounts, piggy banks, and EMI installment goals.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique goal ID" },
+        "userId": { "type": "string", "description": "User ID of the goal owner" },
+        "title": { "type": "string", "description": "Goal title or piggy bank name" },
+        "targetAmount": { "type": "number", "description": "Target amount (0 for open-ended)" },
+        "savedAmount": { "type": "number", "description": "Current saved balance" },
+        "frequency": { "type": "string", "enum": ["daily", "weekly", "monthly", "flexible"], "description": "Deposit cadence" },
+        "type": { "type": "string", "enum": ["savings", "deposit"], "description": "Goal type" },
+        "isOpenEnded": { "type": "boolean", "description": "True for open-ended flexible piggy bank" },
+        "status": { "type": "string", "enum": ["active", "completed", "cancelled"], "description": "Goal status" },
+        "contributions": { "type": "array", "description": "History of deposits and withdrawals" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last updated timestamp" }
+      },
+      "required": ["id", "userId", "title", "targetAmount", "savedAmount", "status", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -80,6 +100,10 @@
     "/users/{userId}/reminders/{reminderId}": {
       "schema": "Reminder",
       "description": "Follow-up alerts for dues"
+    },
+    "/users/{userId}/goals/{goalId}": {
+      "schema": "Goal",
+      "description": "Savings goals, piggy banks, and EMI plans"
     }
   }
 }

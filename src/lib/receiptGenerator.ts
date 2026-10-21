@@ -196,9 +196,51 @@ export interface ReceiptImageResult {
 export async function generateReceiptPng(
   customer: Customer,
   transactions: Transaction[] = [],
-  lang: Language = 'en'
+  lang: Language = 'en',
+  theme?: 'light' | 'dark'
 ): Promise<ReceiptImageResult> {
   await ensureReceiptFontsLoaded();
+
+  const isDark = theme
+    ? theme === 'dark'
+    : typeof document !== 'undefined'
+    ? document.documentElement.classList.contains('dark')
+    : true;
+
+  // Theme-adaptive receipt color palette
+  const colors = isDark
+    ? {
+        paperBg: '#111215',
+        paperBorder: '#23262E',
+        dashedLine: '#2A2D35',
+        doubleLine: '#353944',
+        textPrimary: '#FFFFFF',
+        textValue: '#F3F4F6',
+        textRowDate: '#E5E7EB',
+        textSecondary: '#D1D5DB',
+        textMuted: '#9CA3AF',
+        textSubtle: '#6B7280',
+        due: '#F43F5E',
+        paid: '#10B981',
+        cyan: '#06B6D4',
+        barcode: '#E5E7EB'
+      }
+    : {
+        paperBg: '#FFFFFF',
+        paperBorder: '#CBD5E1',
+        dashedLine: '#CBD5E1',
+        doubleLine: '#94A3B8',
+        textPrimary: '#09090B',
+        textValue: '#0F172A',
+        textRowDate: '#1E293B',
+        textSecondary: '#334155',
+        textMuted: '#64748B',
+        textSubtle: '#64748B',
+        due: '#E11D48',
+        paid: '#059669',
+        cyan: '#0891B2',
+        barcode: '#0F172A'
+      };
 
   const customerName = customer?.name?.trim() || (lang === 'bn' ? 'সম্মানিত গ্রাহক' : 'Valued Customer');
   const customerPhone = customer?.phone?.trim() || (lang === 'bn' ? 'প্রযোজ্য নয়' : 'N/A');
@@ -236,7 +278,7 @@ export async function generateReceiptPng(
   const tableHeaderHeight = 22;
   const tableSpacing = 8;
   const totalsHeight = 66;
-  const balanceHeight = 60;
+  const balanceHeight = 54;
   const barcodeHeight = 48;
   const bottomPad = 12 + toothH;
 
@@ -266,32 +308,32 @@ export async function generateReceiptPng(
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
 
-  // Deep dark authentic receipt paper
+  // Authentic thermal receipt paper (Dark or Light mode)
   ctx.save();
   drawReceiptSilhouette(ctx, width, totalHeight, 6, toothH);
-  ctx.fillStyle = '#111215'; // Deep charcoal thermal receipt background
+  ctx.fillStyle = colors.paperBg;
   ctx.fill();
-  ctx.strokeStyle = '#23262E'; // Subtle outer edge stroke
+  ctx.strokeStyle = colors.paperBorder;
   ctx.lineWidth = 1;
   ctx.stroke();
   ctx.restore();
 
   let curY = toothH + 16;
 
-  // 1. BRAND & HEADER (Clean typography matching main website for both Bangla and English)
+  // 1. BRAND & HEADER
   const brandTitle = lang === 'bn' ? 'চালান ট্র্যাক' : 'CHALLAN TRACK';
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#FFFFFF';
+  ctx.fillStyle = colors.textPrimary;
   ctx.font = fontStack(16, 'bold');
   ctx.fillText(brandTitle, width / 2, curY + 14);
 
-  ctx.fillStyle = '#9CA3AF';
+  ctx.fillStyle = colors.textMuted;
   ctx.font = fontStack(9, '500');
   const subText = lang === 'bn' ? 'লেনদেন রসিদ ও হিসাব' : 'TRANSACTION RECEIPT';
   ctx.fillText(subText, width / 2, curY + 31);
 
   curY += 46;
-  drawDashedLine(ctx, curY, padX, width - padX);
+  drawDashedLine(ctx, curY, padX, width - padX, colors.dashedLine);
   curY += 8;
 
   // 2. METADATA SECTION
@@ -302,37 +344,38 @@ export async function generateReceiptPng(
 
   ctx.textAlign = 'left';
   ctx.font = fontStack(9, '600');
-  ctx.fillStyle = '#9CA3AF';
+  ctx.fillStyle = colors.textMuted;
   ctx.fillText(`${lang === 'bn' ? 'রসিদ নং' : 'SLIP NO'}: `, padX, curY + 11);
-  ctx.fillStyle = '#F3F4F6';
+  ctx.fillStyle = colors.textValue;
+  ctx.font = `700 9px "JetBrains Mono", "Outfit", monospace`;
   ctx.fillText(slipNo, padX + 48, curY + 11);
 
   ctx.textAlign = 'right';
-  ctx.fillStyle = '#9CA3AF';
+  ctx.fillStyle = colors.textMuted;
   ctx.font = fontStack(8.5, 'normal');
   ctx.fillText(`${dateStr} ${timeStr}`, width - padX, curY + 11);
 
   const displayCustName = customerName.length > 22 ? customerName.slice(0, 20) + '..' : customerName;
   ctx.textAlign = 'left';
   ctx.font = fontStack(9, '600');
-  ctx.fillStyle = '#9CA3AF';
+  ctx.fillStyle = colors.textMuted;
   ctx.fillText(`${lang === 'bn' ? 'গ্রাহক' : 'CLIENT'}: `, padX, curY + 27);
-  ctx.fillStyle = '#FFFFFF';
+  ctx.fillStyle = colors.textPrimary;
   ctx.font = fontStack(9.5, 'bold');
   ctx.fillText(displayCustName, padX + 44, curY + 27);
 
   ctx.textAlign = 'left';
   ctx.font = fontStack(9, '600');
-  ctx.fillStyle = '#9CA3AF';
+  ctx.fillStyle = colors.textMuted;
   ctx.fillText(`${lang === 'bn' ? 'ফোন' : 'PHONE'}: `, padX, curY + 43);
-  ctx.fillStyle = '#D1D5DB';
+  ctx.fillStyle = colors.textSecondary;
   ctx.font = fontStack(9, 'normal');
   ctx.fillText(customerPhone, padX + 44, curY + 43);
 
   // Scope Note
   ctx.textAlign = 'left';
   ctx.font = fontStack(8.5, '500');
-  ctx.fillStyle = '#06B6D4';
+  ctx.fillStyle = colors.cyan;
   ctx.fillText(
     lang === 'bn' 
       ? `* সর্বশেষ ${safeFormatNumber(displayTxs.length, lang)}টি লেনদেনের বিবরণী` 
@@ -342,12 +385,10 @@ export async function generateReceiptPng(
   );
 
   curY += 68;
-  drawDashedLine(ctx, curY, padX, width - padX);
+  drawDashedLine(ctx, curY, padX, width - padX, colors.dashedLine);
   curY += 6;
 
   // 3. CARRY-FORWARD OPENING BALANCE CALCULATION
-  // periodNet = periodDues - periodPayments
-  // openingBalance = currentBalance - periodNet
   const periodDues = displayTxs
     .filter(tx => tx && tx.type === 'due')
     .reduce((sum, tx) => sum + (Number(tx.amount) || 0), 0);
@@ -362,21 +403,21 @@ export async function generateReceiptPng(
 
   // Opening Balance Row
   ctx.font = fontStack(9, '600');
-  ctx.fillStyle = '#9CA3AF';
+  ctx.fillStyle = colors.textMuted;
   ctx.textAlign = 'left';
   ctx.fillText(lang === 'bn' ? 'পূর্বের জের (Carried Fwd):' : 'Opening Balance (B/F):', padX, curY + 11);
   ctx.textAlign = 'right';
-  ctx.fillStyle = '#F3F4F6';
+  ctx.fillStyle = colors.textValue;
   ctx.font = fontStack(9.5, 'bold');
   ctx.fillText(`৳${safeFormatNumber(openingBalance, lang)}`, width - padX, curY + 11);
 
   curY += 24;
-  drawDashedLine(ctx, curY, padX, width - padX);
+  drawDashedLine(ctx, curY, padX, width - padX, colors.dashedLine);
   curY += 6;
 
-  // 4. TABLE HEADER
+  // 4. TABLE HEADER (no background card)
   ctx.font = fontStack(8.5, 'bold');
-  ctx.fillStyle = '#9CA3AF';
+  ctx.fillStyle = colors.textMuted;
 
   ctx.textAlign = 'left';
   ctx.fillText(lang === 'bn' ? 'তারিখ ও বিবরণ' : 'DATE & DETAILS', padX, curY + 10);
@@ -388,13 +429,13 @@ export async function generateReceiptPng(
   ctx.fillText(lang === 'bn' ? 'টাকা' : 'AMOUNT', width - padX, curY + 10);
 
   curY += 22;
-  drawDashedLine(ctx, curY, padX, width - padX);
+  drawDashedLine(ctx, curY, padX, width - padX, colors.dashedLine);
   curY += 6;
 
   // 5. TRANSACTION ROWS
   if (displayTxs.length === 0) {
     ctx.textAlign = 'center';
-    ctx.fillStyle = '#6B7280';
+    ctx.fillStyle = colors.textSubtle;
     ctx.font = fontStack(9, 'normal');
     ctx.fillText(lang === 'bn' ? 'কোন লেনদেন নেই' : 'No transactions recorded', width / 2, curY + 18);
     curY += 36;
@@ -412,17 +453,17 @@ export async function generateReceiptPng(
 
       // Date, Type, Amount
       ctx.textAlign = 'left';
-      ctx.fillStyle = '#E5E7EB';
+      ctx.fillStyle = colors.textRowDate;
       ctx.font = fontStack(9, 'normal');
       ctx.fillText(`${rowDateStr} ${rowTimeStr}`, padX, curY + 12);
 
       ctx.textAlign = 'center';
-      ctx.fillStyle = isTxDue ? '#F43F5E' : '#10B981';
+      ctx.fillStyle = isTxDue ? colors.due : colors.paid;
       ctx.font = fontStack(8.5, 'bold');
       ctx.fillText(`[${typeLabel}]`, padX + contentWidth * 0.54, curY + 12);
 
       ctx.textAlign = 'right';
-      ctx.fillStyle = isTxDue ? '#F43F5E' : '#10B981';
+      ctx.fillStyle = isTxDue ? colors.due : colors.paid;
       ctx.font = fontStack(10, 'bold');
       ctx.fillText(amountStr, width - padX, curY + 12);
 
@@ -432,10 +473,10 @@ export async function generateReceiptPng(
         const truncatedDesc = descText.length > 32 ? descText.slice(0, 30) + '..' : descText;
 
         // Draw Lucide 'corner-down-right' icon
-        drawCornerDownRight(ctx, padX + 5, curY + 18, 9, '#9CA3AF');
+        drawCornerDownRight(ctx, padX + 5, curY + 18, 9, colors.textMuted);
 
         ctx.textAlign = 'left';
-        ctx.fillStyle = '#9CA3AF';
+        ctx.fillStyle = colors.textMuted;
         ctx.font = fontStack(8.5, 'normal');
         ctx.fillText(truncatedDesc, padX + 17, curY + 27);
       }
@@ -445,53 +486,53 @@ export async function generateReceiptPng(
   }
 
   curY += 6;
-  drawDashedLine(ctx, curY, padX, width - padX);
+  drawDashedLine(ctx, curY, padX, width - padX, colors.dashedLine);
   curY += 8;
 
   // 6. PERIOD TOTALS
   ctx.font = fontStack(9, 'normal');
-  ctx.fillStyle = '#9CA3AF';
+  ctx.fillStyle = colors.textMuted;
   ctx.textAlign = 'left';
   ctx.fillText(lang === 'bn' ? 'এই সময়ের মোট বকেয়া:' : 'Period Total Dues:', padX, curY + 11);
   ctx.textAlign = 'right';
-  ctx.fillStyle = '#F43F5E';
+  ctx.fillStyle = colors.due;
   ctx.font = fontStack(9.5, 'bold');
   ctx.fillText(`+৳${safeFormatNumber(periodDues, lang)}`, width - padX, curY + 11);
 
   ctx.font = fontStack(9, 'normal');
-  ctx.fillStyle = '#9CA3AF';
+  ctx.fillStyle = colors.textMuted;
   ctx.textAlign = 'left';
   ctx.fillText(lang === 'bn' ? 'এই সময়ের মোট জমা:' : 'Period Total Paid:', padX, curY + 26);
   ctx.textAlign = 'right';
-  ctx.fillStyle = '#10B981';
+  ctx.fillStyle = colors.paid;
   ctx.font = fontStack(9.5, 'bold');
   ctx.fillText(`-৳${safeFormatNumber(periodPayments, lang)}`, width - padX, curY + 26);
 
   ctx.font = fontStack(9, '600');
-  ctx.fillStyle = '#D1D5DB';
+  ctx.fillStyle = colors.textSecondary;
   ctx.textAlign = 'left';
   ctx.fillText(lang === 'bn' ? 'এই সময়ের নিট পরিবর্তন:' : 'Period Net Change:', padX, curY + 41);
   ctx.textAlign = 'right';
-  ctx.fillStyle = netPeriodMovement >= 0 ? '#F43F5E' : '#10B981';
+  ctx.fillStyle = netPeriodMovement >= 0 ? colors.due : colors.paid;
   ctx.font = fontStack(9.5, 'bold');
   ctx.fillText(`${netPeriodMovement >= 0 ? '+' : '-'}৳${safeFormatNumber(Math.abs(netPeriodMovement), lang)}`, width - padX, curY + 41);
 
   curY += 52;
-  drawDoubleLine(ctx, curY, padX, width - padX);
+  drawDoubleLine(ctx, curY, padX, width - padX, colors.doubleLine);
   curY += 10;
 
-  // 7. CURRENT BALANCE
+  // 7. CURRENT BALANCE (no background card)
   const isSettled = outstandingDue === 0;
   const isDue = outstandingDue > 0;
 
-  let statusColor = '#F43F5E';
+  let statusColor = colors.due;
   let statusText = lang === 'bn' ? 'বকেয়া রয়েছে' : 'OUTSTANDING DUE';
 
   if (isSettled) {
-    statusColor = '#10B981';
+    statusColor = colors.paid;
     statusText = lang === 'bn' ? 'সম্পূর্ণ পরিশোধিত' : 'FULLY SETTLED';
   } else if (!isDue) {
-    statusColor = '#06B6D4';
+    statusColor = colors.cyan;
     statusText = lang === 'bn' ? 'অগ্রিম জমা' : 'CREDIT SURPLUS';
   }
 
@@ -500,23 +541,23 @@ export async function generateReceiptPng(
     : `${outstandingDue < 0 ? '-' : ''}৳ ${safeFormatNumber(Math.abs(outstandingDue), lang)}`;
 
   ctx.textAlign = 'left';
-  ctx.font = fontStack(9.5, 'bold');
-  ctx.fillStyle = '#9CA3AF';
-  ctx.fillText(lang === 'bn' ? 'সর্বশেষ মোট স্থিতি:' : 'CURRENT BALANCE:', padX, curY + 12);
+  ctx.font = fontStack(9, 'bold');
+  ctx.fillStyle = colors.textMuted;
+  ctx.fillText(lang === 'bn' ? 'সর্বশেষ মোট স্থিতি:' : 'CURRENT BALANCE:', padX, curY + 11);
 
   ctx.textAlign = 'right';
   ctx.font = fontStack(8.5, 'bold');
   ctx.fillStyle = statusColor;
-  ctx.fillText(`[ ${statusText} ]`, width - padX, curY + 12);
+  ctx.fillText(`[ ${statusText} ]`, width - padX, curY + 11);
 
   // Large crisp balance
   ctx.textAlign = 'center';
-  ctx.font = fontStack(22, 'bold');
+  ctx.font = fontStack(22, '800');
   ctx.fillStyle = statusColor;
-  ctx.fillText(balanceDisplay, width / 2, curY + 38);
+  ctx.fillText(balanceDisplay, width / 2, curY + 36);
 
-  curY += 56;
-  drawDashedLine(ctx, curY, padX, width - padX);
+  curY += 48;
+  drawDashedLine(ctx, curY, padX, width - padX, colors.dashedLine);
   curY += 8;
 
   // 8. BARCODE STRIP (No "Thank you" footer text as requested)
@@ -527,14 +568,14 @@ export async function generateReceiptPng(
   const barTotalW = barPattern.reduce((sum, w) => sum + w + 1.2, 0);
   let barCurX = (width - barTotalW) / 2;
 
-  ctx.fillStyle = '#E5E7EB';
+  ctx.fillStyle = colors.barcode;
   barPattern.forEach((w) => {
     ctx.fillRect(barCurX, barcodeY, w, barcodeH);
     barCurX += w + 1.2;
   });
 
-  ctx.font = fontStack(8, '600');
-  ctx.fillStyle = '#6B7280';
+  ctx.font = `600 8px "JetBrains Mono", "Outfit", monospace`;
+  ctx.fillStyle = colors.textSubtle;
   ctx.textAlign = 'center';
   ctx.fillText(`* ${slipNo} *`, width / 2, barcodeY + barcodeH + 12);
 

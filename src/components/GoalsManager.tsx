@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Customer, SavingGoal, GoalContribution, Reminder } from '../types';
 import { 
-  Target, Calendar, Plus, Users, Trash2, CheckCircle2, ChevronRight, ChevronDown, CreditCard, X, AlertCircle, ReceiptText, AlertTriangle, PiggyBank, CalendarClock, RotateCcw, Goal, Percent, Calculator, Bell, BellRing, Info, Pencil, Check, User 
+  Target, Calendar, Plus, Users, Trash2, CheckCircle2, ChevronRight, ChevronDown, CreditCard, X, AlertCircle, ReceiptText, AlertTriangle, PiggyBank, CalendarClock, RotateCcw, Goal, Percent, Calculator, Bell, BellRing, Info, Pencil, Check, User, Wallet, ArrowDownLeft, ArrowUpRight, Minus, Sprout 
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { triggerHaptic } from '../lib/haptics';
@@ -24,17 +24,20 @@ interface GoalsManagerProps {
     principalAmount?: number,
     interestRate?: number,
     interestAmount?: number,
-    tenure?: number
+    tenure?: number,
+    isOpenEnded?: boolean
   ) => Promise<string | null>;
   addGoalContribution: (
     goalId: string,
     amount: number,
     note?: string,
-    recordAsCustomerTransaction?: boolean
+    recordAsCustomerTransaction?: boolean,
+    contributionType?: 'deposit' | 'withdrawal'
   ) => Promise<SavingGoal | null | void>;
   deleteGoal: (goalId: string) => Promise<void>;
   updateGoalStatus: (goalId: string, status: 'active' | 'completed' | 'cancelled') => Promise<void>;
   updateGoalTitle?: (goalId: string, newTitle: string) => Promise<void>;
+  updateGoalNotes?: (goalId: string, newNotes: string) => Promise<void>;
   editGoalContribution?: (goalId: string, contributionId: string, newAmount: number, newNote: string) => Promise<void>;
   deleteGoalContribution?: (goalId: string, contributionId: string) => Promise<void>;
   reminders?: Reminder[];
@@ -72,6 +75,7 @@ export default function GoalsManager({
   deleteGoal,
   updateGoalStatus,
   updateGoalTitle,
+  updateGoalNotes,
   editGoalContribution,
   deleteGoalContribution,
   reminders = [],
@@ -88,9 +92,10 @@ export default function GoalsManager({
 
   // Create Goal Modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [isOpenEndedSavings, setIsOpenEndedSavings] = useState<boolean>(false);
   const [goalTitle, setGoalTitle] = useState('');
   const [targetAmount, setTargetAmount] = useState('');
-  const [goalType, setGoalType] = useState<'savings' | 'deposit'>('deposit'); // Default to EMI as it's used most often
+  const [goalType, setGoalType] = useState<'savings' | 'deposit'>('deposit');
   const [frequency, setFrequency] = useState<'daily' | 'weekly' | 'monthly' | 'flexible'>('monthly');
   const [installmentAmount, setInstallmentAmount] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
@@ -106,6 +111,7 @@ export default function GoalsManager({
   // Selected Goal Details Modal state
   const [selectedGoal, setSelectedGoal] = useState<SavingGoal | null>(null);
   const [showInstallmentForm, setShowInstallmentForm] = useState(false);
+  const [contributionActionType, setContributionActionType] = useState<'deposit' | 'withdrawal'>('deposit');
   const [isEmiBreakdownOpen, setIsEmiBreakdownOpen] = useState(false);
   const [installmentInput, setInstallmentInput] = useState('');
   const [installmentNote, setInstallmentNote] = useState('');
@@ -127,6 +133,37 @@ export default function GoalsManager({
   const [editedGoalTitle, setEditedGoalTitle] = useState('');
   const [isSavingGoalTitle, setIsSavingGoalTitle] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const installmentInputRef = useRef<HTMLInputElement>(null);
+  const createGoalScrollRef = useRef<HTMLDivElement>(null);
+
+  const centerNativeInput = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const input = e.currentTarget;
+    const container = createGoalScrollRef.current;
+    if (!container || !input) return;
+
+    const scrollIntoCenter = () => {
+      if (!document.body.contains(input)) return;
+      const containerRect = container.getBoundingClientRect();
+      const inputRect = input.getBoundingClientRect();
+      const vvHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+      const visibleBottom = Math.min(containerRect.bottom, vvHeight);
+      const visibleHeight = Math.max(120, visibleBottom - containerRect.top);
+      const visibleCenter = containerRect.top + visibleHeight / 2;
+      const inputCenter = inputRect.top + inputRect.height / 2;
+      const deltaY = inputCenter - visibleCenter;
+      if (Math.abs(deltaY) > 6) {
+        container.scrollBy({ top: deltaY, behavior: 'smooth' });
+      }
+    };
+
+    requestAnimationFrame(scrollIntoCenter);
+    setTimeout(scrollIntoCenter, 280);
+  };
+
+  // Goal Description / Notes Editing inside Goal Detail Popup
+  const [isEditingGoalNotes, setIsEditingGoalNotes] = useState(false);
+  const [editedGoalNotes, setEditedGoalNotes] = useState('');
+  const [isSavingGoalNotes, setIsSavingGoalNotes] = useState(false);
 
   // Contribution Ledger Edit / Delete
   const [editingContribution, setEditingContribution] = useState<GoalContribution | null>(null);
@@ -155,12 +192,14 @@ export default function GoalsManager({
 
   const openGoalDetail = (goal: SavingGoal) => {
     triggerHaptic('single');
+    setIsEditingGoalNotes(false);
     setSelectedGoal({ ...goal });
     pushModalHistory('goalDetail');
   };
 
   const closeGoalDetail = () => {
     setIsEditingGoalTitle(false);
+    setIsEditingGoalNotes(false);
     setEditingContribution(null);
     setDeletingContribution(null);
     setEmiReminderGoal(null);
@@ -325,6 +364,20 @@ export default function GoalsManager({
     }
   }, [goals]);
 
+  // Automatically place cursor in amount input when Add Contribution / Deposit / Withdraw is pressed
+  useEffect(() => {
+    if (showInstallmentForm) {
+      const focusInput = () => {
+        if (installmentInputRef.current) {
+          installmentInputRef.current.focus();
+        }
+      };
+      focusInput();
+      const rafId = requestAnimationFrame(focusInput);
+      return () => cancelAnimationFrame(rafId);
+    }
+  }, [showInstallmentForm, contributionActionType]);
+
   const handleSaveGoalTitle = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!selectedGoal || !updateGoalTitle) return;
@@ -345,6 +398,25 @@ export default function GoalsManager({
       toast.error(lang === 'bn' ? 'শিরোনাম আপডেট করতে ব্যর্থ হয়েছে' : 'Failed to update goal title');
     } finally {
       setIsSavingGoalTitle(false);
+    }
+  };
+
+  const handleSaveGoalNotes = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!selectedGoal || !updateGoalNotes) return;
+    const trimmed = editedGoalNotes.trim();
+    setIsSavingGoalNotes(true);
+    try {
+      await updateGoalNotes(selectedGoal.id, trimmed);
+      setSelectedGoal(prev => prev ? { ...prev, notes: trimmed || undefined } : null);
+      setIsEditingGoalNotes(false);
+      triggerHaptic('single');
+      toast.success(lang === 'bn' ? 'নোট সংরক্ষণ করা হয়েছে' : 'Notes updated successfully');
+    } catch (err) {
+      console.error(err);
+      toast.error(lang === 'bn' ? 'নোট আপডেট করতে ব্যর্থ হয়েছে' : 'Failed to update notes');
+    } finally {
+      setIsSavingGoalNotes(false);
     }
   };
 
@@ -502,7 +574,7 @@ export default function GoalsManager({
       let interestAmt = 0;
       if (hasInterest) {
         const r = parseFloat(interestRate) || 0;
-        const years = frequency === 'monthly' ? N / 12 : frequency === 'weekly' ? N / 52 : N / 365;
+        const years = frequency === 'monthly' ? N / 12 : frequency === 'weekly' ? N / 52 : N / 360;
         interestAmt = Math.round(P * (r / 100) * years);
       }
       const totalPayable = P + interestAmt;
@@ -520,7 +592,7 @@ export default function GoalsManager({
     let interestAmt = 0;
     if (hasInterest) {
       const r = parseFloat(interestRate) || 0;
-      const years = frequency === 'monthly' ? N / 12 : frequency === 'weekly' ? N / 52 : N / 365;
+      const years = frequency === 'monthly' ? N / 12 : frequency === 'weekly' ? N / 52 : N / 360;
       interestAmt = Math.round(P * (r / 100) * years);
     }
     const total = P + interestAmt;
@@ -565,7 +637,7 @@ export default function GoalsManager({
         : (lang === 'bn' ? 'দিন' : 'Days');
 
     const cleanNotes = selectedGoal.notes 
-      ? selectedGoal.notes.replace(/\s*•?\s*EMI:\s*\d+.*$/i, '').trim() 
+      ? selectedGoal.notes.replace(/\s*•?\s*EMI:\s*\d+.*$/i, '').replace(/^EMI:\s*\d+.*$/i, '').trim() 
       : '';
 
     return {
@@ -578,6 +650,15 @@ export default function GoalsManager({
     };
   }, [selectedGoal, lang]);
 
+  // Clean user-entered notes for selectedGoal (empty if user didn't fill it)
+  const cleanSelectedGoalNotes = React.useMemo(() => {
+    if (!selectedGoal?.notes) return '';
+    return selectedGoal.notes
+      .replace(/\s*•?\s*EMI:\s*\d+.*$/i, '')
+      .replace(/^EMI:\s*\d+.*$/i, '')
+      .trim();
+  }, [selectedGoal?.notes]);
+
   const handleCreateGoal = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
@@ -588,17 +669,21 @@ export default function GoalsManager({
       return;
     }
 
-    const principalVal = parseAmount(targetAmount);
-    if (!principalVal || principalVal <= 0) {
+    const isPiggyBank = goalType === 'savings' && isOpenEndedSavings;
+    const effectiveGoalType = goalType;
+    const effectiveIsOpenEnded = isPiggyBank;
+
+    const principalVal = isPiggyBank ? 0 : parseAmount(targetAmount);
+    if (!isPiggyBank && (!principalVal || principalVal <= 0)) {
       setFormError(lang === 'bn' ? 'টার্গেট পরিমাণ সঠিক নয়' : 'Please enter a valid target amount');
       return;
     }
 
     // Determine target amount (with interest if applicable)
-    let finalTargetVal = principalVal;
-    let finalNote = notes.trim();
+    let finalTargetVal = isPiggyBank ? 0 : (principalVal || 0);
+    const finalNote = notes.trim();
 
-    if (goalType === 'deposit' && frequency !== 'flexible') {
+    if (effectiveGoalType === 'deposit' && frequency !== 'flexible') {
       const N = parseInt(tenure) || 0;
       if (N <= 0) {
         setFormError(lang === 'bn' ? 'কিস্তির মেয়াদ সঠিক নয়' : 'Please enter a valid tenure');
@@ -606,25 +691,18 @@ export default function GoalsManager({
       }
       if (hasInterest) {
         const r = parseFloat(interestRate) || 0;
-        const years = frequency === 'monthly' ? N / 12 : frequency === 'weekly' ? N / 52 : N / 365;
+        const years = frequency === 'monthly' ? N / 12 : frequency === 'weekly' ? N / 52 : N / 360;
         const interestAmt = Math.round(principalVal * (r / 100) * years);
         finalTargetVal = principalVal + interestAmt;
-        const tenureUnit = frequency === 'monthly' 
-          ? (lang === 'bn' ? 'মাস' : 'Months') 
-          : frequency === 'weekly' 
-            ? (lang === 'bn' ? 'সপ্তাহ' : 'Weeks') 
-            : (lang === 'bn' ? 'দিন' : 'Days');
-        const emiSpec = `EMI: ${N} ${tenureUnit} | Principal: ৳${formatNumber(principalVal, lang)} | Fee: ৳${formatNumber(interestAmt, lang)} (${interestRate}%)`;
-        finalNote = finalNote ? `${finalNote} • ${emiSpec}` : emiSpec;
       }
     }
 
     const instVal = installmentAmount ? parseAmount(installmentAmount) : undefined;
-    if (instVal !== undefined && instVal <= 0) {
+    if (!isPiggyBank && instVal !== undefined && instVal <= 0) {
       setFormError(lang === 'bn' ? 'কিস্তির পরিমাণ সঠিক নয়' : 'Please enter a valid installment amount');
       return;
     }
-    if (instVal !== undefined && instVal > finalTargetVal) {
+    if (!isPiggyBank && instVal !== undefined && finalTargetVal > 0 && instVal > finalTargetVal) {
       setFormError(lang === 'bn' ? 'কিস্তির পরিমাণ মোট লক্ষ্যের চেয়ে বেশি হতে পারে না' : 'Installment cannot be greater than target amount');
       return;
     }
@@ -633,8 +711,8 @@ export default function GoalsManager({
 
     const linkedCust = customers.find(c => c.id === selectedCustomerId);
     const tenureNum = parseInt(tenure) || 0;
-    const interestAmt = (goalType === 'deposit' && hasInterest)
-      ? Math.round(principalVal * ((parseFloat(interestRate) || 0) / 100) * (frequency === 'monthly' ? tenureNum / 12 : frequency === 'weekly' ? tenureNum / 52 : tenureNum / 365))
+    const interestAmt = (effectiveGoalType === 'deposit' && hasInterest)
+      ? Math.round(principalVal * ((parseFloat(interestRate) || 0) / 100) * (frequency === 'monthly' ? tenureNum / 12 : frequency === 'weekly' ? tenureNum / 52 : tenureNum / 360))
       : 0;
 
     try {
@@ -642,16 +720,17 @@ export default function GoalsManager({
         createGoal(
           goalTitle.trim(),
           finalTargetVal,
-          frequency,
-          instVal,
-          goalType,
+          isPiggyBank ? 'flexible' : frequency,
+          isPiggyBank ? undefined : instVal,
+          effectiveGoalType,
           selectedCustomerId || undefined,
           linkedCust?.name,
           finalNote || undefined,
-          goalType === 'deposit' ? principalVal : undefined,
-          goalType === 'deposit' && hasInterest ? parseFloat(interestRate) : undefined,
-          goalType === 'deposit' && hasInterest ? interestAmt : 0,
-          goalType === 'deposit' && frequency !== 'flexible' ? tenureNum : undefined
+          effectiveGoalType === 'deposit' ? principalVal : undefined,
+          effectiveGoalType === 'deposit' && hasInterest ? parseFloat(interestRate) : undefined,
+          effectiveGoalType === 'deposit' && hasInterest ? interestAmt : 0,
+          effectiveGoalType === 'deposit' && frequency !== 'flexible' ? tenureNum : undefined,
+          effectiveIsOpenEnded
         ),
         new Promise(resolve => setTimeout(resolve, 600))
       ]);
@@ -659,6 +738,7 @@ export default function GoalsManager({
       if (res) {
         setGoalTitle('');
         setTargetAmount('');
+        setIsOpenEndedSavings(false);
         setGoalType('deposit');
         setFrequency('monthly');
         setInstallmentAmount('');
@@ -668,7 +748,11 @@ export default function GoalsManager({
         setSelectedCustomerId('');
         setNotes('');
         closeCreateGoalModal();
-        toast.success(lang === 'bn' ? 'নতুন লক্ষ্য সফলভাবে তৈরি হয়েছে' : 'Goal created successfully');
+        toast.success(
+          isPiggyBank 
+            ? (lang === 'bn' ? 'উন্মুক্ত সঞ্চয় সফলভাবে তৈরি হয়েছে' : 'Flexible Savings created successfully')
+            : (lang === 'bn' ? 'নতুন লক্ষ্য সফলভাবে তৈরি হয়েছে' : 'Goal created successfully')
+        );
       }
     } catch (err) {
       setFormError(lang === 'bn' ? 'লক্ষ্য তৈরি করা যায়নি' : 'Failed to create goal');
@@ -685,18 +769,38 @@ export default function GoalsManager({
     const amt = parseAmount(installmentInput);
     if (!amt || amt <= 0) return;
 
+    if (contributionActionType === 'withdrawal') {
+      const curBalance = Number(selectedGoal.savedAmount) || 0;
+      if (amt > curBalance) {
+        toast.error(
+          lang === 'bn' 
+            ? `উত্তোলনের পরিমাণ বর্তমান জমার (৳${formatNumber(curBalance, 'bn')}) চেয়ে বেশি হতে পারে না` 
+            : `Withdrawal amount cannot exceed current balance (৳${formatNumber(curBalance, 'en')})`
+        );
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     try {
       const [updated] = await Promise.all([
-        addGoalContribution(selectedGoal.id, amt, installmentNote, syncToLedger),
+        addGoalContribution(selectedGoal.id, amt, installmentNote, syncToLedger, contributionActionType),
         new Promise(resolve => setTimeout(resolve, 600))
       ]);
       
-      const newSavedAmount = (Number(selectedGoal.savedAmount) || 0) + amt;
-      const isCompleted = newSavedAmount >= (Number(selectedGoal.targetAmount) || 0);
+      let newSavedAmount = Number(selectedGoal.savedAmount) || 0;
+      if (contributionActionType === 'withdrawal') {
+        newSavedAmount = Math.max(0, newSavedAmount - amt);
+      } else {
+        newSavedAmount = newSavedAmount + amt;
+      }
+
+      const isCompleted = (!selectedGoal.isOpenEnded && (Number(selectedGoal.targetAmount) || 0) > 0)
+        ? newSavedAmount >= (Number(selectedGoal.targetAmount) || 0)
+        : false;
       const newStatus = isCompleted ? 'completed' : selectedGoal.status;
 
-      const fallbackUpdated: SavingGoal = updated || {
+      const fallbackUpdated: SavingGoal = (updated as SavingGoal) || {
         ...selectedGoal,
         savedAmount: newSavedAmount,
         status: newStatus,
@@ -706,7 +810,8 @@ export default function GoalsManager({
             id: 'temp-' + Date.now(),
             amount: amt,
             date: new Date().toISOString(),
-            note: installmentNote.trim()
+            note: installmentNote.trim(),
+            type: contributionActionType
           }
         ]
       };
@@ -716,14 +821,16 @@ export default function GoalsManager({
       setInstallmentNote('');
       setShowInstallmentForm(false);
       
-      if (isCompleted) {
-        toast.success(lang === 'bn' ? 'অভিনন্দন! লক্ষ্য সম্পূর্ণ অর্জিত হয়েছে 🎉' : 'Congratulations! Goal fully achieved 🎉');
+      if (contributionActionType === 'withdrawal') {
+        toast.success(lang === 'bn' ? 'টাকা সফলভাবে উত্তোলন করা হয়েছে' : 'Withdrawal recorded successfully');
+      } else if (isCompleted) {
+        toast.success(lang === 'bn' ? 'অভিনন্দন! লক্ষ্য সম্পূর্ণ অর্জিত হয়েছে' : 'Congratulations! Goal fully achieved');
       } else {
-        toast.success(lang === 'bn' ? 'কিস্তি সফলভাবে জমা হয়েছে' : 'Contribution recorded successfully');
+        toast.success(lang === 'bn' ? 'টাকা সফলভাবে জমা হয়েছে' : 'Contribution recorded successfully');
       }
     } catch (err) {
-      console.warn("Failed to record installment", err);
-      toast.error(lang === 'bn' ? 'কিস্তি জমা দেওয়া সম্ভব হয়নি' : 'Failed to record contribution');
+      console.warn("Failed to record contribution", err);
+      toast.error(lang === 'bn' ? 'লেনদেন সম্পন্ন করা সম্ভব হয়নি' : 'Failed to record transaction');
     } finally {
       setIsSubmitting(false);
     }
@@ -734,45 +841,45 @@ export default function GoalsManager({
   };
 
   return (
-    <div className="space-y-6 no-select">
-      {/* 3 & 4. HEADER SECTION (MATCHING CLIENTS HEADER & BUTTON EXACTLY) */}
+    <div className="space-y-5 no-select">
+      {/* HEADER SECTION */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <h2 className="text-xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
-          <Goal className="w-5 h-5 text-emerald-500" />
+        <h2 className="text-xl font-bold text-black dark:text-white flex items-center gap-2">
+          <Goal className="w-5 h-5 stroke-[2]" />
           <span>{t.goalsHeaderTitle}</span>
-          <span className="text-sm font-semibold text-zinc-400 dark:text-zinc-500">
+          <span className="text-xs font-semibold text-[#757575]">
             ({formatNumber(goals.length, lang)})
           </span>
         </h2>
 
         <button
           onClick={openCreateGoalModal}
-          className="px-5 py-3 bg-emerald-600 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-md shadow-emerald-100 dark:shadow-none hover:bg-emerald-700 transition-colors cursor-pointer text-base shrink-0"
+          className="px-4 py-2.5 bg-black hover:bg-[#262626] dark:bg-white dark:hover:bg-[#E2E2E2] text-white dark:text-black font-bold rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer text-xs shrink-0"
           id="create_goal_btn"
         >
-          <Plus className="w-5 h-5 stroke-[2.5]" />
+          <Plus className="w-4 h-4 stroke-[2.5]" />
           {t.createGoal}
         </button>
       </div>
 
-      {/* 2. FILTER TABS (FILLS OUT SCREEN LEFT TO RIGHT) */}
-      <div className="flex w-full bg-zinc-100 dark:bg-zinc-900 p-1.5 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+      {/* FILTER TABS */}
+      <div className="flex w-full bg-slate-50 dark:bg-slate-900/60 p-1 rounded-lg border border-slate-200 dark:border-slate-800/80">
         <button
           onClick={() => { triggerHaptic('single'); setFilterTab('active'); }}
-          className={`flex-1 py-3 text-center text-sm font-black rounded-xl transition-all cursor-pointer ${
+          className={`flex-1 py-2 text-center text-xs font-bold rounded-md transition-all cursor-pointer ${
             filterTab === 'active'
-              ? 'bg-white dark:bg-zinc-800 text-emerald-600 dark:text-emerald-400 shadow-sm'
-              : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+              ? 'bg-black text-white dark:bg-white dark:text-black shadow-xs'
+              : 'text-[#757575] hover:text-black dark:hover:text-white'
           }`}
         >
           {lang === 'bn' ? 'চলমান লক্ষ্যসমূহ' : 'Active Goals'} ({activeGoals.length})
         </button>
         <button
           onClick={() => { triggerHaptic('single'); setFilterTab('history'); }}
-          className={`flex-1 py-3 text-center text-sm font-black rounded-xl transition-all cursor-pointer ${
+          className={`flex-1 py-2 text-center text-xs font-bold rounded-md transition-all cursor-pointer ${
             filterTab === 'history'
-              ? 'bg-white dark:bg-zinc-800 text-emerald-600 dark:text-emerald-400 shadow-sm'
-              : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+              ? 'bg-black text-white dark:bg-white dark:text-black shadow-xs'
+              : 'text-[#757575] hover:text-black dark:hover:text-white'
           }`}
         >
           {lang === 'bn' ? 'আর্কাইভ খতিয়ান' : 'History'} ({historyGoals.length})
@@ -781,13 +888,13 @@ export default function GoalsManager({
 
       {/* GOALS GRID */}
       {visibleGoals.length === 0 ? (
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-12 text-center text-zinc-400 dark:text-zinc-500 flex flex-col items-center justify-center gap-3 animate-fade-in">
-          <Target className="w-12 h-12 stroke-[1.5] text-zinc-300 dark:text-zinc-600" />
-          <p className="font-bold text-base text-zinc-700 dark:text-zinc-300">{t.noGoals}</p>
+        <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 rounded-xl p-10 text-center text-[#757575] flex flex-col items-center justify-center gap-2.5">
+          <Target className="w-10 h-10 stroke-[1.5]" />
+          <p className="font-bold text-sm text-black dark:text-white">{t.noGoals}</p>
           <p className="text-xs max-w-xs">{lang === 'bn' ? 'ইএমআই বা সঞ্চয় লক্ষ্য তৈরি করতে উপরের বাটনে চাপ দিন।' : 'Create EMI installment plans or savings targets using the button above.'}</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
           {visibleGoals.map(goal => {
             const percent = Math.min(100, Math.round(((goal.savedAmount || 0) / (goal.targetAmount || 1)) * 100));
             const isSavings = goal.type === 'savings';
@@ -804,18 +911,18 @@ export default function GoalsManager({
                     openGoalDetail(goal);
                   }
                 }}
-                className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/50 dark:hover:border-emerald-500/30 p-5 rounded-3xl shadow-sm hover:shadow-md transition-all cursor-pointer relative group flex flex-col justify-between min-h-[180px] touch-manipulation select-none active:scale-[0.99]"
+                className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 hover:bg-slate-50 dark:hover:bg-[#1F1F1F] p-4.5 rounded-xl transition-colors cursor-pointer relative group flex flex-col justify-between min-h-[160px] touch-manipulation select-none active:scale-[0.99]"
               >
                 <div>
-                  {/* Title & Badge (Consistent Distinct Icons) */}
+                  {/* Title & Badge */}
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <h3 className="text-[17px] font-black text-zinc-850 dark:text-white truncate leading-snug">
+                      <h3 className="text-base font-bold text-black dark:text-white truncate">
                         {goal.title}
                       </h3>
                       {goal.customerName && (
-                        <p className="text-xs text-zinc-450 dark:text-zinc-450 font-bold flex items-center gap-1 mt-1 uppercase tracking-wider">
-                          <Users className="w-3.5 h-3.5 text-emerald-500" />
+                        <p className="text-xs text-[#757575] font-semibold flex items-center gap-1 mt-0.5">
+                          <Users className="w-3.5 h-3.5 text-black dark:text-white" />
                           {goal.customerName}
                         </p>
                       )}
@@ -828,10 +935,10 @@ export default function GoalsManager({
                             e.stopPropagation();
                             openEmiReminderModal(goal);
                           }}
-                          className={`p-1.5 rounded-full transition-colors cursor-pointer ${
+                          className={`p-1.5 rounded-md transition-colors cursor-pointer ${
                             reminders.some(r => r.goalId === goal.id && r.active)
-                              ? 'bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400'
-                              : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                              ? 'bg-black text-white dark:bg-white dark:text-black'
+                              : 'text-[#757575] hover:text-black dark:hover:text-white'
                           }`}
                           title={
                             reminders.some(r => r.goalId === goal.id && r.active)
@@ -840,30 +947,34 @@ export default function GoalsManager({
                           }
                         >
                           {reminders.some(r => r.goalId === goal.id && r.active) ? (
-                            <BellRing className="w-4 h-4 text-amber-500" />
+                            <BellRing className="w-3.5 h-3.5" />
                           ) : (
-                            <Bell className="w-4 h-4" />
+                            <Bell className="w-3.5 h-3.5" />
                           )}
                         </button>
                       )}
-                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase shrink-0 flex items-center gap-1 ${
-                        isSavings 
-                          ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/20 dark:text-emerald-400' 
-                          : 'bg-rose-50 text-[#e0385e] dark:bg-rose-950/20 dark:text-rose-400'
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 flex items-center gap-1 border ${
+                        goal.isOpenEnded
+                          ? 'bg-[#E6F6F4] border-[#0D9488]/30 text-[#0F766E] dark:bg-[#0D9488]/20 dark:text-[#2DD4BF]'
+                          : isSavings
+                            ? 'bg-[#E6F7EF] border-[#059669]/30 text-[#059669] dark:bg-[#059669]/20 dark:text-[#38D388]' 
+                            : 'bg-[#FFECEB] border-[#DC2626]/30 text-[#DC2626] dark:bg-[#DC2626]/20 dark:text-[#FF6B5B]'
                       }`}>
-                        {isSavings ? (
-                          <PiggyBank className="w-3.5 h-3.5" />
+                        {goal.isOpenEnded ? (
+                          <Sprout className="w-3 h-3" />
+                        ) : isSavings ? (
+                          <Target className="w-3 h-3" />
                         ) : (
-                          <CalendarClock className="w-3.5 h-3.5" />
+                          <CalendarClock className="w-3 h-3" />
                         )}
-                        {isSavings ? t.savings : t.deposit}
+                        {goal.isOpenEnded ? (lang === 'bn' ? 'উন্মুক্ত সঞ্চয়' : 'Flexible Savings') : (isSavings ? t.savings : t.deposit)}
                       </span>
                     </div>
                   </div>
 
-                  {/* Installment details */}
-                  <div className="flex items-center gap-2 mt-4 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-                    <Calendar className="w-4 h-4 text-zinc-450" />
+                  {/* Installment / Flexible details */}
+                  <div className="flex items-center gap-1.5 mt-3 text-xs font-medium text-[#757575]">
+                    <Calendar className="w-3.5 h-3.5" />
                     <span>
                       {goal.installmentAmount ? `৳${formatNumber(goal.installmentAmount, lang)}` : ''}{' '}
                       {goal.frequency === 'daily' && t.daily}
@@ -874,38 +985,54 @@ export default function GoalsManager({
                   </div>
                 </div>
 
-                {/* Progress bar */}
-                <div className="mt-6 space-y-2">
-                  <div className="flex items-center justify-between text-xs font-extrabold">
-                    <span className="text-emerald-600 dark:text-emerald-400">
-                      ৳{formatNumber(goal.savedAmount || 0, lang)} / ৳{formatNumber(goal.targetAmount, lang)}
-                    </span>
-                    <span className="text-zinc-400">{percent}%</span>
+                {/* Progress bar or Flexible Balance */}
+                {goal.isOpenEnded && (!goal.targetAmount || goal.targetAmount === 0) ? (
+                  <div className="mt-4 space-y-1.5">
+                    <div className="flex items-center justify-between text-xs font-mono font-bold">
+                      <span className="text-black dark:text-white text-base font-black">
+                        ৳{formatNumber(goal.savedAmount || 0, lang)}
+                      </span>
+                      <span className="text-[#757575] font-sans text-[11px]">
+                        {formatNumber(goal.contributions?.length || 0, lang)} {lang === 'bn' ? 'টি লেনদেন' : 'records'}
+                      </span>
+                    </div>
+                    <div className="w-full h-1.5 bg-[#EEEEEE] dark:bg-[#262626] rounded-xs overflow-hidden">
+                      <div
+                        className={`h-full rounded-xs transition-all duration-300 w-full ${
+                          goal.status === 'completed' ? 'bg-[#059669]' : 'bg-black dark:bg-white'
+                        }`}
+                      />
+                    </div>
                   </div>
-                  
-                  <div className="w-full h-3 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full rounded-full transition-all duration-700 ${
-                        goal.status === 'completed' 
-                          ? 'bg-emerald-500' 
-                          : isSavings ? 'bg-emerald-500/80' : 'bg-[#e0385e]'
-                      }`}
-                      style={{ width: `${percent}%` }}
-                    />
+                ) : (
+                  <div className="mt-4 space-y-1.5">
+                    <div className="flex items-center justify-between text-xs font-mono font-bold">
+                      <span className="text-black dark:text-white">
+                        ৳{formatNumber(goal.savedAmount || 0, lang)} / ৳{formatNumber(goal.targetAmount, lang)}
+                      </span>
+                      <span className="text-[#757575]">{percent}%</span>
+                    </div>
+                    
+                    <div className="w-full h-1.5 bg-[#EEEEEE] dark:bg-[#262626] rounded-xs overflow-hidden">
+                      <div 
+                        className={`h-full rounded-xs transition-all duration-300 ${
+                          goal.status === 'completed' 
+                            ? 'bg-[#059669]' 
+                            : isSavings ? 'bg-black dark:bg-white' : 'bg-[#DC2626]'
+                        }`}
+                        style={{ width: `${percent}%` }}
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Status indicator overlay for finished */}
                 {goal.status !== 'active' && (
-                  <div className="absolute inset-0 bg-white/60 dark:bg-zinc-950/60 backdrop-blur-[1px] rounded-3xl flex items-center justify-center">
-                    <span className={`px-4 py-2 rounded-full font-black text-xs uppercase tracking-widest flex items-center gap-1.5 shadow-sm border ${
-                      goal.status === 'completed'
-                        ? 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-900/50'
-                        : 'bg-zinc-150 text-zinc-500 border-zinc-300 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700'
-                    }`}>
+                  <div className="absolute inset-0 bg-white/70 dark:bg-black/70 backdrop-blur-xs rounded-xl flex items-center justify-center">
+                    <span className="px-3 py-1 rounded-md font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 border border-black/10 dark:border-white/10 bg-white dark:bg-[#0F1623] text-black dark:text-white">
                       {goal.status === 'completed' ? (
                         <>
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                          <CheckCircle2 className="w-3.5 h-3.5 text-[#059669]" />
                           {lang === 'bn' ? 'সম্পন্ন' : 'Completed'}
                         </>
                       ) : (
@@ -922,155 +1049,280 @@ export default function GoalsManager({
 
       {/* ── CREATE GOAL MODAL ── */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-y-auto hide-scrollbar">
+        <div
+          className="fixed inset-0 bg-black/65 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-y-auto hide-scrollbar"
+        >
           <div className="absolute inset-0" onClick={closeCreateGoalModal} />
           
-          <div className="bg-white dark:bg-zinc-900 w-full sm:max-w-xl rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col animate-slide-up relative z-10">
-            {/* Header (No icon - matches Add New Ledger Entry) */}
-            <div className="p-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between bg-zinc-50 dark:bg-zinc-900/50">
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+          <div
+            className="animate-slide-up bg-white dark:bg-[#0D121D] w-full sm:max-w-xl rounded-t-3xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col relative z-10"
+          >
+
+            {/* Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-950 dark:text-white">
                 {t.createGoal}
               </h3>
               <button 
-                onClick={closeCreateGoalModal}
-                className="p-3 bg-zinc-100 touch-target-height hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 rounded-full text-zinc-500 dark:text-zinc-400 transition-colors cursor-pointer"
+                type="button"
+                onClick={() => {
+                  triggerHaptic('medium');
+                  closeCreateGoalModal();
+                }}
+                className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-lg text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
                 aria-label="Close"
                 id="close_goal_modal_btn"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
             <form onSubmit={handleCreateGoal} className="flex-1 flex flex-col overflow-hidden">
-              <div className="flex-1 overflow-y-auto hide-scrollbar p-5 space-y-6">
+              <div ref={createGoalScrollRef} className="flex-1 overflow-y-auto hide-scrollbar p-5 space-y-5">
                 
-                {/* 1. Goal Type Selection (EMI / INSTALLMENT vs SAVINGS GOAL) */}
-                <div className="space-y-2">
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                {/* 1. Goal Type Selection (EMI / Installment first, Savings Goal second) */}
+                <div className="space-y-2.5">
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                     {t.goalType}
                   </span>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Option 1: EMI / Installment */}
                     <button
                       type="button"
-                      onClick={() => { triggerHaptic('single'); setGoalType('deposit'); }}
-                      className={`py-5 px-4 rounded-2xl flex flex-col items-center justify-center gap-2 border-3 transition-all cursor-pointer ${
+                      onClick={() => { 
+                        triggerHaptic('single'); 
+                        setGoalType('deposit');
+                        setFrequency('monthly');
+                      }}
+                      className={`py-4 px-3 rounded-xl flex flex-col items-center justify-center gap-1 border-2 transition-all cursor-pointer active:scale-[0.98] text-center ${
                         goalType === 'deposit'
-                          ? 'bg-rose-50 border-[#e0385e] text-[#e0385e] dark:bg-rose-950/20 dark:border-[#e0385e] dark:text-rose-400 font-bold shadow-lg shadow-rose-100 dark:shadow-none'
-                          : 'bg-zinc-50 border-zinc-200 text-zinc-600 hover:bg-zinc-150 dark:bg-zinc-850 dark:border-zinc-800 dark:text-zinc-400'
+                          ? 'bg-rose-600 border-rose-600 dark:border-rose-500 text-white shadow-xs font-extrabold'
+                          : 'bg-slate-50 hover:bg-slate-100 border-slate-300 hover:border-slate-400 text-slate-700 dark:bg-slate-900 dark:border-slate-700 dark:hover:border-slate-600 dark:text-slate-200 font-bold'
                       }`}
                     >
-                      <CalendarClock className="w-7 h-7 stroke-[2.5]" />
-                      <span className="text-lg font-black">{t.deposit}</span>
-                      <span className="text-xs opacity-80">{lang === 'bn' ? 'লোন, বাকি বা পণ্যের কিস্তি পরিশোধ' : 'Loan, credit or product EMI'}</span>
+                      <CalendarClock className="w-5 h-5 stroke-[2.5]" />
+                      <span className="text-sm sm:text-base font-extrabold">
+                        {t.deposit}
+                      </span>
+                      <span className={`text-[11px] leading-tight ${
+                        goalType === 'deposit' ? 'text-white/90 font-semibold' : 'text-slate-500 dark:text-slate-400 font-medium'
+                      }`}>
+                        {lang === 'bn' ? 'লোন বা পণ্যের কিস্তি পরিশোধ' : 'Loan or item installments'}
+                      </span>
                     </button>
 
+                    {/* Option 2: Savings Goal */}
                     <button
                       type="button"
-                      onClick={() => { triggerHaptic('single'); setGoalType('savings'); }}
-                      className={`py-5 px-4 rounded-2xl flex flex-col items-center justify-center gap-2 border-3 transition-all cursor-pointer ${
+                      onClick={() => { 
+                        triggerHaptic('single'); 
+                        setGoalType('savings');
+                        setFrequency(isOpenEndedSavings ? 'flexible' : 'monthly');
+                      }}
+                      className={`py-4 px-3 rounded-xl flex flex-col items-center justify-center gap-1 border-2 transition-all cursor-pointer active:scale-[0.98] text-center ${
                         goalType === 'savings'
-                          ? 'bg-emerald-50 border-emerald-500 text-emerald-700 dark:bg-emerald-950/20 dark:border-emerald-500 dark:text-emerald-400 font-bold shadow-lg shadow-emerald-100 dark:shadow-none'
-                          : 'bg-zinc-50 border-zinc-200 text-zinc-600 hover:bg-zinc-150 dark:bg-zinc-850 dark:border-zinc-800 dark:text-zinc-400'
+                          ? 'bg-emerald-600 border-emerald-600 dark:border-emerald-500 text-white shadow-xs font-extrabold'
+                          : 'bg-slate-50 hover:bg-slate-100 border-slate-300 hover:border-slate-400 text-slate-700 dark:bg-slate-900 dark:border-slate-700 dark:hover:border-slate-600 dark:text-slate-200 font-bold'
                       }`}
                     >
-                      <PiggyBank className="w-7 h-7 stroke-[2.5]" />
-                      <span className="text-lg font-black">{t.savings}</span>
-                      <span className="text-xs opacity-80">{lang === 'bn' ? 'ভবিষ্যতের জন্য সঞ্চয় বা ডিপিএস' : 'Savings or DPS Scheme'}</span>
+                      <Target className="w-5 h-5 stroke-[2.5]" />
+                      <span className="text-sm sm:text-base font-extrabold">
+                        {t.savings}
+                      </span>
+                      <span className={`text-[11px] leading-tight ${
+                        goalType === 'savings' ? 'text-white/90 font-semibold' : 'text-slate-500 dark:text-slate-400 font-medium'
+                      }`}>
+                        {lang === 'bn' ? 'ভবিষ্যতের জন্য টাকা জমান' : 'Save money for the future'}
+                      </span>
                     </button>
                   </div>
+
+                  {/* Flexible Savings Toggle Option (Available under Savings Goal) */}
+                  {goalType === 'savings' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic('single');
+                        setIsOpenEndedSavings(prev => {
+                          const next = !prev;
+                          if (next) {
+                            setTargetAmount('');
+                            setInstallmentAmount('');
+                            setFrequency('flexible');
+                            if (document.activeElement instanceof HTMLElement && document.activeElement.getAttribute('data-numpad') === 'true') {
+                              document.activeElement.blur();
+                            }
+                          } else {
+                            setFrequency('monthly');
+                          }
+                          return next;
+                        });
+                      }}
+                      className={`w-full p-3 rounded-xl border-2 flex items-center justify-between gap-3 text-left transition-all cursor-pointer select-none ${
+                        isOpenEndedSavings
+                          ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-500 dark:border-emerald-600'
+                          : 'bg-slate-50 dark:bg-slate-900/60 border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
+                      }`}
+                    >
+                      <span className="text-xs sm:text-sm font-extrabold text-slate-950 dark:text-white truncate">
+                        {lang === 'bn' ? 'উন্মুক্ত সঞ্চয়' : 'Flexible Savings'}
+                      </span>
+
+                      <div
+                        className={`w-11 h-6 rounded-full p-0.5 transition-colors shrink-0 flex items-center ${
+                          isOpenEndedSavings
+                            ? 'bg-emerald-600 justify-end'
+                            : 'bg-slate-300 dark:bg-slate-700 justify-start'
+                        }`}
+                      >
+                        <div className="w-5 h-5 rounded-full bg-white shadow-xs transition-transform" />
+                      </div>
+                    </button>
+                  )}
                 </div>
 
                 {/* 2. Title Input */}
                 <div className="space-y-1">
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                     {t.goalTitle} *
                   </span>
                   <input
                     type="text"
                     required
                     placeholder={
-                      goalType === 'deposit'
+                      goalType === 'savings' && isOpenEndedSavings
+                        ? (lang === 'bn' ? 'সঞ্চয়ের নাম লিখুন (যেমন: উন্মুক্ত সঞ্চয়, জরুরি ফান্ড)' : 'Enter goal title (e.g. Flexible Savings, Emergency Fund)')
+                        : goalType === 'deposit'
                         ? (lang === 'bn' ? 'লক্ষ্যের শিরোনাম লিখুন (যেমন: টিভি কিস্তি, বাইক লোন)' : 'Enter goal title (e.g. TV Installment, Bike Loan)')
                         : (lang === 'bn' ? 'লক্ষ্যের শিরোনাম লিখুন (যেমন: বাড়ি নির্মাণ, সঞ্চয় স্কিম)' : 'Enter goal title (e.g. House Construction, Savings Scheme)')
                     }
                     value={goalTitle}
                     onChange={(e) => setGoalTitle(e.target.value)}
-                    className="w-full px-4 py-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white font-bold text-base focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500"
+                    onFocus={centerNativeInput}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (!(goalType === 'savings' && isOpenEndedSavings)) {
+                          const targetInput = e.currentTarget.form?.querySelector('input[data-numpad="true"]:not(:disabled)') as HTMLInputElement | null;
+                          if (targetInput) targetInput.focus();
+                        }
+                      }
+                    }}
+                    className="w-full px-3.5 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white font-bold text-sm focus:border-slate-950 dark:focus:border-white outline-none"
                   />
                 </div>
 
-                {/* 3. Target Amount */}
+                {/* 3. Target Amount (Disabled when Flexible Savings / Piggy Bank toggle is enabled) */}
                 <div className="space-y-2">
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
-                    {goalType === 'deposit' 
-                      ? (lang === 'bn' ? 'মোট ঋণের পরিমাণ / আসল টাকা *' : 'Total Principal / Loan Amount *')
-                      : `${t.targetAmount} *`
-                    }
-                  </span>
+                  <div className="flex items-center justify-between">
+                    <span className={`text-[11px] font-bold uppercase tracking-wider block ${
+                      goalType === 'savings' && isOpenEndedSavings
+                        ? 'text-slate-400 dark:text-slate-500'
+                        : 'text-slate-500 dark:text-slate-400'
+                    }`}>
+                      {goalType === 'deposit'
+                        ? (lang === 'bn' ? 'মোট ঋণের পরিমাণ / আসল টাকা *' : 'Total Principal / Loan Amount *')
+                        : goalType === 'savings' && isOpenEndedSavings
+                        ? t.targetAmount
+                        : `${t.targetAmount} *`
+                      }
+                    </span>
+                    {goalType === 'savings' && isOpenEndedSavings && (
+                      <span className="text-[10px] font-mono font-semibold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
+                        {lang === 'bn' ? 'নিষ্ক্রিয় (উন্মুক্ত সঞ্চয়)' : 'Disabled (Open-Ended)'}
+                      </span>
+                    )}
+                  </div>
                   <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl font-bold text-zinc-400 dark:text-zinc-500 select-none">
+                    <span className={`absolute left-4 top-1/2 -translate-y-1/2 text-2xl font-black select-none ${
+                      goalType === 'savings' && isOpenEndedSavings
+                        ? 'text-slate-300 dark:text-slate-700'
+                        : 'text-slate-400 dark:text-slate-500'
+                    }`}>
                       ৳
                     </span>
                     <input
                       type="text"
-                      required
-                      inputMode="numeric"
-                      placeholder="0"
-                      value={targetAmount}
+                      disabled={goalType === 'savings' && isOpenEndedSavings}
+                      required={!(goalType === 'savings' && isOpenEndedSavings)}
+                      inputMode="decimal"
+                      data-numpad={goalType === 'savings' && isOpenEndedSavings ? 'false' : 'true'}
+                      placeholder={goalType === 'savings' && isOpenEndedSavings ? (lang === 'bn' ? 'প্রযোজ্য নয়' : 'No limit') : '0'}
+                      value={goalType === 'savings' && isOpenEndedSavings ? '' : targetAmount}
                       onChange={(e) => handleAmountChange(e.target.value, setTargetAmount)}
-                      className="w-full pl-10 pr-4 py-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white font-extrabold text-2xl focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500"
+                      className={`w-full pl-10 pr-4 py-3.5 rounded-xl border-2 font-black text-2xl tabular-nums font-mono outline-none transition-colors ${
+                        goalType === 'savings' && isOpenEndedSavings
+                          ? 'border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900/40 text-slate-400 dark:text-slate-600 cursor-not-allowed opacity-60'
+                          : 'border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white focus:border-slate-950 dark:focus:border-white'
+                      }`}
                     />
                   </div>
 
                   {/* Speedy Pad helpers */}
-                  <div className="flex flex-wrap gap-1.5 pt-1">
+                  <div className={`flex flex-wrap gap-1.5 pt-1 ${
+                    goalType === 'savings' && isOpenEndedSavings ? 'opacity-40 pointer-events-none select-none' : ''
+                  }`}>
                     {[5000, 10000, 25000, 50000, 100000].map(val => (
                       <button
                         key={val}
                         type="button"
+                        disabled={goalType === 'savings' && isOpenEndedSavings}
                         onClick={() => {
                           triggerHaptic('single');
                           const cur = parseAmount(targetAmount);
                           setTargetAmount(formatIndianNumberString(String(cur + val)));
                         }}
-                        className="px-3 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-300 font-bold rounded-xl transition-all text-2xs cursor-pointer"
+                        className="px-2.5 py-1.5 bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-900 dark:text-white font-bold rounded-lg transition-colors text-xs cursor-pointer tabular-nums font-mono disabled:cursor-not-allowed"
                       >
                         +{formatNumber(val, lang)}
                       </button>
                     ))}
                     <button
                       type="button"
+                      disabled={goalType === 'savings' && isOpenEndedSavings}
                       onClick={() => {
                         triggerHaptic('tick');
                         setTargetAmount('');
                       }}
-                      className="px-3 py-2 bg-rose-50 dark:bg-rose-950/20 text-[#e0385e] font-bold rounded-xl transition-all text-2xs cursor-pointer"
+                      className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 border-2 border-rose-300 dark:border-rose-900 text-rose-600 dark:text-rose-400 font-bold rounded-lg transition-colors text-xs cursor-pointer disabled:cursor-not-allowed"
                     >
                       {lang === 'bn' ? 'মুছুন' : 'Clear'}
                     </button>
                   </div>
                 </div>
 
-                {/* 4. EMI CUSTOM SETUP: TENURE & INTEREST RATE (Only for EMI / Installment) */}
+                {/* Flexible Savings Info Notice (When toggle is enabled) */}
+                {goalType === 'savings' && isOpenEndedSavings && (
+                  <div className="p-3.5 bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-900/50 rounded-xl flex items-start gap-2.5 text-xs text-emerald-900 dark:text-emerald-200 leading-relaxed">
+                    <Info className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                    <span>
+                      {lang === 'bn' 
+                        ? 'উন্মুক্ত সঞ্চয়ে কোনো নির্দিষ্ট কিস্তি বা মেয়াদের বাধ্যবাধকতা নেই। আপনি যেকোনো সময় যেকোনো পরিমাণ টাকা জমা করতে ও প্রয়োজনে উত্তোলন করতে পারবেন।' 
+                        : 'Flexible Savings has no rigid installments or deadlines. You can deposit and withdraw arbitrary amounts anytime you like.'}
+                    </span>
+                  </div>
+                )}
+
+                {/* 4. EMI CUSTOM SETUP: TENURE & INTEREST RATE */}
                 {goalType === 'deposit' && (
-                  <div className="p-4 bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-800 rounded-2xl space-y-4">
-                    <div className="flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-2">
-                      <Calculator className="w-4 h-4 text-[#e0385e]" />
-                      <span className="text-xs font-black uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+                  <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl space-y-3.5">
+                    <div className="flex items-center gap-2 border-b border-slate-200/80 dark:border-slate-800 pb-2">
+                      <Calculator className="w-4 h-4 text-slate-900 dark:text-white" />
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white">
                         {lang === 'bn' ? 'ইএমআই ক্যালকুলেটর ও কিস্তির হিসাব' : 'EMI & Tenure Auto-Calculator'}
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                       {/* Frequency */}
                       <div className="space-y-1">
-                        <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                        <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                           {t.frequency}
                         </span>
                         <select
                           value={frequency}
                           onChange={(e: any) => setFrequency(e.target.value)}
-                          className="w-full px-3 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-850 dark:text-white font-bold text-sm focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                          className="w-full px-3 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-slate-950 dark:text-white font-bold text-xs outline-none cursor-pointer"
                         >
                           <option value="monthly">{t.monthly}</option>
                           <option value="weekly">{t.weekly}</option>
@@ -1082,19 +1334,20 @@ export default function GoalsManager({
                       {/* Tenure if not flexible */}
                       {frequency !== 'flexible' && (
                         <div className="space-y-1">
-                          <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                             {frequency === 'monthly' && (lang === 'bn' ? 'মেয়াদ (মাস)' : 'Tenure (Months)')}
                             {frequency === 'weekly' && (lang === 'bn' ? 'মেয়াদ (সপ্তাহ)' : 'Tenure (Weeks)')}
                             {frequency === 'daily' && (lang === 'bn' ? 'মেয়াদ (দিন)' : 'Tenure (Days)')}
                           </span>
                           <input
-                            type="number"
-                            min="1"
-                            max="360"
+                            type="text"
+                            inputMode="numeric"
+                            data-numpad="true"
+                            data-integer-only="true"
                             value={tenure}
-                            onChange={(e) => setTenure(e.target.value)}
+                            onChange={(e) => setTenure(e.target.value.replace(/[^0-9]/g, ''))}
                             placeholder="6"
-                            className="w-full px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white font-bold text-sm focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500"
+                            className="w-full px-3 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-slate-950 dark:text-white font-mono font-bold text-xs outline-none"
                           />
                         </div>
                       )}
@@ -1108,10 +1361,10 @@ export default function GoalsManager({
                             key={n}
                             type="button"
                             onClick={() => { triggerHaptic('single'); setTenure(String(n)); }}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            className={`px-2.5 py-1 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer font-mono ${
                               tenure === String(n)
-                                ? 'bg-[#e0385e] text-white shadow-sm'
-                                : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-650 dark:text-zinc-300 hover:bg-zinc-100'
+                                ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
+                                : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-900 dark:text-white'
                             }`}
                           >
                             {formatNumber(n, lang)} {lang === 'bn' ? 'মাস' : 'Mo'}
@@ -1122,24 +1375,24 @@ export default function GoalsManager({
                             key={n}
                             type="button"
                             onClick={() => { triggerHaptic('single'); setTenure(String(n)); }}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            className={`px-2.5 py-1 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer font-mono ${
                               tenure === String(n)
-                                ? 'bg-[#e0385e] text-white shadow-sm'
-                                : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-650 dark:text-zinc-300 hover:bg-zinc-100'
+                                ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
+                                : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-900 dark:text-white'
                             }`}
                           >
                             {formatNumber(n, lang)} {lang === 'bn' ? 'সপ্তাহ' : 'Wk'}
                           </button>
                         ))}
-                        {frequency === 'daily' && [30, 60, 90, 180, 365].map(n => (
+                        {frequency === 'daily' && [30, 60, 90, 180, 360].map(n => (
                           <button
                             key={n}
                             type="button"
                             onClick={() => { triggerHaptic('single'); setTenure(String(n)); }}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            className={`px-2.5 py-1 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer font-mono ${
                               tenure === String(n)
-                                ? 'bg-[#e0385e] text-white shadow-sm'
-                                : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-650 dark:text-zinc-300 hover:bg-zinc-100'
+                                ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
+                                : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-900 dark:text-white'
                             }`}
                           >
                             {formatNumber(n, lang)} {lang === 'bn' ? 'দিন' : 'Days'}
@@ -1149,52 +1402,57 @@ export default function GoalsManager({
                     )}
 
                     {/* Interest / Additional Fee Checkmark */}
-                    <div className="pt-2 border-t border-zinc-200/60 dark:border-zinc-800/60 space-y-3">
-                      <div className="flex items-center gap-2.5">
+                    <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800 space-y-2.5">
+                      <div className="flex items-center gap-2">
                         <input
                           type="checkbox"
                           id="interest_checkbox"
                           checked={hasInterest}
                           onChange={(e) => setHasInterest(e.target.checked)}
-                          className="w-4.5 h-4.5 accent-[#e0385e] rounded cursor-pointer"
+                          className="w-4 h-4 accent-slate-950 dark:accent-white rounded cursor-pointer"
                         />
-                        <label htmlFor="interest_checkbox" className="text-xs font-bold text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
+                        <label htmlFor="interest_checkbox" className="text-xs font-bold text-slate-900 dark:text-white cursor-pointer select-none">
                           {lang === 'bn' ? 'সুদ বা অতিরিক্ত ফি / চার্জ যুক্ত করুন' : 'Add Interest / Additional Fee Rate'}
                         </label>
                       </div>
 
                       {hasInterest && (
-                        <div className="space-y-2 p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl animate-reveal">
+                        <div className="space-y-2 p-3 bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800 rounded-xl animate-reveal">
                           <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
-                              {lang === 'bn' ? 'বার্ষিক সুদের হার / ফি (%)' : 'Interest / Fee Rate (% p.a.)'}
+                            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                              {lang === 'bn' ? 'বার্ষিক সুদের হার / কাস্টম ফি (%)' : 'Custom Interest / Fee Rate (% p.a.)'}
                             </span>
-                            <span className="text-xs font-black text-[#e0385e]">{interestRate}%</span>
+                            <span className="text-xs font-mono font-bold text-slate-900 dark:text-white">{interestRate || '0'}%</span>
                           </div>
                           <div className="relative">
-                            <Percent className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                            <Percent className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
                             <input
-                              type="number"
-                              min="0"
-                              max="100"
-                              step="0.5"
+                              type="text"
+                              inputMode="decimal"
+                              data-numpad="true"
                               value={interestRate}
-                              onChange={(e) => setInterestRate(e.target.value)}
-                              placeholder="10"
-                              className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white font-bold text-sm focus:outline-none focus:border-[#e0385e]"
+                              onChange={(e) => {
+                                const ascii = e.target.value.replace(/[০-৯]/g, d => String('০১২৩৪৫৬৭৮৯'.indexOf(d)));
+                                const clean = ascii.replace(/[^0-9.]/g, '');
+                                const parts = clean.split('.');
+                                const sanitized = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : clean;
+                                setInterestRate(sanitized);
+                              }}
+                              placeholder={lang === 'bn' ? 'যেমন: ১১.৫৯' : 'e.g. 11.59'}
+                              className="w-full pl-8 pr-3 py-2 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white font-mono font-bold text-xs outline-none"
                             />
                           </div>
                           {/* Quick interest chips */}
-                          <div className="flex gap-1.5 pt-1">
-                            {[5, 10, 12, 15, 20].map(r => (
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {[5, 10, 11.5, 12, 15, 20].map(r => (
                               <button
                                 key={r}
                                 type="button"
                                 onClick={() => { triggerHaptic('single'); setInterestRate(String(r)); }}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                className={`px-2 py-0.5 rounded-md border-2 text-xs font-mono font-bold transition-all cursor-pointer ${
                                   interestRate === String(r)
-                                    ? 'bg-[#e0385e] text-white'
-                                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-650 dark:text-zinc-300 hover:bg-zinc-200'
+                                    ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
+                                    : 'bg-slate-50 dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white'
                                 }`}
                               >
                                 {r}%
@@ -1207,20 +1465,20 @@ export default function GoalsManager({
 
                     {/* Auto Calculated Live Preview Banner */}
                     {emiPreview && (
-                      <div className="p-3.5 bg-rose-50 dark:bg-rose-950/20 border border-[#e0385e]/20 rounded-xl space-y-2">
-                        <div className="flex justify-between items-center text-xs font-bold text-zinc-600 dark:text-zinc-400">
+                      <div className="p-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 rounded-xl space-y-1.5 font-mono">
+                        <div className="flex justify-between items-center text-xs font-semibold text-slate-900 dark:text-white">
                           <span>{lang === 'bn' ? 'মূল আসল' : 'Principal'}: ৳{formatNumber(emiPreview.principal, lang)}</span>
                           {emiPreview.interest > 0 && (
-                            <span className="text-[#e0385e]">
+                            <span className="text-rose-600 dark:text-rose-400">
                               +{lang === 'bn' ? 'সুদ' : 'Fee'}: ৳{formatNumber(emiPreview.interest, lang)}
                             </span>
                           )}
                         </div>
-                        <div className="flex justify-between items-baseline border-t border-[#e0385e]/20 pt-2">
-                          <span className="text-xs font-black text-zinc-700 dark:text-zinc-300 uppercase">
+                        <div className="flex justify-between items-baseline border-t border-rose-200/80 dark:border-rose-900/50 pt-1.5">
+                          <span className="text-xs font-bold text-slate-900 dark:text-white uppercase">
                             {lang === 'bn' ? 'স্বয়ংক্রিয় কিস্তি' : 'Auto Installment'}:
                           </span>
-                          <span className="text-base font-black text-[#e0385e]">
+                          <span className="text-sm font-black text-rose-600 dark:text-rose-400">
                             ৳{formatNumber(emiPreview.emi, lang)} / {frequency === 'monthly' ? t.monthly : frequency === 'weekly' ? t.weekly : t.daily}
                           </span>
                         </div>
@@ -1229,36 +1487,37 @@ export default function GoalsManager({
                   </div>
                 )}
 
-                {/* Savings Installment & Frequency Grid (When not EMI) */}
-                {goalType === 'savings' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Savings Installment & Frequency Grid (Only for Target Savings Goal when Piggy Bank toggle is OFF) */}
+                {goalType === 'savings' && !isOpenEndedSavings && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                     <div className="space-y-1">
-                      <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                         {t.installmentAmount}
                       </span>
                       <div className="relative">
-                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-base font-bold text-zinc-400 dark:text-zinc-500 select-none">
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400 select-none">
                           ৳
                         </span>
                         <input
                           type="text"
-                          inputMode="numeric"
+                          inputMode="decimal"
+                          data-numpad="true"
                           placeholder="0"
                           value={installmentAmount}
                           onChange={(e) => handleAmountChange(e.target.value, setInstallmentAmount)}
-                          className="w-full pl-9 pr-3 py-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white font-bold text-base focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500"
+                          className="w-full pl-8 pr-3 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white font-mono font-bold text-sm outline-none"
                         />
                       </div>
                     </div>
 
                     <div className="space-y-1">
-                      <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                         {t.frequency}
                       </span>
                       <select
                         value={frequency}
                         onChange={(e: any) => setFrequency(e.target.value)}
-                        className="w-full px-3 py-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-850 dark:text-white font-bold text-base focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                        className="w-full px-3 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white font-bold text-xs outline-none cursor-pointer"
                       >
                         <option value="monthly">{t.monthly}</option>
                         <option value="weekly">{t.weekly}</option>
@@ -1269,15 +1528,15 @@ export default function GoalsManager({
                   </div>
                 )}
 
-                {/* 5. Link Customer (Optional) */}
+                {/* 5. Link Customer */}
                 <div className="space-y-1">
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                     {t.linkCustomer}
                   </span>
                   <select
                     value={selectedCustomerId}
                     onChange={(e) => setSelectedCustomerId(e.target.value)}
-                    className="w-full px-4 py-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-850 dark:text-white font-bold text-sm focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                    className="w-full px-3.5 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white font-medium text-xs outline-none cursor-pointer"
                   >
                     <option value="">{lang === 'bn' ? 'কোনো নির্দিষ্ট গ্রাহক নয় (ব্যক্তিগত লক্ষ্য)' : 'None (Personal Goal)'}</option>
                     {customers.map(c => (
@@ -1290,25 +1549,29 @@ export default function GoalsManager({
 
                 {/* 6. Optional Description / Notes */}
                 <div className="space-y-1">
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                     {t.notes}
                   </span>
-                  <input
-                    type="text"
+                  <textarea
+                    rows={1}
                     placeholder={lang === 'bn' ? 'অতিরিক্ত কোনো মন্তব্য বা শর্ত (ঐচ্ছিক)' : 'Additional notes or remarks (Optional)'}
                     value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-850 dark:text-white focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500 font-medium text-sm"
+                    onChange={(e) => {
+                      setNotes(e.target.value);
+                      e.target.style.height = 'auto';
+                      e.target.style.height = `${Math.max(42, e.target.scrollHeight)}px`;
+                    }}
+                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white outline-none text-xs resize-none overflow-hidden leading-relaxed transition-colors"
                   />
                 </div>
 
               </div>
 
-              {/* 3. Sticky Bottom Actions (Red when EMI/Installment, Emerald when Savings) */}
-              <div className="p-5 border-t border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0">
+              {/* 3. Sticky Bottom Actions */}
+              <div className="p-4 sm:p-5 border-t border-slate-100 dark:border-slate-800/80 bg-white dark:bg-[#0D121D] shrink-0">
                 {formError && (
-                  <div className="p-4 mb-4 bg-rose-50 dark:bg-rose-900/35 rounded-xl text-[#e0385e] font-semibold text-sm flex items-start gap-2">
-                    <AlertCircle className="w-4.5 h-4.5 text-[#e0385e] shrink-0 mt-0.5" />
+                  <div className="p-3 mb-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 rounded-xl text-rose-600 dark:text-rose-400 font-semibold text-xs flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                     <span>{formError}</span>
                   </div>
                 )}
@@ -1316,22 +1579,21 @@ export default function GoalsManager({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className={`w-full py-4.5 rounded-2xl font-extrabold text-lg flex items-center justify-center shadow-lg transition-all cursor-pointer ${
+                  className={`w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center transition-all cursor-pointer select-none active:scale-[0.99] border-2 border-transparent hover:border-slate-950 dark:hover:border-white shadow-xs ${
                     goalType === 'deposit'
-                      ? 'bg-[#e0385e] hover:bg-[#c92a4f] text-white shadow-rose-200 dark:shadow-none'
-                      : 'bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-500 dark:hover:bg-emerald-400 dark:text-zinc-950 shadow-emerald-200 dark:shadow-none'
+                      ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
                   } ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
                 >
                   {isSubmitting ? (
                     <span className="flex items-center gap-2">
-                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                       {t.saving}
                     </span>
                   ) : (
-                    lang === 'bn' ? 'লক্ষ্য সংরক্ষণ করুন' : 'Confirm & Save Goal'
+                    goalType === 'savings' && isOpenEndedSavings
+                      ? (lang === 'bn' ? 'উন্মুক্ত সঞ্চয় তৈরি করুন' : 'Create Flexible Savings')
+                      : (lang === 'bn' ? 'লক্ষ্য সংরক্ষণ করুন' : 'Confirm & Save Goal')
                   )}
                 </button>
               </div>
@@ -1344,19 +1606,18 @@ export default function GoalsManager({
       {selectedGoal && (
         <div 
           key={selectedGoal.id}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 no-select animate-in fade-in duration-150"
+          className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 no-select"
         >
           <div className="absolute inset-0" onClick={closeGoalDetail} />
 
           <div
-            className="bg-white dark:bg-zinc-900 w-full sm:max-w-xl rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col relative z-10 animate-quick-slide-up"
+            className="bg-white dark:bg-[#0D121D] w-full sm:max-w-xl rounded-t-2xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col relative z-10"
           >
             
-            {/* Header (Goal Title on Left & Circular Action Buttons on Right) */}
-            <div className="px-5 py-4 sm:px-6 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/60 shrink-0">
+            {/* Header */}
+            <div className="px-5 py-4 sm:px-6 border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/70 dark:bg-slate-900/50 shrink-0">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1 flex items-center">
-                  {/* Goal Title Button - Tap to Open Rename Popup */}
                   <button
                     type="button"
                     onClick={(e) => {
@@ -1366,7 +1627,7 @@ export default function GoalsManager({
                     className="text-left min-w-0 flex-1 group cursor-pointer focus:outline-none"
                     title={lang === 'bn' ? 'শিরোনাম পরিবর্তন করতে ট্যাপ করুন' : 'Tap to rename goal'}
                   >
-                    <h3 className="text-lg sm:text-xl font-black text-zinc-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors truncate">
+                    <h3 className="text-lg sm:text-xl font-bold text-slate-950 dark:text-white group-hover:opacity-75 transition-opacity truncate">
                       {selectedGoal.title}
                     </h3>
                   </button>
@@ -1377,138 +1638,257 @@ export default function GoalsManager({
                     <button
                       type="button"
                       onClick={() => openEmiReminderModal(selectedGoal)}
-                      className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+                      className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors cursor-pointer border-2 ${
                         reminders.some(r => r.goalId === selectedGoal.id && r.active)
-                          ? 'bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400'
-                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-550 dark:text-zinc-400 hover:text-amber-500'
+                          ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
+                          : 'bg-white dark:bg-[#0D121D] text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white'
                       }`}
                       title={lang === 'bn' ? 'কিস্তির নোটিফিকেশন রিমাইন্ডার' : 'EMI Notification Reminder'}
                     >
                       {reminders.some(r => r.goalId === selectedGoal.id && r.active) ? (
-                        <BellRing className="w-4.5 h-4.5 text-amber-500" />
+                        <BellRing className="w-4 h-4" />
                       ) : (
-                        <Bell className="w-4.5 h-4.5" />
+                        <Bell className="w-4 h-4" />
                       )}
                     </button>
                   )}
                   <button
                     onClick={openDeleteGoalConfirm}
-                    className="w-10 h-10 bg-zinc-100 hover:bg-rose-50 dark:bg-zinc-800 dark:hover:bg-rose-950/30 rounded-full text-zinc-550 hover:text-[#e0385e] dark:text-zinc-400 flex items-center justify-center transition-colors cursor-pointer"
+                    className="w-9 h-9 bg-white hover:bg-rose-50 dark:bg-[#0D121D] dark:hover:bg-rose-950/30 rounded-xl text-slate-600 hover:text-rose-600 dark:text-slate-300 dark:hover:text-rose-400 flex items-center justify-center transition-colors cursor-pointer border-2 border-slate-300 dark:border-slate-700 hover:border-rose-500 dark:hover:border-rose-500"
                     title={lang === 'bn' ? 'মুছে ফেলুন' : 'Delete Goal'}
                   >
-                    <Trash2 className="w-4.5 h-4.5" />
+                    <Trash2 className="w-4 h-4" />
                   </button>
                   <button 
-                    onClick={closeGoalDetail}
-                    className="w-10 h-10 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 rounded-full text-zinc-500 dark:text-zinc-400 flex items-center justify-center transition-colors cursor-pointer"
+                    onClick={() => {
+                      triggerHaptic('medium');
+                      closeGoalDetail();
+                    }}
+                    className="w-9 h-9 bg-white hover:bg-slate-100 dark:bg-[#0D121D] dark:hover:bg-slate-800 rounded-xl text-slate-600 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white"
                     aria-label="Close"
                   >
-                    <X className="w-4.5 h-4.5" />
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
               </div>
             </div>
 
             {/* Scrollable Modal Content */}
-            <div className="flex-1 min-h-0 overflow-y-auto hide-scrollbar p-4 sm:p-5 pb-6 space-y-3.5 sm:space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto hide-scrollbar p-4 sm:p-5 pb-6 space-y-4">
               
-              {/* Unified Financial Progress & Overview Card */}
-              <div className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-200/80 dark:border-zinc-850 rounded-2xl p-3.5 sm:p-4 space-y-3 shadow-xs">
-                {/* 3 Main Numbers */}
-                <div className="grid grid-cols-3 gap-2 text-center">
-                  <div className="p-2 sm:p-2.5 bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800/70 rounded-xl">
-                    <span className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider block">{t.targetAmount}</span>
-                    <span className="text-sm sm:text-base font-black text-zinc-800 dark:text-white mt-0.5 block truncate">৳{formatNumber(selectedGoal.targetAmount, lang)}</span>
-                  </div>
-                  <div className="p-2 sm:p-2.5 bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800/70 rounded-xl">
-                    <span className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider block">{t.savedAmount}</span>
-                    <span className="text-sm sm:text-base font-black text-emerald-600 dark:text-emerald-400 mt-0.5 block truncate">৳{formatNumber(selectedGoal.savedAmount || 0, lang)}</span>
-                  </div>
-                  <div className="p-2 sm:p-2.5 bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800/70 rounded-xl">
-                    <span className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider block">{t.remaining}</span>
-                    <span className="text-sm sm:text-base font-black text-[#e0385e] mt-0.5 block truncate">৳{formatNumber(Math.max(0, selectedGoal.targetAmount - (selectedGoal.savedAmount || 0)), lang)}</span>
-                  </div>
-                </div>
-
-                {/* Progress Bar & Status */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-extrabold">
-                    <div className="flex items-center gap-2">
-                      <span className="text-zinc-500 dark:text-zinc-400 font-bold text-[11px] sm:text-xs">
-                        {Math.min(100, Math.round(((selectedGoal.savedAmount || 0) / (selectedGoal.targetAmount || 1)) * 100))}% {lang === 'bn' ? 'সম্পন্ন' : 'achieved'}
-                      </span>
-                      {selectedGoal.status !== 'active' && (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-zinc-200 dark:bg-zinc-800 text-zinc-650 dark:text-zinc-400">
-                          {selectedGoal.status === 'completed' ? (lang === 'bn' ? 'সম্পন্ন' : 'Completed') : (lang === 'bn' ? 'বাতিল' : 'Cancelled')}
+              {/* Financial Progress & Overview Card */}
+              <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 space-y-3">
+                {selectedGoal.isOpenEnded && (!selectedGoal.targetAmount || selectedGoal.targetAmount === 0) ? (
+                  <>
+                    {/* 3 Main Numbers for Open-Ended Piggy Bank */}
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="p-2.5 bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800 rounded-lg">
+                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                          {lang === 'bn' ? 'ব্যালেন্স' : 'Balance'}
                         </span>
+                        <span className="text-sm sm:text-base font-bold font-mono text-emerald-600 dark:text-emerald-400 mt-0.5 block truncate">
+                          ৳{formatNumber(selectedGoal.savedAmount || 0, lang)}
+                        </span>
+                      </div>
+                      <div className="p-2.5 bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800 rounded-lg">
+                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                          {lang === 'bn' ? 'মোট জমা' : 'Total In'}
+                        </span>
+                        <span className="text-sm sm:text-base font-bold font-mono text-emerald-600 dark:text-emerald-400 mt-0.5 block truncate">
+                          +৳{formatNumber((selectedGoal.contributions || []).filter(c => c.type !== 'withdrawal').reduce((sum, c) => sum + (c.amount || 0), 0), lang)}
+                        </span>
+                      </div>
+                      <div className="p-2.5 bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800 rounded-lg">
+                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                          {lang === 'bn' ? 'মোট উত্তোলন' : 'Total Out'}
+                        </span>
+                        <span className="text-sm sm:text-base font-bold font-mono text-rose-600 dark:text-rose-400 mt-0.5 block truncate">
+                          -৳{formatNumber((selectedGoal.contributions || []).filter(c => c.type === 'withdrawal').reduce((sum, c) => sum + (c.amount || 0), 0), lang)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs font-bold pt-0.5">
+                      <span className="text-slate-600 dark:text-slate-300 text-[11px] font-sans font-medium">
+                        {lang === 'bn' ? 'উন্মুক্ত সঞ্চয়' : 'Flexible savings'}
+                      </span>
+                      <span className="text-slate-500 dark:text-slate-400 text-[11px] font-mono">
+                        {formatNumber((selectedGoal.contributions || []).length, lang)} {lang === 'bn' ? 'টি লেনদেন' : 'entries'}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* 3 Main Numbers for Fixed Target Goal */}
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="p-2.5 bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800 rounded-lg">
+                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                          {lang === 'bn' ? 'টার্গেট' : 'Target'}
+                        </span>
+                        <span className="text-sm sm:text-base font-bold font-mono text-slate-950 dark:text-white mt-0.5 block truncate">৳{formatNumber(selectedGoal.targetAmount, lang)}</span>
+                      </div>
+                      <div className="p-2.5 bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800 rounded-lg">
+                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                          {lang === 'bn' ? 'জমা' : 'Saved'}
+                        </span>
+                        <span className="text-sm sm:text-base font-bold font-mono text-emerald-600 dark:text-emerald-400 mt-0.5 block truncate">৳{formatNumber(selectedGoal.savedAmount || 0, lang)}</span>
+                      </div>
+                      <div className="p-2.5 bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800 rounded-lg">
+                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">{t.remaining}</span>
+                        <span className="text-sm sm:text-base font-bold font-mono text-rose-600 dark:text-rose-400 mt-0.5 block truncate">৳{formatNumber(Math.max(0, selectedGoal.targetAmount - (selectedGoal.savedAmount || 0)), lang)}</span>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar & Status */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs font-bold">
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-600 dark:text-slate-300 text-[11px] sm:text-xs font-mono">
+                            {Math.min(100, Math.round(((selectedGoal.savedAmount || 0) / (selectedGoal.targetAmount || 1)) * 100))}% {lang === 'bn' ? 'সম্পন্ন' : 'achieved'}
+                          </span>
+                          {selectedGoal.status !== 'active' && (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-white">
+                              {selectedGoal.status === 'completed' ? (lang === 'bn' ? 'সম্পন্ন' : 'Completed') : (lang === 'bn' ? 'বাতিল' : 'Cancelled')}
+                            </span>
+                          )}
+                        </div>
+                        {selectedGoal.installmentAmount && selectedGoal.installmentAmount > 0 && (
+                          <span className="text-slate-600 dark:text-slate-300 text-[11px] font-bold font-mono">
+                            ৳{formatNumber(selectedGoal.installmentAmount, lang)} / {selectedGoal.frequency === 'daily' ? t.daily : selectedGoal.frequency === 'weekly' ? t.weekly : selectedGoal.frequency === 'monthly' ? t.monthly : t.flexible}
+                          </span>
+                        )}
+                      </div>
+                      <div className="w-full h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full transition-all duration-500 ${
+                            selectedGoal.status === 'completed' 
+                              ? 'bg-emerald-600' 
+                              : selectedGoal.type === 'savings' ? 'bg-emerald-600' : 'bg-rose-600'
+                          }`}
+                          style={{ width: `${Math.min(100, Math.round(((selectedGoal.savedAmount || 0) / (selectedGoal.targetAmount || 1)) * 100))}%` }}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Customer & Editable Description/Notes Section */}
+                <div className="pt-2.5 border-t border-slate-200/80 dark:border-slate-800 space-y-2">
+                  {selectedGoal.customerName && (
+                    <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300">
+                      <span className="font-bold flex items-center gap-1.5 text-xs">
+                        <User className="w-3.5 h-3.5 text-slate-500" />
+                        <span className="text-slate-900 dark:text-white">{selectedGoal.customerName}</span>
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Description / Notes Area (Empty if user didn't fill it, editable after opening goal) */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                        {t.notes}
+                      </span>
+                      {!isEditingGoalNotes && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            triggerHaptic('single');
+                            setEditedGoalNotes(cleanSelectedGoalNotes);
+                            setIsEditingGoalNotes(true);
+                          }}
+                          className="p-1 px-2 rounded-lg text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white bg-white dark:bg-[#0D121D] border border-slate-200 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white flex items-center gap-1 cursor-pointer transition-colors"
+                          title={lang === 'bn' ? 'নোট সম্পাদনা করুন' : 'Edit Notes'}
+                        >
+                          <Pencil className="w-3 h-3" />
+                          <span>{lang === 'bn' ? 'সম্পাদনা' : 'Edit'}</span>
+                        </button>
                       )}
                     </div>
-                    {selectedGoal.installmentAmount && selectedGoal.installmentAmount > 0 && (
-                      <span className="text-zinc-500 dark:text-zinc-400 text-[11px] font-bold">
-                        ৳{formatNumber(selectedGoal.installmentAmount, lang)} / {selectedGoal.frequency === 'daily' ? t.daily : selectedGoal.frequency === 'weekly' ? t.weekly : selectedGoal.frequency === 'monthly' ? t.monthly : t.flexible}
-                      </span>
+
+                    {isEditingGoalNotes ? (
+                      <form onSubmit={handleSaveGoalNotes} className="space-y-2">
+                        <textarea
+                          rows={2}
+                          value={editedGoalNotes}
+                          ref={(el) => {
+                            if (el) {
+                              el.style.height = 'auto';
+                              el.style.height = `${Math.max(54, el.scrollHeight)}px`;
+                            }
+                          }}
+                          onChange={(e) => {
+                            setEditedGoalNotes(e.target.value);
+                            e.target.style.height = 'auto';
+                            e.target.style.height = `${Math.max(54, e.target.scrollHeight)}px`;
+                          }}
+                          placeholder=""
+                          autoFocus
+                          className="w-full min-h-[54px] px-3 py-2 bg-white dark:bg-[#0D121D] border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white rounded-xl text-xs font-medium text-slate-950 dark:text-white outline-none resize-none overflow-hidden leading-relaxed transition-colors block"
+                        />
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingGoalNotes(false)}
+                            className="px-3 py-1.5 bg-white dark:bg-[#0D121D] hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-xs cursor-pointer transition-colors"
+                          >
+                            {lang === 'bn' ? 'বাতিল' : 'Cancel'}
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={isSavingGoalNotes}
+                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl border-2 border-transparent hover:border-slate-950 dark:hover:border-white text-xs cursor-pointer transition-colors"
+                          >
+                            {lang === 'bn' ? 'সেভ' : 'Save'}
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <div
+                        onClick={() => {
+                          triggerHaptic('single');
+                          setEditedGoalNotes(cleanSelectedGoalNotes);
+                          setIsEditingGoalNotes(true);
+                        }}
+                        className="w-full min-h-[36px] px-3 py-2 bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 rounded-lg text-xs text-slate-800 dark:text-slate-200 cursor-pointer transition-colors whitespace-pre-wrap break-words leading-relaxed"
+                        title={lang === 'bn' ? 'নোট লিখতে বা পরিবর্তন করতে ট্যাপ করুন' : 'Tap to add or edit description/notes'}
+                      >
+                        {cleanSelectedGoalNotes}
+                      </div>
                     )}
-                  </div>
-                  <div className="w-full h-2.5 bg-zinc-200/80 dark:bg-zinc-800 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full rounded-full transition-all duration-700 ${
-                        selectedGoal.status === 'completed' 
-                          ? 'bg-emerald-500' 
-                          : selectedGoal.type === 'savings' ? 'bg-emerald-500' : 'bg-[#e0385e]'
-                      }`}
-                      style={{ width: `${Math.min(100, Math.round(((selectedGoal.savedAmount || 0) / (selectedGoal.targetAmount || 1)) * 100))}%` }}
-                    />
                   </div>
                 </div>
-
-                {/* Customer & Notes subtitle if present */}
-                {(selectedGoal.customerName || selectedGoalEmiDetails?.cleanNotes || selectedGoal.notes) && (
-                  <div className="flex items-center justify-between text-xs pt-2 border-t border-zinc-200/60 dark:border-zinc-850 text-zinc-500 dark:text-zinc-400 flex-wrap gap-2">
-                    {selectedGoal.customerName && (
-                      <span className="font-bold flex items-center gap-1.5 text-xs">
-                        <User className="w-3.5 h-3.5 text-zinc-400" />
-                        <span className="text-zinc-800 dark:text-zinc-200">{selectedGoal.customerName}</span>
-                      </span>
-                    )}
-                    {(selectedGoalEmiDetails?.cleanNotes || selectedGoal.notes) && (
-                      <span className="text-xs text-zinc-600 dark:text-zinc-400 italic">
-                        <span className="font-bold not-italic text-zinc-400 mr-1">{t.notes}:</span>
-                        {selectedGoalEmiDetails?.cleanNotes || selectedGoal.notes}
-                      </span>
-                    )}
-                  </div>
-                )}
               </div>
 
-              {/* Dedicated EMI & Loan Details Card - Compact & Collapsible by default */}
+              {/* EMI & Loan Details Card */}
               {selectedGoalEmiDetails && (
-                <div className="bg-zinc-50 dark:bg-zinc-950/40 rounded-2xl border border-zinc-200/80 dark:border-zinc-850/80 overflow-hidden transition-all shadow-xs">
+                <div className="bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200/80 dark:border-slate-800 overflow-hidden">
                   <button
                     type="button"
                     onClick={() => {
                       triggerHaptic('single');
                       setIsEmiBreakdownOpen(prev => !prev);
                     }}
-                    className="w-full p-3.5 flex items-center justify-between text-left hover:bg-zinc-100/70 dark:hover:bg-zinc-900/50 transition-colors cursor-pointer"
+                    className="w-full p-3.5 flex items-center justify-between text-left hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
                   >
                     <div className="flex items-center gap-2 min-w-0">
-                      <CreditCard className="w-4 h-4 text-[#e0385e] shrink-0" />
-                      <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 truncate">
+                      <CreditCard className="w-4 h-4 text-slate-900 dark:text-white shrink-0" />
+                      <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
                         {lang === 'bn' ? 'ইএমআই ও ঋণ বিবরণী' : 'EMI & Loan Breakdown'}
                       </span>
                       {selectedGoalEmiDetails.tenure && (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#e0385e]/10 text-[#e0385e] shrink-0">
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-white shrink-0">
                           {formatNumber(selectedGoalEmiDetails.tenure, lang)} {selectedGoalEmiDetails.tenureUnit}
                         </span>
                       )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-2">
-                      <span className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
+                      <span className="text-[11px] font-bold font-mono text-slate-600 dark:text-slate-300">
                         ৳{formatNumber(selectedGoalEmiDetails.principal, lang)}
                       </span>
                       <ChevronDown 
-                        className={`w-4 h-4 text-zinc-400 transition-transform duration-200 ${
-                          isEmiBreakdownOpen ? 'rotate-180 text-zinc-700 dark:text-zinc-200' : ''
+                        className={`w-4 h-4 text-slate-500 transition-transform duration-200 ${
+                          isEmiBreakdownOpen ? 'rotate-180 text-slate-900 dark:text-white' : ''
                         }`} 
                       />
                     </div>
@@ -1516,42 +1896,42 @@ export default function GoalsManager({
 
                   {/* Collapsible Content */}
                   {isEmiBreakdownOpen && (
-                    <div className="px-3 pb-3 pt-1 border-t border-zinc-200/60 dark:border-zinc-850/80 animate-in fade-in duration-150">
+                    <div className="px-3 pb-3 pt-1 border-t border-slate-200/80 dark:border-slate-800">
                       <div className="grid grid-cols-2 gap-2 pt-1">
-                        <div className="bg-white dark:bg-zinc-900 p-2.5 rounded-xl border border-zinc-200/70 dark:border-zinc-800/70">
-                          <span className="text-[10px] font-extrabold text-zinc-400 dark:text-zinc-500 uppercase block">
+                        <div className="bg-white dark:bg-[#0D121D] p-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800">
+                          <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">
                             {lang === 'bn' ? 'মূল পরিমাণ (Principal)' : 'Principal Amount'}
                           </span>
-                          <span className="text-xs font-black text-zinc-900 dark:text-white mt-0.5 block">
+                          <span className="text-xs font-bold font-mono text-slate-900 dark:text-white mt-0.5 block">
                             ৳{formatNumber(selectedGoalEmiDetails.principal, lang)}
                           </span>
                         </div>
 
-                        <div className="bg-white dark:bg-zinc-900 p-2.5 rounded-xl border border-zinc-200/70 dark:border-zinc-800/70">
-                          <span className="text-[10px] font-extrabold text-zinc-400 dark:text-zinc-500 uppercase block">
+                        <div className="bg-white dark:bg-[#0D121D] p-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800">
+                          <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">
                             {lang === 'bn' ? 'মুনাফা / ফি (Fee)' : 'Interest / Fee'}
                           </span>
-                          <span className="text-xs font-black text-[#e0385e] mt-0.5 block">
+                          <span className="text-xs font-bold font-mono text-rose-600 dark:text-rose-400 mt-0.5 block">
                             {selectedGoalEmiDetails.interestAmount > 0 
                               ? `+৳${formatNumber(selectedGoalEmiDetails.interestAmount, lang)} ${selectedGoalEmiDetails.interestRate ? `(${selectedGoalEmiDetails.interestRate}%)` : ''}` 
                               : (lang === 'bn' ? '০% (ফি প্রযোজ্য নয়)' : '0% (No Fee)')}
                           </span>
                         </div>
 
-                        <div className="bg-white dark:bg-zinc-900 p-2.5 rounded-xl border border-zinc-200/70 dark:border-zinc-800/70">
-                          <span className="text-[10px] font-extrabold text-zinc-400 dark:text-zinc-500 uppercase block">
+                        <div className="bg-white dark:bg-[#0D121D] p-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800">
+                          <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">
                             {lang === 'bn' ? 'প্রতি কিস্তি (Per Installment)' : 'Installment Rate'}
                           </span>
-                          <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 mt-0.5 block">
+                          <span className="text-xs font-bold font-mono text-emerald-600 dark:text-emerald-400 mt-0.5 block">
                             ৳{formatNumber(selectedGoal.installmentAmount || Math.ceil(selectedGoal.targetAmount / (selectedGoalEmiDetails.tenure || 1)), lang)}
                           </span>
                         </div>
 
-                        <div className="bg-white dark:bg-zinc-900 p-2.5 rounded-xl border border-zinc-200/70 dark:border-zinc-800/70">
-                          <span className="text-[10px] font-extrabold text-zinc-400 dark:text-zinc-500 uppercase block">
+                        <div className="bg-white dark:bg-[#0D121D] p-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800">
+                          <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">
                             {lang === 'bn' ? 'মোট প্রদেয় (Total Payable)' : 'Total Payable'}
                           </span>
-                          <span className="text-xs font-black text-zinc-900 dark:text-white mt-0.5 block">
+                          <span className="text-xs font-bold font-mono text-slate-900 dark:text-white mt-0.5 block">
                             ৳{formatNumber(selectedGoal.targetAmount, lang)}
                           </span>
                         </div>
@@ -1561,63 +1941,129 @@ export default function GoalsManager({
                 </div>
               )}
 
-              {/* INSTALLMENT FORM SECTION */}
+              {/* INSTALLMENT & WITHDRAWAL FORM SECTION */}
               {selectedGoal.status === 'active' && (
                 <div className="pt-1">
                   {!showInstallmentForm ? (
-                    <button
-                      onClick={() => { triggerHaptic('single'); setShowInstallmentForm(true); }}
-                      className="w-full py-3.5 sm:py-4 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-extrabold rounded-2xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer text-sm sm:text-base"
-                    >
-                      <Plus className="w-5 h-5 stroke-[2.5]" />
-                      <span>{t.addInstallment}</span>
-                    </button>
+                    selectedGoal.isOpenEnded ? (
+                      /* Flexible Savings Dual Action Buttons: Deposit & Withdraw */
+                      <div className="grid grid-cols-2 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            triggerHaptic('single');
+                            setContributionActionType('deposit');
+                            setShowInstallmentForm(true);
+                          }}
+                          className="py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl border-2 border-emerald-600 hover:border-slate-950 dark:hover:border-white transition-colors flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm active:scale-95 shadow-xs"
+                        >
+                          <Plus className="w-4 h-4 stroke-[2.5]" />
+                          <span>{lang === 'bn' ? 'টাকা জমা' : 'Deposit'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            triggerHaptic('single');
+                            setContributionActionType('withdrawal');
+                            setShowInstallmentForm(true);
+                          }}
+                          className="py-3 px-4 bg-white dark:bg-[#0D121D] hover:bg-rose-50 dark:hover:bg-rose-950/30 text-rose-600 dark:text-rose-400 font-bold rounded-xl border-2 border-rose-300 dark:border-rose-900/60 hover:border-rose-500 transition-colors flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm active:scale-95 shadow-xs"
+                        >
+                          <Minus className="w-4 h-4 stroke-[2.5]" />
+                          <span>{lang === 'bn' ? 'টাকা উত্তোলন' : 'Withdraw'}</span>
+                        </button>
+                      </div>
+                    ) : (
+                      /* Standard Single Add Installment Button */
+                      <button
+                        onClick={() => { 
+                          triggerHaptic('single'); 
+                          setContributionActionType('deposit');
+                          setShowInstallmentForm(true); 
+                        }}
+                        className="w-full py-3 px-4 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-xl border-2 border-slate-950 dark:border-white transition-colors flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm"
+                      >
+                        <Plus className="w-4 h-4 stroke-[2.5]" />
+                        <span>{t.addInstallment}</span>
+                      </button>
+                    )
                   ) : (
-                    <form onSubmit={handleAddContribution} className="space-y-4 bg-zinc-50 dark:bg-zinc-950 p-4 rounded-2xl border border-zinc-150 dark:border-zinc-850 animate-reveal">
-                      <div className="flex items-center justify-between border-b border-zinc-250 dark:border-zinc-850 pb-2">
-                        <span className="font-black text-sm text-zinc-700 dark:text-zinc-300">{t.addInstallment}</span>
+                    <form onSubmit={handleAddContribution} className="space-y-4 bg-slate-50 dark:bg-slate-900/60 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
+                      <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-slate-800 pb-2">
+                        <span className="font-bold text-sm text-slate-950 dark:text-white flex items-center gap-2">
+                          {contributionActionType === 'withdrawal' ? (
+                            <>
+                              <ArrowUpRight className="w-4 h-4 text-rose-500 stroke-[2.5]" />
+                              <span>{lang === 'bn' ? 'উন্মুক্ত সঞ্চয় থেকে টাকা উত্তোলন' : 'Withdraw from Flexible Savings'}</span>
+                            </>
+                          ) : (
+                            <>
+                              <ArrowDownLeft className="w-4 h-4 text-emerald-500 stroke-[2.5]" />
+                              <span>{selectedGoal.isOpenEnded ? (lang === 'bn' ? 'উন্মুক্ত সঞ্চয়ে টাকা জমা' : 'Deposit into Flexible Savings') : t.addInstallment}</span>
+                            </>
+                          )}
+                        </span>
                         <button 
                           type="button"
                           onClick={() => setShowInstallmentForm(false)}
-                          className="p-1.5 text-zinc-400 hover:text-rose-500 rounded-lg cursor-pointer"
+                          className="p-1.5 text-slate-500 hover:text-slate-950 dark:hover:text-white rounded-lg border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer"
                         >
                           <X className="w-4 h-4" />
                         </button>
                       </div>
 
                       <div className="space-y-1.5">
-                        <label className="text-xs font-extrabold text-zinc-400 uppercase tracking-wider">{t.amountPaid} *</label>
+                        <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                          {contributionActionType === 'withdrawal' 
+                            ? (lang === 'bn' ? 'উত্তোলনের পরিমাণ *' : 'Withdrawal Amount *') 
+                            : `${t.amountPaid} *`}
+                        </label>
                         <div className="relative">
-                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xl font-bold text-zinc-400 dark:text-zinc-500 select-none">
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-400 select-none">
                             ৳
                           </span>
                           <input
+                            ref={installmentInputRef}
                             type="text"
                             required
-                            inputMode="numeric"
+                            autoFocus
+                            inputMode="decimal"
+                            data-numpad="true"
                             placeholder="0"
                             value={installmentInput}
                             onChange={(e) => handleAmountChange(e.target.value, setInstallmentInput)}
-                            className="w-full pl-9 pr-4 py-3 bg-white dark:bg-zinc-900 border-2 border-zinc-300 dark:border-zinc-700 focus:border-emerald-500 dark:focus:border-emerald-500 rounded-xl font-black text-xl text-zinc-900 dark:text-white focus:outline-none transition-all"
+                            className="w-full pl-9 pr-4 py-2.5 bg-white dark:bg-[#0D121D] border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white rounded-xl font-bold font-mono text-lg text-slate-950 dark:text-white focus:outline-none transition-colors"
                           />
                         </div>
 
-                        {/* Quick helper to fill regular installment if configured */}
-                        {selectedGoal.installmentAmount && selectedGoal.installmentAmount > 0 && (
+                        {contributionActionType === 'withdrawal' ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              triggerHaptic('single');
+                              setInstallmentInput(formatIndianNumberString(String(selectedGoal.savedAmount || 0)));
+                            }}
+                            className="text-xs font-bold text-rose-600 dark:text-rose-400 hover:underline flex items-center gap-1 pt-1 cursor-pointer"
+                          >
+                            <span>
+                              {lang === 'bn' ? 'সর্বোচ্চ ব্যালেন্স তুলুন' : 'Withdraw Full Balance'} (৳{formatNumber(selectedGoal.savedAmount || 0, lang)})
+                            </span>
+                          </button>
+                        ) : selectedGoal.installmentAmount && selectedGoal.installmentAmount > 0 ? (
                           <button
                             type="button"
                             onClick={() => {
                               triggerHaptic('single');
                               setInstallmentInput(formatIndianNumberString(String(selectedGoal.installmentAmount)));
                             }}
-                            className="text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 pt-1"
+                            className="text-xs font-bold text-slate-900 dark:text-white hover:underline flex items-center gap-1 pt-1 cursor-pointer"
                           >
                             <span>{lang === 'bn' ? 'নির্ধারিত কিস্তি বসান' : 'Fill regular installment'} (৳{formatNumber(selectedGoal.installmentAmount, lang)})</span>
                           </button>
-                        )}
+                        ) : null}
 
-                        {/* Quick chips (comfortably sized for thumb tapping) */}
-                        <div className="flex flex-wrap gap-2 pt-1.5">
+                        <div className="flex flex-wrap gap-1.5 pt-1.5">
                           {[500, 1000, 2000, 5000].map(val => (
                             <button
                               key={val}
@@ -1627,7 +2073,7 @@ export default function GoalsManager({
                                 const cur = parseAmount(installmentInput);
                                 setInstallmentInput(formatIndianNumberString(String(cur + val)));
                               }}
-                              className="px-3.5 py-2 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 font-extrabold rounded-xl transition-all text-xs cursor-pointer"
+                              className="px-2.5 py-1 bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-900 dark:text-white font-mono font-bold rounded-lg transition-colors text-xs cursor-pointer"
                             >
                               +{formatNumber(val, lang)}
                             </button>
@@ -1638,7 +2084,7 @@ export default function GoalsManager({
                               triggerHaptic('tick');
                               setInstallmentInput('');
                             }}
-                            className="px-3.5 py-2 bg-rose-50 dark:bg-rose-950/20 text-[#e0385e] font-extrabold rounded-xl transition-all text-xs cursor-pointer"
+                            className="px-2.5 py-1 bg-rose-50 dark:bg-rose-950/30 border-2 border-rose-300 dark:border-rose-900 text-rose-600 dark:text-rose-400 font-bold rounded-lg transition-colors text-xs cursor-pointer"
                           >
                             {lang === 'bn' ? 'মুছুন' : 'Clear'}
                           </button>
@@ -1646,28 +2092,35 @@ export default function GoalsManager({
                       </div>
 
                       <div className="space-y-1.5">
-                        <label className="text-xs font-extrabold text-zinc-400 uppercase tracking-wider">{lang === 'bn' ? 'নোট / বিবরণ (ঐচ্ছিক)' : 'Note / Description (Optional)'}</label>
+                        <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                          {lang === 'bn' ? 'নোট / বিবরণ (ঐচ্ছিক)' : 'Note / Description (Optional)'}
+                        </label>
                         <input
                           type="text"
-                          placeholder={lang === 'bn' ? 'যেমন: ১ম কিস্তি, নগদ জমা' : 'e.g. 1st installment, cash deposit'}
+                          placeholder={
+                            contributionActionType === 'withdrawal'
+                              ? (lang === 'bn' ? 'যেমন: জরুরি খরচ, কেনাকাটা' : 'e.g. Shopping, emergency expense')
+                              : (lang === 'bn' ? 'যেমন: অতিরিক্ত নগদ জমা, সঞ্চয়' : 'e.g. Cash deposit, monthly surplus')
+                          }
                           value={installmentNote}
                           onChange={(e) => setInstallmentNote(e.target.value)}
-                          className="w-full px-4 py-3 bg-white dark:bg-zinc-900 border-2 border-zinc-300 dark:border-zinc-700 focus:border-emerald-500 dark:focus:border-emerald-500 rounded-xl font-bold text-sm text-zinc-900 dark:text-white focus:outline-none transition-all"
+                          className="w-full px-3.5 py-2.5 bg-white dark:bg-[#0D121D] border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white rounded-xl font-bold text-sm text-slate-950 dark:text-white focus:outline-none transition-colors"
                         />
                       </div>
 
-                      {/* Checkbox for Ledger Sync */}
                       {selectedGoal.customerId && (
-                        <div className="flex items-start gap-2.5 pt-1.5">
+                        <div className="flex items-start gap-2.5 pt-1">
                           <input
                             type="checkbox"
                             id="ledger_sync_checkbox"
                             checked={syncToLedger}
                             onChange={(e) => setSyncToLedger(e.target.checked)}
-                            className="w-4.5 h-4.5 accent-emerald-600 rounded cursor-pointer mt-0.5"
+                            className="w-4 h-4 accent-emerald-600 rounded cursor-pointer mt-0.5"
                           />
-                          <label htmlFor="ledger_sync_checkbox" className="text-xs font-bold text-zinc-500 dark:text-zinc-400 cursor-pointer selection-none leading-normal">
-                            {t.recordTxInLedger} ({selectedGoal.customerName || (lang === 'bn' ? 'গ্রাহকের খাতা' : "Customer's Ledger")})
+                          <label htmlFor="ledger_sync_checkbox" className="text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer selection-none leading-normal">
+                            {contributionActionType === 'withdrawal' 
+                              ? (lang === 'bn' ? `গ্রাহকের খতিয়ানে বাকি/প্রদান হিসেবে যুক্ত করুন` : `Record as Due/Withdrawal in Customer's Ledger`)
+                              : `${t.recordTxInLedger} (${selectedGoal.customerName || (lang === 'bn' ? 'গ্রাহকের খাতা' : "Customer's Ledger")})`}
                           </label>
                         </div>
                       )}
@@ -1675,18 +2128,19 @@ export default function GoalsManager({
                       <button
                         type="submit"
                         disabled={isSubmitting}
-                        className={`w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-all cursor-pointer text-xs flex items-center justify-center gap-2 shadow-sm ${
-                          isSubmitting ? 'opacity-70 cursor-not-allowed' : ''
-                        }`}
+                        className={`w-full py-2.5 font-bold rounded-xl border-2 border-transparent hover:border-slate-950 dark:hover:border-white transition-colors cursor-pointer text-xs flex items-center justify-center gap-2 ${
+                          contributionActionType === 'withdrawal'
+                            ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                            : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                        } ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
                       >
                         {isSubmitting ? (
                           <span className="flex items-center gap-2">
-                            <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                             {t.saving}
                           </span>
+                        ) : contributionActionType === 'withdrawal' ? (
+                          lang === 'bn' ? 'উত্তোলন সম্পন্ন করুন' : 'Confirm Withdrawal'
                         ) : (
                           lang === 'bn' ? 'জমা সম্পন্ন করুন' : 'Confirm Deposit'
                         )}
@@ -1696,55 +2150,69 @@ export default function GoalsManager({
                 </div>
               )}
 
-              {/* CONTRIBUTION LOGS TIMELINE */}
+              {/* CONTRIBUTION & WITHDRAWAL LOGS TIMELINE */}
               <div className="space-y-3">
-                <span className="text-xs font-extrabold text-zinc-400 uppercase tracking-wider block">
-                  {lang === 'bn' ? 'জমার বিবরণী' : 'Contribution Ledger'} ({selectedGoal.contributions?.length || 0})
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                  {selectedGoal.isOpenEnded 
+                    ? (lang === 'bn' ? 'জমা ও উত্তোলনের বিবরণী' : 'Savings & Withdrawal Ledger') 
+                    : (lang === 'bn' ? 'জমার বিবরণী' : 'Contribution Ledger')} ({selectedGoal.contributions?.length || 0})
                 </span>
 
-                <div className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-200/80 dark:border-zinc-850 rounded-2xl overflow-hidden shadow-xs">
-                  <div className="max-h-[220px] overflow-y-auto divide-y divide-zinc-200/50 dark:divide-zinc-850 pr-1.5 mr-0.5">
+                <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl overflow-hidden">
+                  <div className="max-h-[220px] overflow-y-auto divide-y divide-slate-200/70 dark:divide-slate-800/80">
                     {(!selectedGoal.contributions || selectedGoal.contributions.length === 0) ? (
-                      <div className="p-6 text-center text-xs font-bold text-zinc-400 dark:text-zinc-500 flex flex-col items-center gap-1.5">
-                        <ReceiptText className="w-8 h-8 stroke-[1.5] text-zinc-350 dark:text-zinc-700" />
-                        {lang === 'bn' ? 'কোন কিস্তি বা জমার রেকর্ড পাওয়া যায়নি' : 'No payments logged yet'}
+                      <div className="p-6 text-center text-xs font-bold text-slate-500 dark:text-slate-400 flex flex-col items-center gap-1.5">
+                        <ReceiptText className="w-8 h-8 stroke-[1.5] text-slate-400" />
+                        {lang === 'bn' ? 'কোন জমা বা উত্তোলনের রেকর্ড পাওয়া যায়নি' : 'No records logged yet'}
                       </div>
                     ) : (
                       [...selectedGoal.contributions].reverse().map((c, index) => {
                         const contribKey = c.id || c.date || index;
+                        const isWithdrawal = c.type === 'withdrawal';
                         return (
-                          <div key={contribKey} className="p-3 sm:py-3 sm:px-3.5 flex items-center justify-between gap-3 text-xs hover:bg-zinc-100/50 dark:hover:bg-zinc-900/50 transition-colors">
+                          <div key={contribKey} className="p-3 sm:py-3 sm:px-3.5 flex items-center justify-between gap-3 text-xs hover:bg-slate-100/80 dark:hover:bg-slate-800/50 transition-colors">
                             <div className="min-w-0 flex-1">
-                              <div className="font-extrabold text-zinc-800 dark:text-zinc-200 truncate text-xs sm:text-sm">
-                                {c.note || (lang === 'bn' ? 'কিস্তি জমা' : 'Installment Added')}
+                              <div className="flex items-center gap-1.5">
+                                {isWithdrawal ? (
+                                  <ArrowUpRight className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400 stroke-[2.5] shrink-0" />
+                                ) : (
+                                  <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 stroke-[2.5] shrink-0" />
+                                )}
+                                <span className="font-bold text-slate-900 dark:text-white truncate text-xs sm:text-sm">
+                                  {c.note || (isWithdrawal ? (lang === 'bn' ? 'টাকা উত্তোলন' : 'Withdrawal') : (lang === 'bn' ? 'কিস্তি জমা' : 'Deposit Added'))}
+                                </span>
                               </div>
-                              <div className="text-[11px] text-zinc-400 font-semibold mt-0.5">
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
                                 {new Date(c.date).toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' })}{' • '}{new Date(c.date).toLocaleTimeString(lang === 'bn' ? 'bn-BD' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
                               </div>
                             </div>
                             <div className="flex items-center gap-2.5 shrink-0">
-                              <span className="font-black text-emerald-600 dark:text-emerald-400 text-sm sm:text-base">
-                                + ৳{formatNumber(c.amount, lang)}
+                              <span className={`font-bold font-mono text-sm sm:text-base flex items-center gap-0.5 ${
+                                isWithdrawal 
+                                  ? 'text-rose-600 dark:text-rose-400' 
+                                  : 'text-emerald-600 dark:text-emerald-400'
+                              }`}>
+                                {isWithdrawal ? `- ৳${formatNumber(c.amount, lang)}` : `+ ৳${formatNumber(c.amount, lang)}`}
                               </span>
-                              <div className="flex items-center gap-1 pl-2 border-l border-zinc-200 dark:border-zinc-800">
+                              <div className="flex items-center gap-1 pl-2 border-l border-slate-200 dark:border-slate-800">
                                 {editGoalContribution && (
                                   <button
                                     type="button"
                                     onClick={() => openEditContributionModal(c)}
-                                    className="p-2 text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
-                                    title={lang === 'bn' ? 'জমা সম্পাদনা করুন' : 'Edit Contribution'}
+                                    className="p-1.5 text-slate-500 hover:text-slate-950 dark:hover:text-white hover:bg-slate-200/70 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                                    title={lang === 'bn' ? 'সম্পাদনা করুন' : 'Edit'}
                                   >
-                                    <Pencil className="w-4 h-4" />
+                                    <Pencil className="w-3.5 h-3.5" />
                                   </button>
                                 )}
                                 {deleteGoalContribution && (
                                   <button
                                     type="button"
                                     onClick={() => openDeleteContributionModal(c)}
-                                    className="p-2 text-zinc-400 hover:text-[#e0385e] dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition-colors cursor-pointer"
-                                    title={lang === 'bn' ? 'জমা মুছে ফেলুন' : 'Delete Contribution'}
+                                    className="p-1.5 text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition-colors cursor-pointer"
+                                    title={lang === 'bn' ? 'মুছে ফেলুন' : 'Delete'}
                                   >
-                                    <Trash2 className="w-4 h-4" />
+                                    <Trash2 className="w-3.5 h-3.5" />
                                   </button>
                                 )}
                               </div>
@@ -1763,7 +2231,7 @@ export default function GoalsManager({
                   <button
                     type="button"
                     onClick={openCancelGoalConfirm}
-                    className="text-xs font-extrabold text-[#e0385e] hover:underline cursor-pointer"
+                    className="text-xs font-bold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
                   >
                     {lang === 'bn' ? 'লক্ষ্যটি বাতিল করুন' : 'Cancel this Goal'}
                   </button>
@@ -1773,7 +2241,7 @@ export default function GoalsManager({
                   <button
                     type="button"
                     onClick={openReactivateGoalConfirm}
-                    className="text-xs font-extrabold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 cursor-pointer hover:underline flex items-center gap-1.5"
+                    className="text-xs font-bold text-slate-900 dark:text-white cursor-pointer hover:underline flex items-center gap-1.5"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                     <span>{lang === 'bn' ? 'লক্ষ্যটি পুনরায় চালু করুন' : 'Reactivate this Goal'}</span>
@@ -1785,59 +2253,46 @@ export default function GoalsManager({
         </div>
       )}
 
-      {/* ── 1 & 2. CUSTOM REACTIVATION CONFIRMATION POPUP (LEARNED FROM RESTORE CUSTOMER) ── */}
+      {/* ── 1 & 2. CUSTOM REACTIVATION CONFIRMATION POPUP ── */}
       {showReactivateConfirm && selectedGoal && (
         <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-[2px] animate-in fade-in duration-150"
+          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs"
           onClick={closeReactivateGoalConfirm}
         >
-          <motion.div
+          <div
             onClick={(e) => e.stopPropagation()}
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white dark:bg-zinc-900 w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl shadow-2xl p-6"
+            className="bg-white dark:bg-[#0D121D] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-6"
           >
             <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                <RotateCcw className="w-8 h-8 text-emerald-600 dark:text-emerald-500" />
+              <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                <RotateCcw className="w-6 h-6 text-slate-900 dark:text-white" />
               </div>
-              <h3 className="text-lg font-black text-emerald-600 dark:text-emerald-400 mb-2">
+              <h3 className="text-base font-extrabold text-slate-950 dark:text-white mb-1.5">
                 {lang === 'bn' ? 'লক্ষ্য পুনরায় চালুকরণ' : 'Reactivate Goal'}
               </h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                 {lang === 'bn' 
                   ? 'আপনি কি নিশ্চিত এই লক্ষ্যটি পুনরায় চলমান তালিকায় ফিরিয়ে নিতে চান?' 
                   : 'Are you sure you want to restore this goal back to your active list?'}
               </p>
               
-              {/* Details Card */}
-              <div className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-left space-y-2.5 mt-4">
+              <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 text-left space-y-2 mt-4 text-xs">
                 <div className="flex justify-between items-baseline">
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'লক্ষ্য' : 'Goal'}</span>
-                  <span className="text-sm font-extrabold text-zinc-850 dark:text-zinc-150 truncate max-w-[200px]">{selectedGoal.title}</span>
+                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'লক্ষ্য' : 'Goal'}</span>
+                  <span className="font-bold text-slate-900 dark:text-white truncate max-w-[180px]">{selectedGoal.title}</span>
                 </div>
                 <div className="flex justify-between items-baseline">
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'ধরন' : 'Type'}</span>
-                  <span className="text-xs font-extrabold text-zinc-700 dark:text-zinc-300">{selectedGoal.type === 'savings' ? t.savings : t.deposit}</span>
-                </div>
-                {selectedGoal.customerName && (
-                  <div className="flex justify-between items-baseline">
-                    <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'গ্রাহক' : 'Customer'}</span>
-                    <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{selectedGoal.customerName}</span>
-                  </div>
-                )}
-                <div className="flex justify-between items-baseline">
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'লক্ষ্যমাত্রা' : 'Target'}</span>
-                  <span className="text-sm font-black text-zinc-900 dark:text-white">৳ {formatNumber(selectedGoal.targetAmount, lang)}</span>
+                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'লক্ষ্যমাত্রা' : 'Target'}</span>
+                  <span className="font-bold font-mono text-slate-900 dark:text-white">৳ {formatNumber(selectedGoal.targetAmount, lang)}</span>
                 </div>
                 <div className="flex justify-between items-baseline">
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'জমা হয়েছে' : 'Saved'}</span>
-                  <span className="text-sm font-black text-emerald-600 dark:text-emerald-400">৳ {formatNumber(selectedGoal.savedAmount || 0, lang)}</span>
+                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'জমা হয়েছে' : 'Saved'}</span>
+                  <span className="font-bold font-mono text-emerald-600 dark:text-emerald-400">৳ {formatNumber(selectedGoal.savedAmount || 0, lang)}</span>
                 </div>
               </div>
             </div>
 
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2">
               <button
                 type="button"
                 onClick={async () => {
@@ -1847,75 +2302,58 @@ export default function GoalsManager({
                   closeReactivateGoalConfirm();
                   toast.success(lang === 'bn' ? 'লক্ষ্যটি সফলভাবে পুনরায় চালু করা হয়েছে' : 'Goal reactivated successfully');
                 }}
-                className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl cursor-pointer transition-colors"
+                className="w-full py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-xl border-2 border-slate-950 dark:border-white cursor-pointer transition-colors text-xs"
               >
                 {lang === 'bn' ? 'হ্যাঁ, পুনরায় চালু করুন' : 'Yes, Reactivate Goal'}
               </button>
               <button
                 type="button"
                 onClick={closeReactivateGoalConfirm}
-                className="w-full py-4 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-300 font-bold rounded-xl cursor-pointer transition-colors"
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer transition-colors text-xs"
               >
                 {lang === 'bn' ? 'বাতিল' : 'Cancel'}
               </button>
             </div>
-          </motion.div>
+          </div>
         </div>
       )}
 
-      {/* ── 2. CUSTOM CANCEL CONFIRMATION POPUP (LEARNED FROM MOVE CUSTOMER TO TRASH) ── */}
+      {/* ── 2. CUSTOM CANCEL CONFIRMATION POPUP ── */}
       {showCancelConfirm && selectedGoal && (
         <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-[2px] animate-in fade-in duration-150"
+          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs"
           onClick={closeCancelGoalConfirm}
         >
-          <motion.div
+          <div
             onClick={(e) => e.stopPropagation()}
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white dark:bg-zinc-900 w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl shadow-2xl p-6"
+            className="bg-white dark:bg-[#0D121D] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-6"
           >
             <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                <AlertTriangle className="w-8 h-8 text-amber-600 dark:text-amber-500" />
+              <div className="w-12 h-12 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                <AlertTriangle className="w-6 h-6 text-rose-600 dark:text-rose-400" />
               </div>
-              <h3 className="text-lg font-black text-amber-600 dark:text-amber-500 mb-2">
+              <h3 className="text-base font-extrabold text-slate-950 dark:text-white mb-1.5">
                 {lang === 'bn' ? 'লক্ষ্য বাতিল নিশ্চিতকরণ' : 'Confirm Goal Cancellation'}
               </h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                 {lang === 'bn' 
                   ? 'আপনি কি নিশ্চিতভাবে এই লক্ষ্যটি বাতিল করতে চান? এটি আর্কাইভে সংরক্ষিত থাকবে।' 
                   : 'Are you sure you want to cancel this goal? It will be moved to History.'}
               </p>
               
-              {/* Details Card */}
-              <div className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-left space-y-2.5 mt-4">
+              <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 text-left space-y-2 mt-4 text-xs">
                 <div className="flex justify-between items-baseline">
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'লক্ষ্য' : 'Goal'}</span>
-                  <span className="text-sm font-extrabold text-zinc-850 dark:text-zinc-150 truncate max-w-[200px]">{selectedGoal.title}</span>
+                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'লক্ষ্য' : 'Goal'}</span>
+                  <span className="font-bold text-slate-900 dark:text-white truncate max-w-[180px]">{selectedGoal.title}</span>
                 </div>
                 <div className="flex justify-between items-baseline">
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'ধরন' : 'Type'}</span>
-                  <span className="text-xs font-extrabold text-zinc-700 dark:text-zinc-300">{selectedGoal.type === 'savings' ? t.savings : t.deposit}</span>
-                </div>
-                {selectedGoal.customerName && (
-                  <div className="flex justify-between items-baseline">
-                    <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'গ্রাহক' : 'Customer'}</span>
-                    <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{selectedGoal.customerName}</span>
-                  </div>
-                )}
-                <div className="flex justify-between items-baseline">
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'লক্ষ্যমাত্রা' : 'Target'}</span>
-                  <span className="text-sm font-black text-zinc-900 dark:text-white">৳ {formatNumber(selectedGoal.targetAmount, lang)}</span>
-                </div>
-                <div className="flex justify-between items-baseline">
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'জমা হয়েছে' : 'Saved'}</span>
-                  <span className="text-sm font-black text-emerald-600 dark:text-emerald-400">৳ {formatNumber(selectedGoal.savedAmount || 0, lang)}</span>
+                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'লক্ষ্যমাত্রা' : 'Target'}</span>
+                  <span className="font-bold font-mono text-slate-900 dark:text-white">৳ {formatNumber(selectedGoal.targetAmount, lang)}</span>
                 </div>
               </div>
             </div>
 
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2">
               <button
                 type="button"
                 onClick={async () => {
@@ -1925,75 +2363,58 @@ export default function GoalsManager({
                   closeGoalDetail();
                   toast.success(lang === 'bn' ? 'লক্ষ্যটি বাতিল করা হয়েছে' : 'Goal cancelled');
                 }}
-                className="w-full py-4 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl cursor-pointer transition-colors"
+                className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent hover:border-slate-950 dark:hover:border-white cursor-pointer transition-colors text-xs"
               >
                 {lang === 'bn' ? 'হ্যাঁ, বাতিল করুন' : 'Yes, Cancel Goal'}
               </button>
               <button
                 type="button"
                 onClick={closeCancelGoalConfirm}
-                className="w-full py-4 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-300 font-bold rounded-xl cursor-pointer transition-colors"
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer transition-colors text-xs"
               >
                 {lang === 'bn' ? 'না, ফেরত যান' : 'No, Go Back'}
               </button>
             </div>
-          </motion.div>
+          </div>
         </div>
       )}
 
-      {/* ── 2. CUSTOM DELETE CONFIRMATION POPUP (LEARNED FROM MOVE CUSTOMER TO TRASH) ── */}
+      {/* ── 2. CUSTOM DELETE CONFIRMATION POPUP ── */}
       {showDeleteConfirm && selectedGoal && (
         <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-[2px] animate-in fade-in duration-150"
+          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs"
           onClick={closeDeleteGoalConfirm}
         >
-          <motion.div
+          <div
             onClick={(e) => e.stopPropagation()}
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white dark:bg-zinc-900 w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl shadow-2xl p-6"
+            className="bg-white dark:bg-[#0D121D] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-6"
           >
             <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-rose-100 dark:bg-rose-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Trash2 className="w-8 h-8 text-[#e0385e]" />
+              <div className="w-12 h-12 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                <Trash2 className="w-6 h-6 text-rose-600 dark:text-rose-400" />
               </div>
-              <h3 className="text-lg font-black text-[#e0385e] mb-2">
+              <h3 className="text-base font-extrabold text-slate-950 dark:text-white mb-1.5">
                 {lang === 'bn' ? 'লক্ষ্য স্থায়ীভাবে মুছুন' : 'Delete Goal Permanently'}
               </h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                 {lang === 'bn' 
                   ? 'আপনি কি নিশ্চিত এই লক্ষ্যটি চিরতরে মুছে ফেলতে চান? এর কিস্তির সকল তথ্য চিরতরে মুছে যাবে।' 
                   : 'Are you sure you want to delete this goal permanently? All contribution records will be permanently lost.'}
               </p>
               
-              {/* Details Card */}
-              <div className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-left space-y-2.5 mt-4">
+              <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 text-left space-y-2 mt-4 text-xs">
                 <div className="flex justify-between items-baseline">
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'লক্ষ্য' : 'Goal'}</span>
-                  <span className="text-sm font-extrabold text-zinc-850 dark:text-zinc-150 truncate max-w-[200px]">{selectedGoal.title}</span>
+                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'লক্ষ্য' : 'Goal'}</span>
+                  <span className="font-bold text-slate-900 dark:text-white truncate max-w-[180px]">{selectedGoal.title}</span>
                 </div>
                 <div className="flex justify-between items-baseline">
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'ধরন' : 'Type'}</span>
-                  <span className="text-xs font-extrabold text-zinc-700 dark:text-zinc-300">{selectedGoal.type === 'savings' ? t.savings : t.deposit}</span>
-                </div>
-                {selectedGoal.customerName && (
-                  <div className="flex justify-between items-baseline">
-                    <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'গ্রাহক' : 'Customer'}</span>
-                    <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{selectedGoal.customerName}</span>
-                  </div>
-                )}
-                <div className="flex justify-between items-baseline">
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'লক্ষ্যমাত্রা' : 'Target'}</span>
-                  <span className="text-sm font-black text-zinc-900 dark:text-white">৳ {formatNumber(selectedGoal.targetAmount, lang)}</span>
-                </div>
-                <div className="flex justify-between items-baseline">
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'জমা হয়েছে' : 'Saved'}</span>
-                  <span className="text-sm font-black text-emerald-600 dark:text-emerald-400">৳ {formatNumber(selectedGoal.savedAmount || 0, lang)}</span>
+                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'লক্ষ্যমাত্রা' : 'Target'}</span>
+                  <span className="font-bold font-mono text-slate-900 dark:text-white">৳ {formatNumber(selectedGoal.targetAmount, lang)}</span>
                 </div>
               </div>
             </div>
 
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2">
               <button
                 type="button"
                 onClick={async () => {
@@ -2003,60 +2424,56 @@ export default function GoalsManager({
                   closeGoalDetail();
                   toast.success(lang === 'bn' ? 'লক্ষ্যটি মুছে ফেলা হয়েছে' : 'Goal deleted successfully');
                 }}
-                className="w-full py-4 bg-[#e0385e] hover:bg-[#c92a4f] text-white font-bold rounded-xl cursor-pointer transition-colors"
+                className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent hover:border-slate-950 dark:hover:border-white cursor-pointer transition-colors text-xs"
               >
                 {lang === 'bn' ? 'হ্যাঁ, স্থায়ীভাবে মুছুন' : 'Yes, Delete Permanently'}
               </button>
               <button
                 type="button"
                 onClick={closeDeleteGoalConfirm}
-                className="w-full py-4 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-300 font-bold rounded-xl cursor-pointer transition-colors"
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer transition-colors text-xs"
               >
                 {lang === 'bn' ? 'বাতিল' : 'Cancel'}
               </button>
             </div>
-          </motion.div>
+          </div>
         </div>
       )}
 
       {/* ── EMI NOTIFICATION REMINDER MODAL ── */}
       {emiReminderGoal && (
         <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-[2px] animate-in fade-in duration-150 overflow-hidden"
+          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs overflow-hidden"
           onClick={closeEmiReminderModal}
         >
           <div className="absolute inset-0" onClick={closeEmiReminderModal} />
 
-          <motion.div
+          <div
             onClick={(e) => e.stopPropagation()}
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2 }}
-            className="bg-white dark:bg-zinc-900 w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col relative z-10"
+            className="bg-white dark:bg-[#0D121D] w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col relative z-10"
           >
             {/* Header */}
-            <div className="p-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between bg-zinc-50 dark:bg-zinc-900/50">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between bg-slate-50/70 dark:bg-slate-900/50">
               <div>
-                <h3 className="text-lg font-black text-zinc-900 dark:text-white leading-tight">
+                <h3 className="text-base font-bold text-slate-950 dark:text-white leading-tight">
                   {lang === 'bn' ? 'কিস্তি রিমাইন্ডার' : 'Monthly EMI Reminder'}
                 </h3>
-                <p className="text-xs text-zinc-450 dark:text-zinc-500 font-semibold truncate max-w-[240px] mt-0.5">
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium truncate max-w-[240px] mt-0.5">
                   {emiReminderGoal.title}
                 </p>
               </div>
               <button
                 onClick={closeEmiReminderModal}
-                className="p-2.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 rounded-full text-zinc-500 dark:text-zinc-400 transition-colors cursor-pointer"
+                className="p-1.5 bg-white dark:bg-[#0D121D] hover:bg-slate-100 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-lg text-slate-500 dark:text-slate-400 transition-colors cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Modal Body */}
-            <div className="p-5 space-y-4 overflow-y-auto hide-scrollbar">
-              {/* 7-day prior notice banner */}
-              <div className="p-3.5 bg-amber-50 dark:bg-amber-950/25 border border-amber-200 dark:border-amber-900/50 rounded-2xl text-xs text-amber-800 dark:text-amber-300 font-bold flex items-start gap-2.5 leading-relaxed">
-                <Info className="w-4.5 h-4.5 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+            <div className="p-4 space-y-4 overflow-y-auto hide-scrollbar">
+              <div className="p-3 bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs text-slate-600 dark:text-slate-300 font-medium flex items-start gap-2.5 leading-relaxed">
+                <Info className="w-4 h-4 shrink-0 text-slate-900 dark:text-white mt-0.5" />
                 <span>
                   {lang === 'bn'
                     ? 'প্রতি মাসে আপনার কিস্তির নির্ধারিত তারিখের ৭ দিন আগে থেকে প্রতিদিন নোটিফিকেশন অ্যালার্ট পাঠানো হবে যাতে সময়মতো কিস্তি পরিশোধ করা যায়।'
@@ -2065,20 +2482,20 @@ export default function GoalsManager({
               </div>
 
               {/* Goal Snapshot */}
-              <div className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-850 p-4 rounded-2xl flex items-center justify-between gap-3">
+              <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 p-3.5 rounded-xl flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <span className="text-[10px] font-extrabold uppercase text-zinc-400 dark:text-zinc-500 block">
+                  <span className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400 block">
                     {lang === 'bn' ? 'কিস্তির পরিমাণ' : 'Installment Amount'}
                   </span>
-                  <span className="text-lg font-black text-zinc-900 dark:text-white">
+                  <span className="text-base font-bold font-mono text-slate-950 dark:text-white">
                     ৳{formatNumber(emiReminderGoal.installmentAmount || emiReminderGoal.targetAmount, lang)}
                   </span>
                 </div>
                 <div className="text-right">
-                  <span className="text-[10px] font-extrabold uppercase text-zinc-400 dark:text-zinc-500 block">
+                  <span className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400 block">
                     {lang === 'bn' ? 'ধরন' : 'Type'}
                   </span>
-                  <span className="text-xs font-black text-rose-500 uppercase">
+                  <span className="text-xs font-bold text-slate-900 dark:text-white uppercase">
                     {emiReminderGoal.type === 'deposit' ? 'EMI / কিস্তি' : 'Savings Goal'}
                   </span>
                 </div>
@@ -2086,21 +2503,20 @@ export default function GoalsManager({
 
               {/* Day of Month Selector */}
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase flex items-center gap-1.5">
-                  <CalendarClock className="w-3.5 h-3.5 text-[#e0385e]" />
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1.5">
+                  <CalendarClock className="w-3.5 h-3.5 text-slate-900 dark:text-white" />
                   {lang === 'bn' ? 'প্রতি মাসের কিস্তির তারিখ' : 'Day of Month for EMI'} *
                 </label>
                 <select
                   value={emiDueDay}
                   onChange={(e) => setEmiDueDay(Number(e.target.value))}
-                  className="w-full px-4 py-3 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-700 focus:border-emerald-500 dark:focus:border-emerald-500 rounded-xl text-zinc-900 dark:text-zinc-100 text-base font-bold focus:outline-none transition-all cursor-pointer"
-                  style={{ colorScheme: 'dark' }}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white rounded-xl text-slate-950 dark:text-white text-sm font-bold focus:outline-none transition-colors cursor-pointer"
                 >
                   {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
                     <option 
                       key={day} 
                       value={day}
-                      className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-bold"
+                      className="bg-white dark:bg-[#0D121D] text-slate-950 dark:text-white font-bold"
                     >
                       {lang === 'bn' ? `প্রতি মাসের ${formatNumber(day, 'bn')} তারিখ` : `Day ${day} of every month`}
                     </option>
@@ -2110,22 +2526,20 @@ export default function GoalsManager({
 
               {/* Daily Alert Time */}
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase flex items-center gap-1.5">
-                  <Bell className="w-3.5 h-3.5 text-amber-500" />
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1.5">
+                  <Bell className="w-3.5 h-3.5 text-slate-900 dark:text-white" />
                   {lang === 'bn' ? 'নোটিফিকেশন অ্যালার্টের সময়' : 'Notification Alert Time'}
                 </label>
                 <input
                   type="time"
                   value={emiAlertTime}
                   onChange={(e) => setEmiAlertTime(e.target.value)}
-                  className="w-full px-4 py-3 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-700 focus:border-emerald-500 dark:focus:border-emerald-500 rounded-xl text-zinc-900 dark:text-zinc-100 text-base font-bold focus:outline-none transition-all"
-                  style={{ colorScheme: 'dark' }}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white rounded-xl text-slate-950 dark:text-white text-sm font-bold focus:outline-none transition-colors"
                 />
               </div>
 
-              {/* Existing active reminder status */}
               {reminders.some(r => r.goalId === emiReminderGoal.id && r.active) && (
-                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/25 border border-emerald-200 dark:border-emerald-900/50 rounded-xl text-xs text-emerald-800 dark:text-emerald-300 font-bold flex items-center gap-2">
+                <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/60 rounded-xl text-xs text-slate-900 dark:text-white font-bold flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                   <span>
                     {lang === 'bn'
@@ -2137,14 +2551,14 @@ export default function GoalsManager({
             </div>
 
             {/* Actions */}
-            <div className="p-5 border-t border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 space-y-2.5">
+            <div className="p-4 border-t border-slate-100 dark:border-slate-800/80 bg-white dark:bg-[#0D121D] space-y-2">
               <button
                 type="button"
                 disabled={isSavingEmiReminder}
                 onClick={handleSaveEmiReminder}
-                className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-base shadow-md cursor-pointer transition-colors flex items-center justify-center gap-2"
+                className="w-full py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-xl border-2 border-slate-950 dark:border-white text-xs cursor-pointer transition-colors flex items-center justify-center gap-2"
               >
-                <Bell className="w-5 h-5" />
+                <Bell className="w-4 h-4" />
                 {reminders.some(r => r.goalId === emiReminderGoal.id && r.active)
                   ? (lang === 'bn' ? 'রিমাইন্ডার আপডেট করুন' : 'Update EMI Reminder')
                   : (lang === 'bn' ? 'কিস্তির অ্যালার্ট চালু করুন' : 'Enable EMI Reminder')}
@@ -2154,7 +2568,7 @@ export default function GoalsManager({
                 <button
                   type="button"
                   onClick={handleRemoveEmiReminder}
-                  className="w-full py-3.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-900/30 text-[#e0385e] dark:text-rose-400 font-bold rounded-xl text-sm cursor-pointer transition-colors"
+                  className="w-full py-2.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-900/40 border-2 border-rose-300 dark:border-rose-800 text-rose-600 dark:text-rose-400 font-bold rounded-xl text-xs cursor-pointer transition-colors"
                 >
                   {lang === 'bn' ? 'রিমাইন্ডার বন্ধ করুন' : 'Turn Off Reminder'}
                 </button>
@@ -2163,37 +2577,35 @@ export default function GoalsManager({
               <button
                 type="button"
                 onClick={closeEmiReminderModal}
-                className="w-full py-3 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 font-bold rounded-xl text-sm cursor-pointer transition-colors"
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer transition-colors"
               >
                 {lang === 'bn' ? 'বাতিল' : 'Cancel'}
               </button>
             </div>
-          </motion.div>
+          </div>
         </div>
       )}
 
       {/* ── EDIT CONTRIBUTION MODAL ── */}
       {editingContribution && selectedGoal && (
         <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-[2px] animate-in fade-in duration-150"
+          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs"
           onClick={closeEditContributionModal}
         >
-          <motion.div
+          <div
             onClick={(e) => e.stopPropagation()}
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white dark:bg-zinc-900 w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl p-6 relative"
+            className="bg-white dark:bg-[#0D121D] w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-5 relative"
           >
-            <div className="flex items-center justify-between pb-4 border-b border-zinc-100 dark:border-zinc-800 mb-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800/80 mb-4">
               <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-950/40 rounded-xl flex items-center justify-center text-emerald-600 dark:text-emerald-400">
-                  <Pencil className="w-5 h-5" />
+                <div className="w-8 h-8 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg flex items-center justify-center text-slate-900 dark:text-white">
+                  <Pencil className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-base font-black text-zinc-900 dark:text-white">
+                  <h3 className="text-sm font-bold text-slate-950 dark:text-white">
                     {lang === 'bn' ? 'জমার বিবরণ সম্পাদনা' : 'Edit Contribution'}
                   </h3>
-                  <p className="text-[11px] font-bold text-zinc-400 truncate max-w-[200px]">
+                  <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate max-w-[200px]">
                     {selectedGoal.title}
                   </p>
                 </div>
@@ -2201,30 +2613,32 @@ export default function GoalsManager({
               <button
                 type="button"
                 onClick={closeEditContributionModal}
-                className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                className="p-1.5 text-slate-500 hover:text-slate-950 dark:hover:text-white rounded-lg border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white transition-colors cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveEditContribution} className="space-y-4">
+            <form onSubmit={handleSaveEditContribution} className="space-y-3.5">
               <div>
-                <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block mb-1.5">
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block mb-1">
                   {lang === 'bn' ? 'জমার পরিমাণ (৳)' : 'Deposit Amount (৳)'} *
                 </label>
                 <input
                   type="text"
+                  inputMode="decimal"
+                  data-numpad="true"
                   required
                   value={editContribAmount}
                   onChange={(e) => handleAmountChange(e.target.value, setEditContribAmount)}
                   placeholder="0.00"
-                  className="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-300 dark:border-zinc-700 focus:border-emerald-500 dark:focus:border-emerald-500 rounded-xl text-zinc-900 dark:text-zinc-100 text-lg font-black focus:outline-none transition-all"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white rounded-xl text-slate-950 dark:text-white text-base font-mono font-bold focus:outline-none transition-colors"
                   autoFocus
                 />
               </div>
 
               <div>
-                <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block mb-1.5">
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block mb-1">
                   {lang === 'bn' ? 'বিবরণ / নোট' : 'Note / Description'}
                 </label>
                 <input
@@ -2232,29 +2646,26 @@ export default function GoalsManager({
                   value={editContribNote}
                   onChange={(e) => setEditContribNote(e.target.value)}
                   placeholder={lang === 'bn' ? 'যেমন: ১ম কিস্তি' : 'e.g. 1st installment'}
-                  className="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-300 dark:border-zinc-700 focus:border-emerald-500 dark:focus:border-emerald-500 rounded-xl text-zinc-900 dark:text-zinc-100 text-sm font-bold focus:outline-none transition-all"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white rounded-xl text-slate-950 dark:text-white text-sm font-medium focus:outline-none transition-colors"
                 />
               </div>
 
-              <div className="flex gap-3 pt-2">
+              <div className="flex gap-2.5 pt-1">
                 <button
                   type="button"
                   onClick={closeEditContributionModal}
-                  className="flex-1 py-3 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 font-bold rounded-xl text-sm cursor-pointer transition-colors"
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer transition-colors"
                 >
                   {lang === 'bn' ? 'বাতিল' : 'Cancel'}
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingEditContrib}
-                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-sm shadow-md cursor-pointer transition-colors flex items-center justify-center gap-2"
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl border-2 border-transparent hover:border-slate-950 dark:hover:border-white text-xs cursor-pointer transition-colors flex items-center justify-center gap-2"
                 >
                   {isSavingEditContrib ? (
                     <span className="flex items-center gap-2">
-                      <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                       {t.saving}
                     </span>
                   ) : (
@@ -2263,69 +2674,57 @@ export default function GoalsManager({
                 </button>
               </div>
             </form>
-          </motion.div>
+          </div>
         </div>
       )}
 
       {/* ── DELETE CONTRIBUTION CONFIRMATION MODAL ── */}
       {deletingContribution && selectedGoal && (
         <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-[2px] animate-in fade-in duration-150"
+          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs"
           onClick={closeDeleteContributionModal}
         >
-          <motion.div
+          <div
             onClick={(e) => e.stopPropagation()}
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white dark:bg-zinc-900 w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl shadow-2xl p-6"
+            className="bg-white dark:bg-[#0D121D] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-5"
           >
-            <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-rose-100 dark:bg-rose-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Trash2 className="w-8 h-8 text-[#e0385e] dark:text-rose-400" />
+            <div className="text-center mb-5">
+              <div className="w-12 h-12 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                <Trash2 className="w-6 h-6 text-rose-600 dark:text-rose-400" />
               </div>
-              <h3 className="text-lg font-black text-[#e0385e] dark:text-rose-400 mb-2">
+              <h3 className="text-base font-extrabold text-slate-950 dark:text-white mb-1">
                 {lang === 'bn' ? 'জমা মুছে ফেলুন' : 'Delete Contribution'}
               </h3>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                 {lang === 'bn' 
                   ? 'আপনি কি নিশ্চিত এই জমার রেকর্ডটি মুছে ফেলতে চান? এটি লক্ষ্যের মোট জমা থেকে বাদ দেওয়া হবে।' 
                   : 'Are you sure you want to delete this contribution? It will be deducted from your total saved amount.'}
               </p>
               
-              {/* Details Card */}
-              <div className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-left space-y-2 mt-4 text-xs">
+              <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 text-left space-y-1.5 mt-3 text-xs">
                 <div className="flex justify-between items-baseline">
-                  <span className="font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'পরিমাণ' : 'Amount'}</span>
-                  <span className="text-sm font-black text-rose-600 dark:text-rose-400">৳ {formatNumber(deletingContribution.amount, lang)}</span>
+                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'পরিমাণ' : 'Amount'}</span>
+                  <span className="text-sm font-bold font-mono text-rose-600 dark:text-rose-400">৳ {formatNumber(deletingContribution.amount, lang)}</span>
                 </div>
                 <div className="flex justify-between items-baseline">
-                  <span className="font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'বিবরণ' : 'Note'}</span>
-                  <span className="font-bold text-zinc-800 dark:text-zinc-200 truncate max-w-[180px]">
+                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'বিবরণ' : 'Note'}</span>
+                  <span className="font-medium text-slate-900 dark:text-white truncate max-w-[180px]">
                     {deletingContribution.note || (lang === 'bn' ? 'কিস্তি জমা' : 'Installment Added')}
-                  </span>
-                </div>
-                <div className="flex justify-between items-baseline">
-                  <span className="font-bold text-zinc-400 dark:text-zinc-500 uppercase">{lang === 'bn' ? 'তারিখ' : 'Date'}</span>
-                  <span className="font-bold text-zinc-600 dark:text-zinc-400">
-                    {new Date(deletingContribution.date).toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </span>
                 </div>
               </div>
             </div>
 
-            <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col gap-2">
               <button
                 type="button"
                 disabled={isDeletingContrib}
                 onClick={handleConfirmDeleteContribution}
-                className="w-full py-3.5 bg-[#e0385e] hover:bg-[#c92a4f] text-white font-black rounded-xl text-sm shadow-md cursor-pointer transition-colors flex items-center justify-center gap-2"
+                className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent hover:border-slate-950 dark:hover:border-white text-xs cursor-pointer transition-colors flex items-center justify-center gap-2"
               >
                 {isDeletingContrib ? (
                   <span className="flex items-center gap-2">
-                    <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     {lang === 'bn' ? 'মুছে ফেলা হচ্ছে...' : 'Deleting...'}
                   </span>
                 ) : (
@@ -2336,37 +2735,35 @@ export default function GoalsManager({
               <button
                 type="button"
                 onClick={closeDeleteContributionModal}
-                className="w-full py-3 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 font-bold rounded-xl text-sm cursor-pointer transition-colors"
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer transition-colors"
               >
                 {lang === 'bn' ? 'বাতিল' : 'Cancel'}
               </button>
             </div>
-          </motion.div>
+          </div>
         </div>
       )}
 
-      {/* ── RENAME GOAL POPUP MODAL (OPENED BY TAPPING GOAL TITLE) ── */}
+      {/* ── RENAME GOAL POPUP MODAL ── */}
       {isEditingGoalTitle && selectedGoal && (
         <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-[2px] animate-in fade-in duration-150"
+          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs"
           onClick={closeRenameGoal}
         >
-          <motion.div
+          <div
             onClick={(e) => e.stopPropagation()}
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white dark:bg-zinc-900 w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl p-6 relative"
+            className="bg-white dark:bg-[#0D121D] w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-5 relative"
           >
-            <div className="flex items-center justify-between pb-4 border-b border-zinc-100 dark:border-zinc-800 mb-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800/80 mb-4">
               <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-950/40 rounded-xl flex items-center justify-center text-emerald-600 dark:text-emerald-400">
-                  <Pencil className="w-5 h-5" />
+                <div className="w-8 h-8 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg flex items-center justify-center text-slate-900 dark:text-white">
+                  <Pencil className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-base font-black text-zinc-900 dark:text-white">
+                  <h3 className="text-sm font-bold text-slate-950 dark:text-white">
                     {lang === 'bn' ? 'লক্ষ্যের শিরোনাম পরিবর্তন' : 'Rename Goal'}
                   </h3>
-                  <p className="text-[11px] font-bold text-zinc-400 truncate max-w-[200px]">
+                  <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate max-w-[200px]">
                     {selectedGoal.title}
                   </p>
                 </div>
@@ -2374,15 +2771,15 @@ export default function GoalsManager({
               <button
                 type="button"
                 onClick={closeRenameGoal}
-                className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                className="p-1.5 text-slate-500 hover:text-slate-950 dark:hover:text-white rounded-lg border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white transition-colors cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveGoalTitle} className="space-y-4">
+            <form onSubmit={handleSaveGoalTitle} className="space-y-3.5">
               <div>
-                <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block mb-1.5">
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block mb-1">
                   {lang === 'bn' ? 'নতুন শিরোনাম' : 'Goal Title'} *
                 </label>
                 <input
@@ -2392,30 +2789,27 @@ export default function GoalsManager({
                   value={editedGoalTitle}
                   onChange={(e) => setEditedGoalTitle(e.target.value)}
                   placeholder={lang === 'bn' ? 'লক্ষ্যের নতুন নাম লিখুন' : 'Enter new goal title'}
-                  className="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-300 dark:border-zinc-700 focus:border-emerald-500 dark:focus:border-emerald-500 rounded-xl text-zinc-900 dark:text-zinc-100 text-base font-black focus:outline-none transition-all"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white rounded-xl text-slate-950 dark:text-white text-base font-bold focus:outline-none transition-colors"
                   autoFocus
                 />
               </div>
 
-              <div className="flex gap-3 pt-2">
+              <div className="flex gap-2.5 pt-1">
                 <button
                   type="button"
                   onClick={closeRenameGoal}
-                  className="flex-1 py-3 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 font-bold rounded-xl text-sm cursor-pointer transition-colors"
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer transition-colors"
                 >
                   {lang === 'bn' ? 'বাতিল' : 'Cancel'}
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingGoalTitle}
-                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-sm shadow-md cursor-pointer transition-colors flex items-center justify-center gap-2"
+                  className="flex-1 py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-xl border-2 border-slate-950 dark:border-white text-xs cursor-pointer transition-colors flex items-center justify-center gap-2"
                 >
                   {isSavingGoalTitle ? (
                     <span className="flex items-center gap-2">
-                      <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
+                      <div className="w-3.5 h-3.5 border-2 border-white dark:border-black border-t-transparent rounded-full animate-spin" />
                       {t.saving}
                     </span>
                   ) : (
@@ -2424,7 +2818,7 @@ export default function GoalsManager({
                 </button>
               </div>
             </form>
-          </motion.div>
+          </div>
         </div>
       )}
     </div>

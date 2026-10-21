@@ -151,3 +151,25 @@ export function matchesPhonetic(name: string, query: string): boolean {
 export function getPhoneticKey(str: string): string {
   return normalizeConsonants(str);
 }
+
+export const PHONETIC_SEARCH_STORAGE_KEY = 'search_bangla_in_english';
+
+export function isPhoneticSearchEnabled(): boolean {
+  if (typeof window === 'undefined' || !window.localStorage) return false;
+  try {
+    const val = localStorage.getItem(PHONETIC_SEARCH_STORAGE_KEY);
+    return val === 'true';
+  } catch (e) {
+    return false;
+  }
+}
+
+export function setPhoneticSearchEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    localStorage.setItem(PHONETIC_SEARCH_STORAGE_KEY, enabled ? 'true' : 'false');
+    window.dispatchEvent(new CustomEvent('phonetic-search-toggle', { detail: { enabled } }));
+  } catch (e) {
+    // ignore
+  }
+}

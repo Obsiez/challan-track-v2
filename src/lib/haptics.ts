@@ -1,91 +1,146 @@
-let iosHapticCheckbox: HTMLInputElement | null = null;
-let iosHapticLabel: HTMLLabelElement | null = null;
+export const isIOSDevice = (): boolean => {
+  if (typeof navigator === 'undefined') return false;
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+};
 
-function triggerIosHaptic() {
+export const isHapticsEnabled = (): boolean => {
+  if (typeof localStorage === 'undefined') return true;
+  const stored = localStorage.getItem('haptics');
+  // Default to true unless explicitly disabled
+  return stored === null ? true : stored === 'true';
+};
+
+let lastIosHapticTimestamp = 0;
+
+/**
+ * Fires a single native iOS Taptic Engine switch tick using WebKit's
+ * <label><input type="checkbox" switch></label> activation exploit.
+ * Must be invoked within an active user gesture on iOS Safari / Standalone PWA.
+ */
+function fireSingleIosSwitchClick() {
   if (typeof document === 'undefined') return;
   try {
-    if (!iosHapticLabel) {
-      iosHapticCheckbox = document.createElement('input');
-      iosHapticCheckbox.type = 'checkbox';
-      iosHapticCheckbox.setAttribute('switch', '');
-      iosHapticCheckbox.id = 'ios-haptic-trigger-switch';
-      iosHapticCheckbox.style.position = 'fixed';
-      iosHapticCheckbox.style.top = '-9999px';
-      iosHapticCheckbox.style.left = '-9999px';
-      iosHapticCheckbox.style.opacity = '0';
-      iosHapticCheckbox.style.pointerEvents = 'none';
+    const label = document.createElement('label');
+    label.ariaHidden = 'true';
+    // Keep out of visual layout without using pointer-events:none (which blocks WebKit switch activation)
+    label.style.position = 'fixed';
+    label.style.bottom = '0px';
+    label.style.left = '0px';
+    label.style.width = '1px';
+    label.style.height = '1px';
+    label.style.opacity = '0.01';
+    label.style.zIndex = '-1';
+    label.style.overflow = 'hidden';
 
-      iosHapticLabel = document.createElement('label');
-      iosHapticLabel.htmlFor = 'ios-haptic-trigger-switch';
-      iosHapticLabel.style.position = 'fixed';
-      iosHapticLabel.style.top = '-9999px';
-      iosHapticLabel.style.left = '-9999px';
-      iosHapticLabel.style.opacity = '0';
-      iosHapticLabel.style.pointerEvents = 'none';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.setAttribute('switch', '');
+    label.appendChild(input);
 
-      document.body.appendChild(iosHapticCheckbox);
-      document.body.appendChild(iosHapticLabel);
-    }
-    iosHapticLabel.click();
-  } catch (e) {}
+    const container = document.body || document.head;
+    if (!container) return;
+
+    container.appendChild(label);
+    label.click();
+    container.removeChild(label);
+  } catch (e) {
+    // Ignore DOM errors on unsupported environments
+  }
 }
 
-export const triggerHaptic = (type: 'single' | 'double' | 'tick' | number | number[] = 'single') => {
-  if (localStorage.getItem('haptics') !== 'true') return;
-  const intensity = parseInt(localStorage.getItem('haptic_intensity') || '3');
-  
-  // Calculate base duration for single vibration
-  // intensity mapping:
-  // 1: 15ms (Very light tick)
-  // 2: 30ms (Soft tap)
-  // 3: 50ms (Medium buzz)
-  // 4: 75ms (Firm buzz)
-  // 5: 110ms (Strong buzz)
-  const baseDuration = intensity === 1 ? 2
-                     : intensity === 2 ? 5
-                     : intensity === 3 ? 28
-                     : intensity === 4 ? 55
-                     : 110;
+function triggerIosHaptic(deduplicateWindowMs = 60) {
+  const now = Date.now();
+  if (now - lastIosHapticTimestamp < deduplicateWindowMs) return;
+  lastIosHapticTimestamp = now;
+  fireSingleIosSwitchClick();
+}
+
+// Install a lightweight global touch/pointer listener on iOS so buttons that call
+// triggerHaptic() after an async await still fire during the synchronous WebKit user gesture.
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  const handleIosInteractiveGesture = (e: Event) => {
+    if (!isIOSDevice() || !isHapticsEnabled()) return;
+    const target = e.target as HTMLElement | null;
+    if (!target || typeof target.closest !== 'function') return;
+    // Skip custom keypad keys since they handle haptics directly on pointerdown
+    if (target.closest('[data-keypad-root="true"]')) return;
+
+    const interactive = target.closest(
+      'button:not(:disabled), [role="button"], a[href], input[type="checkbox"], input[type="radio"], select, summary'
+    );
+    if (interactive) {
+      triggerIosHaptic(110);
+    }
+  };
+
+  document.addEventListener('click', handleIosInteractiveGesture, { capture: true, passive: true });
+}
+
+export type HapticType = 'single' | 'double' | 'tick' | 'keypad' | 'soft' | 'medium' | number | number[];
+
+export const triggerHaptic = (type: HapticType = 'single') => {
+  if (!isHapticsEnabled()) return;
+
+  // 1. iOS Safari / Standalone PWA Taptic Engine workaround
+  if (isIOSDevice()) {
+    triggerIosHaptic(type === 'keypad' || type === 'tick' ? 45 : 80);
+    return;
+  }
+
+  // 2. Standard Web Vibration API (Android Chrome, etc.)
+  const intensity = parseInt(localStorage.getItem('haptic_intensity') || '3', 10);
+
+  // Lowered, crisp native-like vibration durations (in ms):
+  // 1: Ultra-light micro-tick (1ms)
+  // 2: Soft tap (3ms)
+  // 3: Balanced crisp tap (8ms — lowered from 28ms)
+  // 4: Firm tap (15ms — lowered from 55ms)
+  // 5: Strong tap (28ms — lowered from 110ms)
+  const baseDuration =
+    intensity === 1
+      ? 1
+      : intensity === 2
+      ? 3
+      : intensity === 3
+      ? 8
+      : intensity === 4
+      ? 15
+      : 28;
 
   let pattern: number | number[];
-  
+
   if (typeof type === 'number') {
-    // scale custom duration based on intensity ratio to medium (intensity 3 = 50ms)
-    const ratio = baseDuration / 28;
-    pattern = Math.max(baseDuration, Math.round(type * ratio));
+    const ratio = baseDuration / 10;
+    pattern = Math.max(1, Math.round(type * ratio));
   } else if (Array.isArray(type)) {
-    const ratio = baseDuration / 28;
+    const ratio = baseDuration / 10;
     pattern = type.map((val, idx) => {
-      if (idx % 2 === 0) { // vibrate duration
-        return Math.max(baseDuration, Math.round(val * ratio));
+      if (idx % 2 === 0) {
+        return Math.max(1, Math.round(val * ratio));
       }
-      return val; // gap duration remains unchanged
+      return val;
     });
-  } else if (type === 'tick') {
-    pattern = Math.max(Math.round(baseDuration * 0.5), 1); // even lighter but palpable
+  } else if (type === 'keypad' || type === 'tick') {
+    // Ultra-light micro-pulse for keyboard typing & slider ticks (1ms - 4ms)
+    pattern = Math.max(1, Math.round(baseDuration * 0.4));
+  } else if (type === 'soft') {
+    pattern = Math.max(1, Math.round(baseDuration * 0.65));
+  } else if (type === 'medium') {
+    pattern = Math.max(2, Math.round(baseDuration * 1.25));
   } else if (type === 'double') {
-    pattern = [baseDuration, 40, baseDuration];
-  } else { // 'single'
+    pattern = [baseDuration, 35, baseDuration];
+  } else {
     pattern = baseDuration;
   }
 
-  // 1. Standard Web Vibration API (Android Chrome, desktop, etc.)
   try {
     if (window.navigator?.vibrate) {
       window.navigator.vibrate(pattern);
     }
   } catch (e) {
-    console.warn("Haptics vibration failed:", e);
+    // Ignore vibration errors
   }
-
-  // 2. iOS Safari / WebKit Taptic Engine workaround
-  try {
-    const isIOS = typeof navigator !== 'undefined' && (
-      /iPad|iPhone|iPod/.test(navigator.userAgent) || 
-      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-    );
-    if (isIOS) {
-      triggerIosHaptic();
-    }
-  } catch (e) {}
 };
