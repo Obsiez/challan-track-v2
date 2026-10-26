@@ -1462,10 +1462,7 @@ export default function SettingsManager({
               </button>
               
               <button
-                onClick={() => {
-                  triggerHaptic('single');
-                  closeConfirmAction();
-                }}
+                onClick={closeConfirmAction}
                 className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer text-xs transition-colors"
               >
                 {lang === 'bn' ? 'বাতিল' : 'Cancel'}

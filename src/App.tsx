@@ -1377,7 +1377,6 @@ updateSettings={updateSettings}
             <button
               type="button"
               onClick={() => {
-                triggerHaptic('single');
                 if (appDialog.onCancel) appDialog.onCancel();
                 setAppDialog(null);
               }}
@@ -1388,10 +1387,7 @@ updateSettings={updateSettings}
           )}
           <button
             type="button"
-            onClick={() => {
-              triggerHaptic('single');
-              appDialog.onConfirm();
-            }}
+            onClick={appDialog.onConfirm}
             className="flex-1 py-3 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-xl text-xs transition-colors cursor-pointer border-2 border-slate-950 dark:border-white shadow-xs"
           >
             {lang === 'bn' ? 'ঠিক আছে' : 'OK'}

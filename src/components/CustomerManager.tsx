@@ -3663,7 +3663,6 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           </button>
           <button
             onClick={() => {
-              triggerHaptic('single');
               setDeletingCustomer(null);
               if (window.history.state?.modal === 'deleteCustomer') {
                 window.history.back();
