@@ -79,7 +79,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   document.addEventListener('click', handleIosInteractiveGesture, { capture: true, passive: true });
 }
 
-export type HapticType = 'single' | 'double' | 'tick' | 'keypad' | 'soft' | 'medium' | number | number[];
+export type HapticType = 'single' | 'double' | 'tick' | 'keypad' | 'soft' | 'medium' | 'punchy' | number | number[];
 
 let lastTickHapticTimestamp = 0;
 
@@ -101,22 +101,22 @@ export const triggerHaptic = (type: HapticType = 'single') => {
   // 2. Standard Web Vibration API (Android Chrome, etc.)
   const intensity = parseInt(localStorage.getItem('haptic_intensity') || '3', 10);
 
-  // Lowered, crisp native-like vibration durations (in ms):
-  // 1: Ultra-light micro-tick (1ms)
-  // 2: Soft tap (3ms)
-  // 3: Balanced crisp tap (8ms — lowered from 28ms)
-  // 4: Firm tap (15ms — lowered from 55ms)
-  // 5: Strong tap (28ms — lowered from 110ms)
+  // Scaled crisp native-like vibration durations (in ms):
+  // Level 1: Soft tap (3ms — shifted from old level 2)
+  // Level 2: Balanced crisp tap (8ms — shifted from old level 3)
+  // Level 3: Firm tap (16ms — shifted from old level 4)
+  // Level 4: Strong tap (28ms — shifted from old level 5)
+  // Level 5: High intensity / vigorous tap (50ms — brand new punchy level 5)
   const baseDuration =
     intensity === 1
-      ? 1
-      : intensity === 2
       ? 3
-      : intensity === 3
+      : intensity === 2
       ? 8
+      : intensity === 3
+      ? 16
       : intensity === 4
-      ? 15
-      : 28;
+      ? 28
+      : 50;
 
   let pattern: number | number[];
 
@@ -132,12 +132,15 @@ export const triggerHaptic = (type: HapticType = 'single') => {
       return val;
     });
   } else if (type === 'keypad' || type === 'tick') {
-    // Ultra-light micro-pulse for keyboard typing & slider ticks (1ms - 4ms)
+    // Ultra-light micro-pulse for keyboard typing & slider ticks
     pattern = Math.max(1, Math.round(baseDuration * 0.4));
   } else if (type === 'soft') {
     pattern = Math.max(1, Math.round(baseDuration * 0.65));
   } else if (type === 'medium') {
-    pattern = Math.max(2, Math.round(baseDuration * 1.25));
+    pattern = Math.max(10, Math.round(baseDuration * 1.25));
+  } else if (type === 'punchy') {
+    // Punchy, satisfying tactile snap for gesture thresholds / critical release points
+    pattern = Math.max(12, Math.round(baseDuration * 1.4));
   } else if (type === 'double') {
     pattern = [baseDuration, 35, baseDuration];
   } else {

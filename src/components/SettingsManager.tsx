@@ -681,11 +681,11 @@ export default function SettingsManager({
             <div className="flex justify-between items-center text-xs font-bold text-black dark:text-white">
               <span>{t.hapticIntensity}</span>
               <span className="text-[#757575]">
-                {hapticIntensity === 1 ? t.intensityLight
-                 : hapticIntensity === 2 ? t.intensitySoft
-                 : hapticIntensity === 3 ? t.intensityMedium
-                 : hapticIntensity === 4 ? t.intensityFirm
-                 : t.intensityStrong}
+                {hapticIntensity === 1 ? t.intensitySoft
+                 : hapticIntensity === 2 ? t.intensityMedium
+                 : hapticIntensity === 3 ? t.intensityFirm
+                 : hapticIntensity === 4 ? t.intensityStrong
+                 : t.intensityMax}
               </span>
             </div>
             <ScrollSafeSlider
@@ -1183,7 +1183,10 @@ export default function SettingsManager({
         </div>
 
         <button
-          onClick={onSignOut}
+          onClick={() => {
+            triggerHaptic('double');
+            onSignOut();
+          }}
           className="px-4 py-2.5 bg-[#FFECEB] hover:bg-[#FFD9D7] text-[#DC2626] dark:bg-[#DC2626]/20 dark:hover:bg-[#DC2626]/30 dark:text-[#FF6B5B] font-bold rounded-lg text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors shrink-0"
         >
           <LogOut className="w-3.5 h-3.5" />
@@ -1262,7 +1265,10 @@ export default function SettingsManager({
 
           {trashCustomers.length > 0 && (
             <button
-              onClick={() => openConfirmAction({ type: 'empty_trash' })}
+              onClick={() => {
+                triggerHaptic('double');
+                openConfirmAction({ type: 'empty_trash' });
+              }}
               className="px-3.5 py-1.5 border border-[#DC2626] text-[#DC2626] hover:bg-[#FFECEB] dark:hover:bg-[#DC2626]/20 font-bold rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 shrink-0"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -1315,14 +1321,20 @@ export default function SettingsManager({
 
                     <div className="flex items-center gap-1.5">
                       <button
-                        onClick={() => openConfirmAction({ type: 'restore', customer: c })}
+                        onClick={() => {
+                          triggerHaptic('single');
+                          openConfirmAction({ type: 'restore', customer: c });
+                        }}
                         title={lang === 'bn' ? 'পুনরুদ্ধার করুন' : 'Restore'}
                         className="p-2 bg-slate-50 hover:bg-slate-100 text-black dark:bg-slate-900/60 dark:hover:bg-slate-800 dark:text-white rounded-lg transition-colors cursor-pointer flex items-center justify-center border border-slate-200 dark:border-slate-800/80"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={() => openConfirmAction({ type: 'delete_perm', customer: c })}
+                        onClick={() => {
+                          triggerHaptic('double');
+                          openConfirmAction({ type: 'delete_perm', customer: c });
+                        }}
                         title={lang === 'bn' ? 'স্থায়ীভাবে মুছুন' : 'Delete Permanently'}
                         className="p-2 bg-[#FFECEB] hover:bg-[#FFD9D7] text-[#DC2626] dark:bg-[#DC2626]/20 dark:hover:bg-[#DC2626]/30 rounded-lg transition-colors cursor-pointer flex items-center justify-center"
                       >
@@ -1421,7 +1433,11 @@ export default function SettingsManager({
                   const customer = confirmAction.customer;
                   closeConfirmAction();
                   
-                  triggerHaptic('single');
+                  if (type === 'empty_trash' || type === 'delete_perm') {
+                    triggerHaptic('double');
+                  } else {
+                    triggerHaptic('single');
+                  }
                   
                   if (type === 'empty_trash') {
                     await emptyTrash();
@@ -1446,7 +1462,10 @@ export default function SettingsManager({
               </button>
               
               <button
-                onClick={closeConfirmAction}
+                onClick={() => {
+                  triggerHaptic('single');
+                  closeConfirmAction();
+                }}
                 className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer text-xs transition-colors"
               >
                 {lang === 'bn' ? 'বাতিল' : 'Cancel'}

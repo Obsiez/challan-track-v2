@@ -217,7 +217,7 @@ export default function BiometricLockScreen({
           <button
             type="button"
             onClick={() => {
-              triggerHaptic('single');
+              triggerHaptic('double');
               onSignOut();
             }}
             className="w-full py-2.5 bg-transparent hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"

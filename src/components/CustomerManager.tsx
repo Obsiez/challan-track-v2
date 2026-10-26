@@ -185,9 +185,9 @@ const SwipeableCustomerItem = ({
 			// Update motion transform position directly
 			controls.set({ x: resistanceX });
 
-			// Threshold haptic tick when finger distance reaches the threshold (thresholdX)
+			// Threshold punchy haptic when finger distance reaches the critical threshold (thresholdX)
 			if (Math.abs(diffX) >= thresholdX && !hasVibratedRef.current) {
-				triggerHaptic('tick');
+				triggerHaptic('punchy');
 				hasVibratedRef.current = true;
 			} else if (Math.abs(diffX) < thresholdX && hasVibratedRef.current) {
 				hasVibratedRef.current = false;
@@ -3647,6 +3647,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
         <div className="flex flex-col gap-2.5">
           <button
             onClick={async () => {
+              triggerHaptic('double');
               const id = deletingCustomer.id;
               setDeletingCustomer(null);
               if (window.history.state?.modal === 'deleteCustomer') {
@@ -3662,6 +3663,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           </button>
           <button
             onClick={() => {
+              triggerHaptic('single');
               setDeletingCustomer(null);
               if (window.history.state?.modal === 'deleteCustomer') {
                 window.history.back();
