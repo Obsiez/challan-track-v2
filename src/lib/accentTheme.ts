@@ -320,12 +320,18 @@ export function mixHex(hexA: string, hexB: string, ratio: number): string {
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`.toUpperCase();
 }
 
+// Map slider 0..100% into the 20..80% effective shade range (20% -> new 0%, 80% -> new 100%)
+function toEffectiveIntensity(sliderIntensity: number): number {
+  const clamped = Math.max(0, Math.min(100, sliderIntensity));
+  return 20 + (clamped / 100) * 60;
+}
+
 export function updateKeypadThemeVariables() {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
   const accentHex = getSavedAccentColor();
   const paletteId = getSavedThemePalette();
-  const intensity = getSavedThemeIntensity();
+  const intensity = toEffectiveIntensity(getSavedThemeIntensity());
   const palette = THEME_PALETTES.find(p => p.id === paletteId) || THEME_PALETTES[0];
 
   let canvasDark = palette.canvasDark;
@@ -404,22 +410,21 @@ export function applyAccentColor(hex: string) {
 
 export function applyThemePalette(paletteId: string, intensityOverride?: number) {
   const palette = THEME_PALETTES.find(p => p.id === paletteId) || THEME_PALETTES[0];
-  const intensity = intensityOverride !== undefined
+  const rawIntensity = intensityOverride !== undefined
     ? Math.max(0, Math.min(100, intensityOverride))
     : getSavedThemeIntensity();
 
   try {
     localStorage.setItem(THEME_PALETTE_STORAGE_KEY, palette.id);
-    localStorage.setItem(THEME_INTENSITY_STORAGE_KEY, String(intensity));
+    localStorage.setItem(THEME_INTENSITY_STORAGE_KEY, String(rawIntensity));
   } catch (e) {
     // Ignore storage issues
   }
 
+  const intensity = toEffectiveIntensity(rawIntensity);
   const root = document.documentElement;
 
-  // Calculate dynamic shade adjustments based on intensity (0..100, default 50)
-  // 0 = Deeper / Pure Contrast (Pitch Black in dark mode, Pure White in light mode)
-  // 100 = Lighter / Richer Tinted Surface & Website Background
+  // Calculate dynamic shade adjustments based on effective intensity (20..80 mapped from 0..100, default 50)
   let canvasDark = palette.canvasDark;
   let surfaceDark = palette.surfaceDark;
   let elevatedDark = palette.elevatedDark;
@@ -429,7 +434,7 @@ export function applyThemePalette(paletteId: string, intensityOverride?: number)
   const adjustedScale = { ...palette.scale };
 
   if (intensity < 50) {
-    const t = (50 - intensity) / 50; // 0 at 50, 1 at 0
+    const t = (50 - intensity) / 50; // 0 at 50, 0.6 at 20 (slider 0%)
     canvasDark = mixHex(palette.canvasDark, '#000000', t * 0.9);
     surfaceDark = mixHex(palette.surfaceDark, '#050507', t * 0.75);
     elevatedDark = mixHex(palette.elevatedDark, '#0C0C0F', t * 0.65);
@@ -443,7 +448,7 @@ export function applyThemePalette(paletteId: string, intensityOverride?: number)
     adjustedScale[50] = mixHex(palette.scale[50], '#FFFFFF', t * 0.8);
     adjustedScale[100] = mixHex(palette.scale[100], '#FAFAFA', t * 0.6);
   } else if (intensity > 50) {
-    const t = (intensity - 50) / 50; // 0 at 50, 1 at 100
+    const t = (intensity - 50) / 50; // 0 at 50, 0.6 at 80 (slider 100%)
     canvasDark = mixHex(palette.canvasDark, palette.scale[800], t * 0.75);
     surfaceDark = mixHex(palette.surfaceDark, palette.scale[700], t * 0.65);
     elevatedDark = mixHex(palette.elevatedDark, palette.scale[600], t * 0.55);
@@ -476,7 +481,9 @@ export function applyThemePalette(paletteId: string, intensityOverride?: number)
 
   window.dispatchEvent(
     new CustomEvent('theme-palette-changed', {
-      detail: { paletteId: palette.id, intensity }
+      detail: { paletteId: palette.id, intensity: rawIntensity }
     })
   );
 }
+
+

@@ -14,6 +14,7 @@ import { translations, formatNumber, Language } from '../lib/translations';
 import { triggerHaptic, isIOSDevice, isHapticsEnabled } from '../lib/haptics';
 import { showNotification } from '../lib/notifications';
 import { isCustomKeypadEnabled, setCustomKeypadEnabledState } from './CalculatorKeypad';
+import ScrollSafeSlider from './ScrollSafeSlider';
 
 interface SettingsManagerProps {
   theme: 'light' | 'dark';
@@ -565,19 +566,17 @@ export default function SettingsManager({
               </span>
               <span>{formatNumber(surfaceIntensity, lang)}%</span>
             </div>
-            <input
-              type="range"
+            <ScrollSafeSlider
               min={0}
               max={100}
               step={1}
               value={surfaceIntensity}
-              onChange={(e) => {
-                const val = Number(e.target.value);
+              ariaLabel={lang === 'bn' ? 'শেড' : 'Shade'}
+              onChange={(val) => {
                 triggerHaptic('tick');
                 setSurfaceIntensity(val);
                 applyThemePalette(currentThemePalette, val);
               }}
-              className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-slate-950 dark:accent-white"
             />
           </div>
         </div>
@@ -689,14 +688,13 @@ export default function SettingsManager({
                  : t.intensityStrong}
               </span>
             </div>
-            <input 
-              type="range"
-              min="1"
-              max="5"
-              step="1"
+            <ScrollSafeSlider
+              min={1}
+              max={5}
+              step={1}
               value={hapticIntensity}
-              onChange={(e) => changeHapticIntensity(Number(e.target.value))}
-              className="w-full h-1.5 bg-[#EEEEEE] dark:bg-[#262626] rounded-sm appearance-none cursor-pointer accent-black dark:accent-white"
+              ariaLabel={t.hapticIntensity}
+              onChange={(val) => changeHapticIntensity(val)}
             />
             <div className="flex justify-between text-[10px] font-mono font-bold text-[#757575] px-1">
               <span>1</span>
@@ -832,7 +830,7 @@ export default function SettingsManager({
             <h2 className="text-base font-bold text-black dark:text-white flex items-center gap-2">
               <Search className="w-4 h-4 stroke-[2]" />
               <span>
-                {lang === 'bn' ? 'ইংরেজিতে বাংলা নাম অনুসন্ধান' : 'Search Bangla Names in English'}
+                {lang === 'bn' ? 'ফোনেটিক বাংলা সার্চ' : 'Phonetic Bangla Search'}
               </span>
             </h2>
             <p className="text-xs text-[#757575] leading-relaxed">
@@ -1460,298 +1458,336 @@ export default function SettingsManager({
 
       {/* JSON Backup Import Modal */}
       {importState.showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white dark:bg-[#0D121D] w-full max-w-md rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-6 max-h-[90vh] flex flex-col"
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 no-select backdrop-blur-xs"
+          onClick={() => !importState.loading && setImportState(prev => ({ ...prev, showModal: false }))}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="animate-reveal bg-white dark:bg-[#0D121D] w-full max-w-md rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-6 space-y-5 max-h-[88vh] overflow-y-auto hide-scrollbar"
           >
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800/80">
-              <h3 className="text-base font-bold text-slate-950 dark:text-white">
-                {lang === 'bn' ? 'ব্যাকআপ ডাটা ইম্পোর্ট করুন' : 'Import Backup Data'}
-              </h3>
-              <button
-                onClick={() => setImportState(prev => ({ ...prev, showModal: false }))}
-                className="p-1.5 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-lg cursor-pointer transition-colors text-slate-500 dark:text-slate-400"
-                disabled={importState.loading}
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto py-4 space-y-4 pr-1 hide-scrollbar">
-              {/* File Meta Info */}
-              <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 p-3.5 rounded-xl space-y-1.5 text-xs text-slate-500 dark:text-slate-400">
-                <div className="flex justify-between">
-                  <span>{lang === 'bn' ? 'ব্যাকআপ সময়:' : 'Backup Date:'}</span>
-                  <span className="font-bold text-slate-900 dark:text-white">
-                    {importState.backupData.backupTimestamp 
-                      ? new Date(importState.backupData.backupTimestamp).toLocaleString(lang === 'bn' ? 'bn-BD' : 'en-US') 
-                      : 'N/A'}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{lang === 'bn' ? 'গ্রাহক ও ক্রেডিট কার্ড হিসাব:' : 'Accounts & Credit Cards:'}</span>
-                  <span className="font-bold text-slate-900 dark:text-white font-mono">
-                    {importState.backupData.customers?.length || 0}
-                    {Array.isArray(importState.backupData.customers) && importState.backupData.customers.some((c: any) => c.accountType === 'credit_card')
-                      ? ` (${importState.backupData.customers.filter((c: any) => c.accountType === 'credit_card').length} ${lang === 'bn' ? 'কার্ড' : 'cards'})`
-                      : ''}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>{lang === 'bn' ? 'লেনদেনের সংখ্যা:' : 'Total Transactions:'}</span>
-                  <span className="font-bold text-slate-900 dark:text-white font-mono">{importState.backupData.ledgerTransactions?.length || 0}</span>
-                </div>
-                {Array.isArray(importState.backupData.goals) && (
-                  <div className="flex justify-between">
-                    <span>{lang === 'bn' ? 'লক্ষ্য ও উন্মুক্ত সঞ্চয়:' : 'Goals & Flexible Savings:'}</span>
-                    <span className="font-bold text-slate-900 dark:text-white font-mono">
-                      {importState.backupData.goals.length}
-                      {importState.backupData.goals.some((g: any) => g.isOpenEnded)
-                        ? ` (${importState.backupData.goals.filter((g: any) => g.isOpenEnded).length} ${lang === 'bn' ? 'উন্মুক্ত' : 'flexible'})`
-                        : ''}
-                    </span>
-                  </div>
-                )}
+            <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-3.5">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-950 dark:text-white">
+                  {lang === 'bn' ? 'ব্যাকআপ ডাটা ইম্পোর্ট করুন' : 'Import Backup Data'}
+                </h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                  {importState.loading
+                    ? (lang === 'bn'
+                        ? 'ডাটাবেসে ব্যাকআপ সিঙ্ক ও ভেরিফাই করা হচ্ছে'
+                        : 'Restoring and verifying backup entries with database')
+                    : (lang === 'bn'
+                        ? 'ফাইল যাচাই করে রিস্টোর পদ্ধতি নির্বাচন করুন'
+                        : 'Review backup file and choose import method')}
+                </p>
               </div>
-
-              {importState.loading ? (
-                <div className="py-6 px-1 flex flex-col items-center justify-center space-y-4 text-center">
-                  <div className="relative w-16 h-16 flex items-center justify-center">
-                    <svg className="w-16 h-16 -rotate-90 transform" viewBox="0 0 100 100">
-                      <circle
-                        className="text-slate-200 dark:text-slate-800"
-                        strokeWidth="8"
-                        stroke="currentColor"
-                        fill="transparent"
-                        r="40"
-                        cx="50"
-                        cy="50"
-                      />
-                      <circle
-                        className="text-slate-950 dark:text-white transition-all duration-300"
-                        strokeWidth="8"
-                        strokeDasharray={251.2}
-                        strokeDashoffset={251.2 - (251.2 * (importProgress?.percent || 5)) / 100}
-                        strokeLinecap="round"
-                        stroke="currentColor"
-                        fill="transparent"
-                        r="40"
-                        cx="50"
-                        cy="50"
-                      />
-                    </svg>
-                    <div className="absolute flex flex-col items-center justify-center">
-                      <span className="text-xs font-mono font-bold text-slate-950 dark:text-white">
-                        {importProgress?.percent || 5}%
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <h4 className="text-sm font-bold text-slate-950 dark:text-white flex items-center justify-center gap-2">
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>{importProgress?.message || (lang === 'bn' ? 'ডাটা ইম্পোর্ট হচ্ছে...' : 'Importing data...')}</span>
-                    </h4>
-                  </div>
-
-                  <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
-                    <div 
-                      className="bg-slate-950 dark:bg-white h-full transition-all duration-300"
-                      style={{ width: `${Math.max(5, importProgress?.percent || 5)}%` }}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between w-full text-xs text-slate-500 dark:text-slate-400 font-medium px-1 font-mono">
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5" />
-                      <span>{lang === 'bn' ? 'অতিবাহিত সময়:' : 'Elapsed:'} {Math.floor(elapsedSeconds / 60)}:{String(elapsedSeconds % 60).padStart(2, '0')}s</span>
-                    </span>
-                  </div>
-
-                  <div className="w-full p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800/60 rounded-xl text-xs text-amber-800 dark:text-amber-300 text-left">
-                    {lang === 'bn' 
-                      ? '⚠️ দয়া করে অপেক্ষা করুন। ব্যাকআপ রিস্টোর চলাকালীন পেজটি রিলোড বা বন্ধ করবেন না।' 
-                      : '⚠️ Please wait. Do not close or refresh this page while restore is in progress.'}
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  {/* Choice 1 */}
-                  <button
-                    onClick={() => setImportState(prev => ({ ...prev, choice: 'merge' }))}
-                    className={`w-full text-left p-3.5 rounded-xl border-2 transition-all cursor-pointer flex gap-3 ${
-                      importState.choice === 'merge'
-                        ? 'border-slate-950 dark:border-white bg-slate-50 dark:bg-slate-900'
-                        : 'border-slate-300 dark:border-slate-700 bg-transparent hover:border-slate-900 dark:hover:border-white'
-                    }`}
-                  >
-                    <div className="shrink-0 mt-0.5">
-                      <input
-                        type="radio"
-                        checked={importState.choice === 'merge'}
-                        onChange={() => {}}
-                        className="w-4 h-4 accent-slate-950 dark:accent-white cursor-pointer"
-                      />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-950 dark:text-white">
-                          {lang === 'bn' ? '১. মার্জ ও আপডেট' : 'Choice 1: Merge & Update'}
-                        </span>
-                        <span className="px-1.5 py-0.5 text-[10px] font-bold bg-slate-950 text-white dark:bg-white dark:text-slate-950 rounded">
-                          {lang === 'bn' ? 'প্রস্তাবিত' : 'Recommended'}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-normal">
-                        {lang === 'bn' 
-                          ? 'ফাইলটি লাইভ ডাটাবেসের সাথে তুলনা করে অনুপস্থিত এন্ট্রি যোগ করবে এবং কোনো পরিবর্তন থাকলে আপডেট করবে।' 
-                          : 'Compares file with live database. Adds missing entries and updates existing ones if changed.'}
-                      </p>
-                    </div>
-                  </button>
-
-                  {/* Choice 2 */}
-                  <button
-                    onClick={() => setImportState(prev => ({ ...prev, choice: 'skip' }))}
-                    className={`w-full text-left p-3.5 rounded-xl border-2 transition-all cursor-pointer flex gap-3 ${
-                      importState.choice === 'skip'
-                        ? 'border-slate-950 dark:border-white bg-slate-50 dark:bg-slate-900'
-                        : 'border-slate-300 dark:border-slate-700 bg-transparent hover:border-slate-900 dark:hover:border-white'
-                    }`}
-                  >
-                    <div className="shrink-0 mt-0.5">
-                      <input
-                        type="radio"
-                        checked={importState.choice === 'skip'}
-                        onChange={() => {}}
-                        className="w-4 h-4 accent-slate-950 dark:accent-white cursor-pointer"
-                      />
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold text-slate-950 dark:text-white">
-                        {lang === 'bn' ? '২. ডুপ্লিকেট এড়িয়ে যান' : 'Choice 2: Skip Duplicates'}
-                      </span>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-normal">
-                        {lang === 'bn' 
-                          ? 'শুধুমাত্র নতুন এন্ট্রিগুলো যুক্ত করবে যা বর্তমান ডাটাবেসে নেই।' 
-                          : 'Only imports entries that do not exist in the current live database.'}
-                      </p>
-                    </div>
-                  </button>
-
-                  {/* Choice 3 */}
-                  <button
-                    onClick={() => setImportState(prev => ({ ...prev, choice: 'clear' }))}
-                    className={`w-full text-left p-3.5 rounded-xl border-2 transition-all cursor-pointer flex gap-3 ${
-                      importState.choice === 'clear'
-                        ? 'border-rose-600 dark:border-rose-500 bg-rose-50 dark:bg-rose-950/30'
-                        : 'border-slate-300 dark:border-slate-700 bg-transparent hover:border-rose-600 dark:hover:border-rose-500'
-                    }`}
-                  >
-                    <div className="shrink-0 mt-0.5">
-                      <input
-                        type="radio"
-                        checked={importState.choice === 'clear'}
-                        onChange={() => {}}
-                        className="w-4 h-4 accent-rose-600 cursor-pointer"
-                      />
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold text-rose-600 dark:text-rose-400">
-                        {lang === 'bn' ? '৩. মুছুন ও প্রতিস্থাপন করুন (সম্পূর্ণ রিস্টোর)' : 'Choice 3: Clear & Replace (Full Restore)'}
-                      </span>
-                      <p className="text-[11px] text-rose-600/90 dark:text-rose-400/90 mt-1 leading-normal">
-                        {lang === 'bn' 
-                          ? 'সতর্কতা: বর্তমান ডাটাবেসের সমস্ত তথ্য মুছে ফেলবে এবং ব্যাকআপ ফাইল দিয়ে প্রতিস্থাপন করবে।' 
-                          : 'WARNING: Completely wipes existing live database and replaces with file.'}
-                      </p>
-                    </div>
-                  </button>
-
-                  {importState.choice === 'clear' && (
-                    <motion.div 
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      className="bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 p-3.5 rounded-xl space-y-2"
-                    >
-                      <label className="text-[11px] font-bold text-rose-600 dark:text-rose-400 block leading-tight">
-                        {lang === 'bn' 
-                          ? 'ডাটাবেস সম্পূর্ণ মুছে ফেলার জন্য নিচে "RESTORE" শব্দটি টাইপ করুন:' 
-                          : 'Type "RESTORE" below to confirm full restore:'}
-                      </label>
-                      <input
-                        type="text"
-                        value={importState.confirmText}
-                        onChange={(e) => setImportState(prev => ({ ...prev, confirmText: e.target.value }))}
-                        placeholder="RESTORE"
-                        className="w-full px-3 py-2 bg-white dark:bg-[#0D121D] border-2 border-rose-300 dark:border-rose-800 rounded-xl text-xs text-center font-bold tracking-widest text-rose-600 dark:text-rose-400 outline-none"
-                      />
-                    </motion.div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex flex-col gap-2">
-              <button
-                onClick={async () => {
-                  if (importState.choice === 'clear' && importState.confirmText !== 'RESTORE') {
-                    toast.error(lang === 'bn' ? 'নিশ্চিতকরণের জন্য "RESTORE" শব্দটি টাইপ করুন!' : 'Please type "RESTORE" to confirm!');
-                    return;
-                  }
-
-                  setImportState(prev => ({ ...prev, loading: true }));
-                  setImportProgress({
-                    stage: 'parsing',
-                    percent: 5,
-                    message: lang === 'bn' ? 'ব্যাকআপ ফাইল প্রস্তুত করা হচ্ছে...' : 'Preparing backup data...'
-                  });
-                  triggerHaptic('single');
-
-                  try {
-                    await importLedgerData(importState.backupData, importState.choice, (progress) => {
-                      setImportProgress(progress);
-                    });
-                    toast.success(lang === 'bn' ? 'ডাটা সফলভাবে ইম্পোর্ট করা হয়েছে!' : 'Data imported successfully!');
-                    triggerHaptic('double');
-                    setImportState(prev => ({ ...prev, showModal: false }));
-                  } catch (err) {
-                    console.error(err);
-                    toast.error(lang === 'bn' ? 'ইম্পোর্ট করতে সমস্যা হয়েছে!' : 'Failed to import data!');
-                  } finally {
-                    setImportState(prev => ({ ...prev, loading: false }));
-                    setImportProgress(null);
-                  }
-                }}
-                disabled={importState.loading || (importState.choice === 'clear' && importState.confirmText !== 'RESTORE')}
-                className={`w-full py-2.5 text-white font-bold rounded-xl border-2 text-xs flex items-center justify-center gap-2 cursor-pointer transition-all ${
-                  importState.choice === 'clear'
-                    ? 'bg-rose-600 hover:bg-rose-700 border-transparent hover:border-slate-950 dark:hover:border-white disabled:opacity-40'
-                    : 'bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 dark:text-slate-950 border-slate-950 dark:border-white disabled:opacity-40'
-                }`}
-              >
-                {importState.loading ? (
-                  <span className="flex items-center gap-2">
-                    <RefreshCw className="animate-spin -ml-1 mr-2 h-4 w-4" />
-                    {importProgress?.message || (lang === 'bn' ? 'ইম্পোর্ট হচ্ছে...' : 'Importing...')}
-                  </span>
-                ) : (
-                  lang === 'bn' ? 'ইম্পোর্ট শুরু করুন' : 'Confirm Import'
-                )}
-              </button>
-
               {!importState.loading && (
                 <button
-                  onClick={() => setImportState(prev => ({ ...prev, showModal: false }))}
-                  className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-xs cursor-pointer transition-colors"
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic('medium');
+                    setImportState(prev => ({ ...prev, showModal: false }));
+                  }}
+                  className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-lg text-slate-600 dark:text-slate-300 cursor-pointer transition-colors"
                 >
-                  {lang === 'bn' ? 'বাতিল' : 'Cancel'}
+                  <X className="w-4 h-4" />
                 </button>
               )}
             </div>
-          </motion.div>
+
+            {importState.loading ? (
+              <div className="py-6 px-1 flex flex-col items-center justify-center space-y-4 text-center">
+                <div className="relative w-16 h-16 flex items-center justify-center">
+                  <svg className="w-16 h-16 -rotate-90 transform" viewBox="0 0 100 100">
+                    <circle
+                      className="text-slate-200 dark:text-slate-800"
+                      strokeWidth="8"
+                      stroke="currentColor"
+                      fill="transparent"
+                      r="40"
+                      cx="50"
+                      cy="50"
+                    />
+                    <circle
+                      className="text-slate-950 dark:text-white transition-all duration-300"
+                      strokeWidth="8"
+                      strokeDasharray={251.2}
+                      strokeDashoffset={251.2 - (251.2 * (importProgress?.percent || 5)) / 100}
+                      strokeLinecap="round"
+                      stroke="currentColor"
+                      fill="transparent"
+                      r="40"
+                      cx="50"
+                      cy="50"
+                    />
+                  </svg>
+                  <div className="absolute flex flex-col items-center justify-center">
+                    <span className="text-xs font-mono font-bold text-slate-950 dark:text-white">
+                      {importProgress?.percent || 5}%
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <h4 className="text-sm font-bold text-slate-950 dark:text-white flex items-center justify-center gap-2">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>
+                      {importProgress?.message ||
+                        (lang === 'bn' ? 'ডাটা ইম্পোর্ট হচ্ছে...' : 'Importing data...')}
+                    </span>
+                  </h4>
+                  {importProgress && importProgress.totalBatches && importProgress.totalBatches > 1 && (
+                    <p className="text-xs font-mono text-slate-500 dark:text-slate-400">
+                      {lang === 'bn'
+                        ? `ব্যাচ: ${formatNumber(importProgress.currentBatch || 1, 'bn')} / ${formatNumber(importProgress.totalBatches, 'bn')}`
+                        : `Batch: ${importProgress.currentBatch || 1} / ${importProgress.totalBatches}`}
+                    </p>
+                  )}
+                </div>
+
+                <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
+                  <div
+                    className="bg-slate-950 dark:bg-white h-full transition-all duration-300"
+                    style={{ width: `${Math.max(5, importProgress?.percent || 5)}%` }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between w-full text-xs text-slate-500 dark:text-slate-400 font-medium px-1 font-mono">
+                  <span className="flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>
+                      {lang === 'bn' ? 'অতিবাহিত সময়:' : 'Elapsed:'}{' '}
+                      {Math.floor(elapsedSeconds / 60)}:
+                      {String(elapsedSeconds % 60).padStart(2, '0')}s
+                    </span>
+                  </span>
+                  {importProgress?.totalCount !== undefined && importProgress.totalCount > 0 ? (
+                    <span>
+                      {importProgress.processedCount ?? 0} / {importProgress.totalCount}
+                    </span>
+                  ) : (
+                    <span>{importProgress?.percent || 5}%</span>
+                  )}
+                </div>
+
+                <div className="w-full p-3 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-600 dark:text-slate-300 text-left">
+                  {lang === 'bn'
+                    ? 'দয়া করে অপেক্ষা করুন। ব্যাকআপ রিস্টোর চলাকালীন পেজটি রিলোড বা বন্ধ করবেন না।'
+                    : 'Please wait. Do not close or refresh this page while restore is in progress.'}
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-4">
+                  {/* File Meta Info */}
+                  <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 p-3.5 rounded-xl space-y-1.5 text-xs text-slate-500 dark:text-slate-400">
+                    <div className="flex justify-between">
+                      <span>{lang === 'bn' ? 'ব্যাকআপ সময়:' : 'Backup Date:'}</span>
+                      <span className="font-bold text-slate-900 dark:text-white">
+                        {importState.backupData.backupTimestamp 
+                          ? new Date(importState.backupData.backupTimestamp).toLocaleString(lang === 'bn' ? 'bn-BD' : 'en-US') 
+                          : 'N/A'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>{lang === 'bn' ? 'গ্রাহক ও ক্রেডিট কার্ড হিসাব:' : 'Accounts & Credit Cards:'}</span>
+                      <span className="font-bold text-slate-900 dark:text-white font-mono">
+                        {importState.backupData.customers?.length || 0}
+                        {Array.isArray(importState.backupData.customers) && importState.backupData.customers.some((c: any) => c.accountType === 'credit_card')
+                          ? ` (${importState.backupData.customers.filter((c: any) => c.accountType === 'credit_card').length} ${lang === 'bn' ? 'কার্ড' : 'cards'})`
+                          : ''}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>{lang === 'bn' ? 'লেনদেনের সংখ্যা:' : 'Total Transactions:'}</span>
+                      <span className="font-bold text-slate-900 dark:text-white font-mono">{importState.backupData.ledgerTransactions?.length || 0}</span>
+                    </div>
+                    {Array.isArray(importState.backupData.goals) && (
+                      <div className="flex justify-between">
+                        <span>{lang === 'bn' ? 'লক্ষ্য ও উন্মুক্ত সঞ্চয়:' : 'Goals & Flexible Savings:'}</span>
+                        <span className="font-bold text-slate-900 dark:text-white font-mono">
+                          {importState.backupData.goals.length}
+                          {importState.backupData.goals.some((g: any) => g.isOpenEnded)
+                            ? ` (${importState.backupData.goals.filter((g: any) => g.isOpenEnded).length} ${lang === 'bn' ? 'উন্মুক্ত' : 'flexible'})`
+                            : ''}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Restore Choices */}
+                  <div className="space-y-2.5">
+                    {/* Choice 1 */}
+                    <button
+                      type="button"
+                      onClick={() => setImportState(prev => ({ ...prev, choice: 'merge' }))}
+                      className={`w-full text-left p-3.5 rounded-xl border-2 transition-all cursor-pointer flex gap-3 ${
+                        importState.choice === 'merge'
+                          ? 'border-slate-950 dark:border-white bg-slate-50 dark:bg-slate-900'
+                          : 'border-slate-300 dark:border-slate-700 bg-transparent hover:border-slate-900 dark:hover:border-white'
+                      }`}
+                    >
+                      <div className="shrink-0 mt-0.5">
+                        <input
+                          type="radio"
+                          checked={importState.choice === 'merge'}
+                          onChange={() => {}}
+                          className="w-4 h-4 accent-slate-950 dark:accent-white cursor-pointer"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-slate-950 dark:text-white">
+                            {lang === 'bn' ? '১. মার্জ ও আপডেট' : 'Choice 1: Merge & Update'}
+                          </span>
+                          <span className="px-1.5 py-0.5 text-[10px] font-bold bg-slate-950 text-white dark:bg-white dark:text-slate-950 rounded">
+                            {lang === 'bn' ? 'প্রস্তাবিত' : 'Recommended'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-normal">
+                          {lang === 'bn' 
+                            ? 'ফাইলটি লাইভ ডাটাবেসের সাথে তুলনা করে অনুপস্থিত এন্ট্রি যোগ করবে এবং কোনো পরিবর্তন থাকলে আপডেট করবে।' 
+                            : 'Compares file with live database. Adds missing entries and updates existing ones if changed.'}
+                        </p>
+                      </div>
+                    </button>
+
+                    {/* Choice 2 */}
+                    <button
+                      type="button"
+                      onClick={() => setImportState(prev => ({ ...prev, choice: 'skip' }))}
+                      className={`w-full text-left p-3.5 rounded-xl border-2 transition-all cursor-pointer flex gap-3 ${
+                        importState.choice === 'skip'
+                          ? 'border-slate-950 dark:border-white bg-slate-50 dark:bg-slate-900'
+                          : 'border-slate-300 dark:border-slate-700 bg-transparent hover:border-slate-900 dark:hover:border-white'
+                      }`}
+                    >
+                      <div className="shrink-0 mt-0.5">
+                        <input
+                          type="radio"
+                          checked={importState.choice === 'skip'}
+                          onChange={() => {}}
+                          className="w-4 h-4 accent-slate-950 dark:accent-white cursor-pointer"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-slate-950 dark:text-white">
+                          {lang === 'bn' ? '২. ডুপ্লিকেট এড়িয়ে যান' : 'Choice 2: Skip Duplicates'}
+                        </span>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-normal">
+                          {lang === 'bn' 
+                            ? 'শুধুমাত্র নতুন এন্ট্রিগুলো যুক্ত করবে যা বর্তমান ডাটাবেসে নেই।' 
+                            : 'Only imports entries that do not exist in the current live database.'}
+                        </p>
+                      </div>
+                    </button>
+
+                    {/* Choice 3 */}
+                    <button
+                      type="button"
+                      onClick={() => setImportState(prev => ({ ...prev, choice: 'clear' }))}
+                      className={`w-full text-left p-3.5 rounded-xl border-2 transition-all cursor-pointer flex gap-3 ${
+                        importState.choice === 'clear'
+                          ? 'border-rose-600 dark:border-rose-500 bg-rose-50 dark:bg-rose-950/30'
+                          : 'border-slate-300 dark:border-slate-700 bg-transparent hover:border-rose-600 dark:hover:border-rose-500'
+                      }`}
+                    >
+                      <div className="shrink-0 mt-0.5">
+                        <input
+                          type="radio"
+                          checked={importState.choice === 'clear'}
+                          onChange={() => {}}
+                          className="w-4 h-4 accent-rose-600 cursor-pointer"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-rose-600 dark:text-rose-400">
+                          {lang === 'bn' ? '৩. মুছুন ও প্রতিস্থাপন করুন (সম্পূর্ণ রিস্টোর)' : 'Choice 3: Clear & Replace (Full Restore)'}
+                        </span>
+                        <p className="text-[11px] text-rose-600/90 dark:text-rose-400/90 mt-1 leading-normal">
+                          {lang === 'bn' 
+                            ? 'সতর্কতা: বর্তমান ডাটাবেসের সমস্ত তথ্য মুছে ফেলবে এবং ব্যাকআপ ফাইল দিয়ে প্রতিস্থাপন করবে।' 
+                            : 'WARNING: Completely wipes existing live database and replaces with file.'}
+                        </p>
+                      </div>
+                    </button>
+
+                    {importState.choice === 'clear' && (
+                      <motion.div 
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        className="bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 p-3.5 rounded-xl space-y-2"
+                      >
+                        <label className="text-[11px] font-bold text-rose-600 dark:text-rose-400 block leading-tight">
+                          {lang === 'bn' 
+                            ? 'ডাটাবেস সম্পূর্ণ মুছে ফেলার জন্য নিচে "RESTORE" শব্দটি টাইপ করুন:' 
+                            : 'Type "RESTORE" below to confirm full restore:'}
+                        </label>
+                        <input
+                          type="text"
+                          value={importState.confirmText}
+                          onChange={(e) => setImportState(prev => ({ ...prev, confirmText: e.target.value }))}
+                          placeholder="RESTORE"
+                          className="w-full px-3 py-2 bg-white dark:bg-[#0D121D] border-2 border-rose-300 dark:border-rose-800 rounded-xl text-xs text-center font-bold tracking-widest text-rose-600 dark:text-rose-400 outline-none"
+                        />
+                      </motion.div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (importState.choice === 'clear' && importState.confirmText !== 'RESTORE') {
+                        toast.error(lang === 'bn' ? 'নিশ্চিতকরণের জন্য "RESTORE" শব্দটি টাইপ করুন!' : 'Please type "RESTORE" to confirm!');
+                        return;
+                      }
+
+                      setImportState(prev => ({ ...prev, loading: true }));
+                      setImportProgress({
+                        stage: 'parsing',
+                        percent: 5,
+                        message: lang === 'bn' ? 'ব্যাকআপ ফাইল প্রস্তুত করা হচ্ছে...' : 'Preparing backup data...'
+                      });
+                      triggerHaptic('single');
+
+                      try {
+                        await importLedgerData(importState.backupData, importState.choice, (progress) => {
+                          setImportProgress(progress);
+                        });
+                        toast.success(lang === 'bn' ? 'ডাটা সফলভাবে ইম্পোর্ট করা হয়েছে!' : 'Data imported successfully!');
+                        triggerHaptic('double');
+                        setImportState(prev => ({ ...prev, showModal: false }));
+                      } catch (err) {
+                        console.error(err);
+                        toast.error(lang === 'bn' ? 'ইম্পোর্ট করতে সমস্যা হয়েছে!' : 'Failed to import data!');
+                      } finally {
+                        setImportState(prev => ({ ...prev, loading: false }));
+                        setImportProgress(null);
+                      }
+                    }}
+                    disabled={importState.choice === 'clear' && importState.confirmText !== 'RESTORE'}
+                    className={`w-full py-2.5 text-white font-bold rounded-xl border-2 text-xs flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                      importState.choice === 'clear'
+                        ? 'bg-rose-600 hover:bg-rose-700 border-transparent hover:border-slate-950 dark:hover:border-white disabled:opacity-40'
+                        : 'bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 dark:text-slate-950 border-slate-950 dark:border-white disabled:opacity-40'
+                    }`}
+                  >
+                    {lang === 'bn' ? 'ইম্পোর্ট শুরু করুন' : 'Confirm Import'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setImportState(prev => ({ ...prev, showModal: false }))}
+                    className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-xs cursor-pointer transition-colors"
+                  >
+                    {lang === 'bn' ? 'বাতিল' : 'Cancel'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
 

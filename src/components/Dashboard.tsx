@@ -281,10 +281,10 @@ export default function Dashboard({
         <div className="pt-4 border-t border-slate-100 dark:border-slate-800/80 grid grid-cols-3 gap-2 divide-x divide-slate-100 dark:divide-slate-800/80">
           {/* Column 1: Center-aligned */}
           <div className="px-1.5 text-center">
-            <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate">
+            <div className="text-[11px] sm:text-[13px] font-medium text-slate-500 dark:text-slate-400 truncate">
               {lang === 'bn' ? 'দেনাদার খাতা' : 'Active Debtors'}
             </div>
-            <div className="text-sm sm:text-base font-black font-mono text-slate-950 dark:text-white tabular-nums mt-0.5">
+            <div className="text-sm sm:text-[20px] font-black font-mono text-slate-950 dark:text-white tabular-nums mt-0.5">
               <CountUpSpan value={stats.activeDebtorsCount} lang={lang} enabled={true} />{' '}
               <span className="text-[11px] font-sans font-semibold text-slate-500 dark:text-slate-400">
                 {lang === 'bn' ? 'জন' : 'clients'}
@@ -294,10 +294,10 @@ export default function Dashboard({
 
           {/* Column 2: Center-aligned */}
           <div className="px-1.5 text-center">
-            <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate">
+            <div className="text-[11px] sm:text-[13px] font-medium text-slate-500 dark:text-slate-400 truncate">
               {lang === 'bn' ? 'মোট লেনদেন' : 'Total Entries'}
             </div>
-            <div className="text-sm sm:text-base font-black font-mono text-slate-950 dark:text-white tabular-nums mt-0.5">
+            <div className="text-sm sm:text-[20px] font-black font-mono text-slate-950 dark:text-white tabular-nums mt-0.5">
               <CountUpSpan value={transactionsCount} lang={lang} enabled={true} />{' '}
               <span className="text-[11px] font-sans font-semibold text-slate-500 dark:text-slate-400">
                 {lang === 'bn' ? 'টি' : 'logs'}
@@ -309,11 +309,11 @@ export default function Dashboard({
           <div className="px-1.5 text-center">
             {stats.totalOverpaid > 0 ? (
               <>
-                <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate">
+                <div className="text-[11px] sm:text-[13px] font-medium text-slate-500 dark:text-slate-400 truncate">
                   {lang === 'bn' ? 'অগ্রিম জমা' : 'Advance Credit'}
                 </div>
                 <div 
-                  className="text-sm sm:text-base font-black font-mono tabular-nums mt-0.5 truncate"
+                  className="text-sm sm:text-[20px] font-black font-mono tabular-nums mt-0.5 truncate"
                   style={{ color: 'var(--accent-color)' }}
                 >
                   <CountUpSpan value={stats.totalOverpaid} lang={lang} prefix="৳ " enabled={true} />
@@ -321,10 +321,10 @@ export default function Dashboard({
               </>
             ) : (
               <>
-                <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate">
+                <div className="text-[11px] sm:text-[13px] font-medium text-slate-500 dark:text-slate-400 truncate">
                   {lang === 'bn' ? 'পরিশোধিত খাতা' : 'Settled Clients'}
                 </div>
-                <div className="text-sm sm:text-base font-black font-mono text-slate-950 dark:text-white tabular-nums mt-0.5">
+                <div className="text-sm sm:text-[20px] font-black font-mono text-slate-950 dark:text-white tabular-nums mt-0.5">
                   <CountUpSpan value={stats.settledCount} lang={lang} enabled={true} />{' '}
                   <span className="text-[11px] font-sans font-semibold text-slate-500 dark:text-slate-400">
                     {lang === 'bn' ? 'জন' : 'clear'}

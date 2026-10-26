@@ -342,7 +342,7 @@ export default function RemindersManager({
                 }`}
               >
                 <User className="w-3.5 h-3.5" />
-                {lang === 'bn' ? 'গ্রাহক বকেয়া তাগাদা' : 'Customer Follow-up'}
+                {lang === 'bn' ? 'ফলো-আপ' : 'Follow-up'}
               </button>
               <button
                 type="button"
@@ -354,7 +354,7 @@ export default function RemindersManager({
                 }`}
               >
                 <CalendarClock className="w-3.5 h-3.5" />
-                {lang === 'bn' ? 'মাসিক কিস্তি / EMI' : 'Monthly EMI / Installment'}
+                {lang === 'bn' ? 'কিস্তি' : 'Installment'}
               </button>
             </div>
 

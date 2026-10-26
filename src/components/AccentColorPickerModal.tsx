@@ -11,6 +11,7 @@ import {
 } from '../lib/accentTheme';
 import { triggerHaptic } from '../lib/haptics';
 import { Language, formatNumber } from '../lib/translations';
+import ScrollSafeSlider from './ScrollSafeSlider';
 
 interface AccentColorPickerModalProps {
   isOpen: boolean;
@@ -165,17 +166,16 @@ export default function AccentColorPickerModal({
               </span>
               <span>{formatNumber(surfaceIntensity, lang)}%</span>
             </div>
-            <input
-              type="range"
+            <ScrollSafeSlider
               min={0}
               max={100}
               step={1}
               value={surfaceIntensity}
-              onChange={(e) => {
+              ariaLabel={lang === 'bn' ? 'শেড' : 'Shade'}
+              onChange={(val) => {
                 triggerHaptic('tick');
-                handleIntensityChange(Number(e.target.value));
+                handleIntensityChange(val);
               }}
-              className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-slate-950 dark:accent-white"
             />
           </div>
         </div>

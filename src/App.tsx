@@ -583,7 +583,7 @@ export default function App() {
         />
         
         {/* Top Controls: Language & Theme Switchers */}
-        <div className="w-full max-w-sm flex items-center justify-between mb-8">
+        <div className="w-full max-w-sm md:max-w-3xl lg:max-w-4xl flex items-center justify-between mb-6 sm:mb-8">
           <button
             onClick={() => {
               triggerHaptic('single');
@@ -608,112 +608,138 @@ export default function App() {
           </button>
         </div>
 
-        {/* Auth Card Container */}
-        <div className="w-full max-w-sm bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 rounded-xl p-6 sm:p-8 space-y-6 shadow-xs">
-          
-          {/* Custom Challan Track Brand Header */}
-          <div className="space-y-2">
-            <ChallanTrackLogo size="lg" variant="full" />
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium">{t.ledgerForTablet}</p>
-          </div>
-          
-          {/* Key Features List */}
-          <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800/80">
-            <div className="flex items-start gap-3">
-              <div className="p-2 bg-slate-50 dark:bg-slate-900/60 text-slate-700 dark:text-slate-300 rounded-md mt-0.5 shrink-0 border border-slate-200/60 dark:border-slate-800/60">
-                <ArrowUpRight className="w-3.5 h-3.5 stroke-[2.2]" />
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-slate-900 dark:text-white">{t.trackAndDeduct}</h4>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">{t.trackDesc}</p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <div className="p-2 bg-slate-50 dark:bg-slate-900/60 text-slate-700 dark:text-slate-300 rounded-md mt-0.5 shrink-0 border border-slate-200/60 dark:border-slate-800/60">
-                <Globe className="w-3.5 h-3.5 stroke-[2.2]" />
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-slate-900 dark:text-white">{t.cloudSync}</h4>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">{t.cloudDesc}</p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <div className="p-2 bg-slate-50 dark:bg-slate-900/60 text-slate-700 dark:text-slate-300 rounded-md mt-0.5 shrink-0 border border-slate-200/60 dark:border-slate-800/60">
-                <Bell className="w-3.5 h-3.5 stroke-[2.2]" />
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-slate-900 dark:text-white">{t.simpleAlerts}</h4>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">{t.alertsDesc}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="space-y-2.5 pt-2">
-            <button
-              onClick={handleGoogleSignIn}
-              disabled={googleLoading}
-              className="w-full py-3 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 dark:text-slate-950 text-white font-bold rounded-lg flex items-center justify-center gap-2.5 transition-colors cursor-pointer text-sm disabled:opacity-75 disabled:cursor-not-allowed select-none active:scale-[0.98] shadow-xs"
-              id="google_signin_btn"
-            >
-              {googleLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <svg className="h-4 w-4 shrink-0 fill-current" viewBox="0 0 24 24">
-                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                </svg>
-              )}
-              {googleLoading ? (lang === 'bn' ? 'লগইন হচ্ছে...' : 'Signing in...') : t.googleSignIn}
-            </button>
+        {/* Auth Card Container: Compact on mobile, expansive split showcase on desktop */}
+        <div className="w-full max-w-sm md:max-w-3xl lg:max-w-4xl bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 rounded-2xl p-6 sm:p-8 md:p-10 shadow-xs md:shadow-md transition-all">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-10 items-stretch">
             
-            <button
-              onClick={handleGuestSignIn}
-              className="w-full py-3 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900/60 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold rounded-lg flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-800/80 transition-colors cursor-pointer text-sm select-none active:scale-[0.98]"
-              id="guest_signin_btn"
-            >
-              {t.guestSignIn}
-            </button>
-          </div>
+            {/* Left Column (Brand + Key Features Showcase on desktop) */}
+            <div className="md:col-span-7 flex flex-col justify-between space-y-6">
+              {/* Custom Challan Track Brand Header */}
+              <div className="space-y-2">
+                <ChallanTrackLogo size="lg" variant="full" />
+                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 font-medium leading-relaxed">
+                  {t.ledgerForTablet}
+                </p>
+              </div>
 
-          {authError && (
-            <div className="bg-[#FFF8E6] dark:bg-[#261E0A] border border-[#FFC043]/40 p-3.5 rounded-lg text-xs text-[#7A4B00] dark:text-[#FFD479] font-medium space-y-2">
-              <div className="flex items-center gap-1.5 font-bold">
-                <span className="w-2 h-2 rounded-full bg-[#FFC043]"></span>
-                {lang === 'bn' ? 'লগইন সাহায্য নির্দেশিকা' : 'Google Login Troubleshooting'}
+              {/* Key Features List */}
+              <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800/80">
+                <div className="flex items-start gap-3 p-2.5 rounded-xl md:bg-slate-50/50 md:dark:bg-slate-900/30 md:border md:border-slate-100 md:dark:border-slate-800/50 transition-colors">
+                  <div className="p-2 bg-slate-50 dark:bg-slate-900/60 text-slate-700 dark:text-slate-300 rounded-md shrink-0 border border-slate-200/60 dark:border-slate-800/60">
+                    <ArrowUpRight className="w-4 h-4 stroke-[2.2]" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">{t.trackAndDeduct}</h4>
+                    <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">{t.trackDesc}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 p-2.5 rounded-xl md:bg-slate-50/50 md:dark:bg-slate-900/30 md:border md:border-slate-100 md:dark:border-slate-800/50 transition-colors">
+                  <div className="p-2 bg-slate-50 dark:bg-slate-900/60 text-slate-700 dark:text-slate-300 rounded-md shrink-0 border border-slate-200/60 dark:border-slate-800/60">
+                    <Globe className="w-4 h-4 stroke-[2.2]" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">{t.cloudSync}</h4>
+                    <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">{t.cloudDesc}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 p-2.5 rounded-xl md:bg-slate-50/50 md:dark:bg-slate-900/30 md:border md:border-slate-100 md:dark:border-slate-800/50 transition-colors">
+                  <div className="p-2 bg-slate-50 dark:bg-slate-900/60 text-slate-700 dark:text-slate-300 rounded-md shrink-0 border border-slate-200/60 dark:border-slate-800/60">
+                    <Bell className="w-4 h-4 stroke-[2.2]" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">{t.simpleAlerts}</h4>
+                    <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">{t.alertsDesc}</p>
+                  </div>
+                </div>
               </div>
-              <p className="opacity-90">
-                {lang === 'bn'
-                  ? 'গুগল সাইন-ইন সম্পন্ন করতে আপনার ফায়ারবেস প্রজেক্টের "Authorized Domains" তালিকায় এই ডোমেনটি যুক্ত করতে হবে:'
-                  : 'To complete Google Sign-In, you need to add this domain to your Firebase Authorized Domains list:'}
-              </p>
-              <div className="bg-white dark:bg-black p-2 rounded font-mono text-[11px] break-all select-all text-black dark:text-white border border-black/10 dark:border-white/15">
-                {typeof window !== 'undefined' ? window.location.hostname : 'localhost'}
+
+              {/* Desktop-friendly offline notice in footer of left column */}
+              <div className="hidden md:flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-medium pt-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+                <span>{t.offlineNotice}</span>
               </div>
-              <p className="opacity-90 text-[11px]">
-                {lang === 'bn'
-                  ? 'ধাপ: Firebase Console > Authentication > Settings > Authorized Domains-এ গিয়ে উপরের ডোমেনটি যুক্ত করুন। অথবা গেস্ট মোড চাপুন।'
-                  : 'Steps: Firebase Console > Authentication > Settings > Authorized Domains. Or use Guest Mode.'}
-              </p>
             </div>
-          )}
 
-          {/* Secure Sync Notice */}
-          <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 p-3.5 rounded-lg text-[11px] text-[#545454] dark:text-[#A6A6A6] font-medium leading-normal flex items-start gap-2.5">
-            <Lock className="w-4 h-4 text-black dark:text-white shrink-0 mt-0.5" />
-            <span>
-              {lang === 'bn' 
-                ? 'ক্লাউড সিঙ্ক: আপনার হিসাব খাতার ডেটা সুরক্ষিত রাখতে গুগল দিয়ে নিরাপদে লগইন করুন।'
-                : 'Cloud Sync: Sign in with Google to protect your ledger calculations and sync across devices.'}
-            </span>
-          </div>
+            {/* Right Column (Sign-in Actions, Troubleshooting & Security Notice) */}
+            <div className="md:col-span-5 flex flex-col justify-center space-y-4 md:pl-6 md:border-l md:border-slate-100 dark:md:border-slate-800/80">
+              <div className="hidden md:block space-y-1 mb-1">
+                <h3 className="text-base font-extrabold text-slate-950 dark:text-white">
+                  {lang === 'bn' ? 'অ্যাকাউন্টে প্রবেশ করুন' : 'Sign in to Continue'}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                  {lang === 'bn' ? 'আপনার ব্যবসা খতিয়ান ও ব্যাকআপ সিঙ্ক করতে যুক্ত হন' : 'Access your live ledger, analytics and customer balances'}
+                </p>
+              </div>
 
-          <div className="text-[10px] text-center text-[#757575] font-medium">
-            {t.offlineNotice}
+              {/* Action Buttons */}
+              <div className="space-y-2.5">
+                <button
+                  onClick={handleGoogleSignIn}
+                  disabled={googleLoading}
+                  className="w-full py-3 sm:py-3.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 dark:text-slate-950 text-white font-bold rounded-xl flex items-center justify-center gap-2.5 transition-colors cursor-pointer text-sm disabled:opacity-75 disabled:cursor-not-allowed select-none active:scale-[0.98] shadow-xs"
+                  id="google_signin_btn"
+                >
+                  {googleLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <svg className="h-4 w-4 shrink-0 fill-current" viewBox="0 0 24 24">
+                      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                    </svg>
+                  )}
+                  {googleLoading ? (lang === 'bn' ? 'লগইন হচ্ছে...' : 'Signing in...') : t.googleSignIn}
+                </button>
+                
+                <button
+                  onClick={handleGuestSignIn}
+                  className="w-full py-3 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900/60 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold rounded-xl flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-800/80 transition-colors cursor-pointer text-sm select-none active:scale-[0.98]"
+                  id="guest_signin_btn"
+                >
+                  {t.guestSignIn}
+                </button>
+              </div>
+
+              {authError && (
+                <div className="bg-[#FFF8E6] dark:bg-[#261E0A] border border-[#FFC043]/40 p-3.5 rounded-xl text-xs text-[#7A4B00] dark:text-[#FFD479] font-medium space-y-2">
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <span className="w-2 h-2 rounded-full bg-[#FFC043]"></span>
+                    {lang === 'bn' ? 'লগইন সাহায্য নির্দেশিকা' : 'Google Login Troubleshooting'}
+                  </div>
+                  <p className="opacity-90">
+                    {lang === 'bn'
+                      ? 'গুগল সাইন-ইন সম্পন্ন করতে আপনার ফায়ারবেস প্রজেক্টের "Authorized Domains" তালিকায় এই ডোমেনটি যুক্ত করতে হবে:'
+                      : 'To complete Google Sign-In, you need to add this domain to your Firebase Authorized Domains list:'}
+                  </p>
+                  <div className="bg-white dark:bg-black p-2 rounded font-mono text-[11px] break-all select-all text-black dark:text-white border border-black/10 dark:border-white/15">
+                    {typeof window !== 'undefined' ? window.location.hostname : 'localhost'}
+                  </div>
+                  <p className="opacity-90 text-[11px]">
+                    {lang === 'bn'
+                      ? 'ধাপ: Firebase Console > Authentication > Settings > Authorized Domains-এ গিয়ে উপরের ডোমেনটি যুক্ত করুন। অথবা গেস্ট মোড চাপুন।'
+                      : 'Steps: Firebase Console > Authentication > Settings > Authorized Domains. Or use Guest Mode.'}
+                  </p>
+                </div>
+              )}
+
+              {/* Secure Sync Notice */}
+              <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 p-3.5 rounded-xl text-[11px] text-[#545454] dark:text-[#A6A6A6] font-medium leading-normal flex items-start gap-2.5">
+                <Lock className="w-4 h-4 text-black dark:text-white shrink-0 mt-0.5" />
+                <span>
+                  {lang === 'bn' 
+                    ? 'ক্লাউড সিঙ্ক: আপনার হিসাব খাতার ডেটা সুরক্ষিত রাখতে গুগল দিয়ে নিরাপদে লগইন করুন।'
+                    : 'Cloud Sync: Sign in with Google to protect your ledger calculations and sync across devices.'}
+                </span>
+              </div>
+
+              {/* Mobile-only offline notice */}
+              <div className="md:hidden text-[10px] text-center text-[#757575] font-medium pt-1">
+                {t.offlineNotice}
+              </div>
+            </div>
           </div>
         </div>
       </div>

@@ -1769,7 +1769,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                             )}
                           </div>
                           <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1 truncate font-mono">
-                            {c.accountType === 'credit_card' && !c.phone ? (
+                            {c.accountType === 'credit_card' ? (
                               <>
                                 <Calendar className="w-3 h-3 shrink-0 opacity-70" />
                                 <span className="truncate">
@@ -1976,8 +1976,16 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   )}
 
  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10 pt-2">
+ <AnimatePresence mode="wait" initial={false}>
  {isEditingCustomer ? (
- <div className="flex-1 space-y-3 max-w-md">
+ <motion.div
+   key="edit-customer-form"
+   initial={{ opacity: 0, y: -8, scale: 0.98 }}
+   animate={{ opacity: 1, y: 0, scale: 1 }}
+   exit={{ opacity: 0, y: -6, scale: 0.98 }}
+   transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+   className="flex-1 space-y-3 max-w-md"
+ >
  {/* Account Type Selector in Edit Mode */}
  <div>
    <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
@@ -2158,9 +2166,15 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  {lang === 'bn' ? 'বাতিল' : 'Cancel'}
  </button>
  </div>
- </div>
+ </motion.div>
  ) : (
- <div>
+ <motion.div
+   key="view-customer-info"
+   initial={{ opacity: 0, y: 6 }}
+   animate={{ opacity: 1, y: 0 }}
+   exit={{ opacity: 0, y: -4 }}
+   transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+ >
  <h2 className="text-xl sm:text-2xl font-extrabold text-slate-950 dark:text-white pr-28">{selectedCustomer.name}</h2>
  {selectedCustomer.phone ? (
  <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-1.5 font-mono">
@@ -2215,8 +2229,9 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
      </span>
    </p>
  )}
- </div>
+ </motion.div>
  )}
+ </AnimatePresence>
 
  </div>
  {/* CURRENT BALANCE CARD + ELLIPSIS TOGGLE FOR TOTAL BILLED & TOTAL PAID */}

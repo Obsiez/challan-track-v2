@@ -10,5 +10,4 @@ Thumbs.db
 !.env.example
 .aistudio/
 public/assets/aistudio/
-
-
+*.patch
