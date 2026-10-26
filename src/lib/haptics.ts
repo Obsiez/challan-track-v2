@@ -81,8 +81,16 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 
 export type HapticType = 'single' | 'double' | 'tick' | 'keypad' | 'soft' | 'medium' | number | number[];
 
+let lastTickHapticTimestamp = 0;
+
 export const triggerHaptic = (type: HapticType = 'single') => {
   if (!isHapticsEnabled()) return;
+
+  if (type === 'tick') {
+    const now = performance.now();
+    if (now - lastTickHapticTimestamp < 45) return;
+    lastTickHapticTimestamp = now;
+  }
 
   // 1. iOS Safari / Standalone PWA Taptic Engine workaround
   if (isIOSDevice()) {

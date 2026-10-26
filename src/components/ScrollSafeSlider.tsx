@@ -20,9 +20,60 @@ export default function ScrollSafeSlider({
   ariaLabel = 'Slider',
 }: ScrollSafeSliderProps) {
   const trackRef = useRef<HTMLDivElement>(null);
+  const fillRef = useRef<HTMLDivElement>(null);
+  const thumbRef = useRef<HTMLDivElement>(null);
   const lastScrollTimeRef = useRef<number>(0);
   const valueRef = useRef<number>(value);
-  valueRef.current = value;
+  const rafRef = useRef<number | null>(null);
+  const isDraggingRef = useRef<boolean>(false);
+
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  const setVisualPercent = useCallback(
+    (val: number) => {
+      const pct = max > min ? Math.max(0, Math.min(100, ((val - min) / (max - min)) * 100)) : 0;
+      if (fillRef.current) {
+        fillRef.current.style.width = `${pct}%`;
+      }
+      if (thumbRef.current) {
+        thumbRef.current.style.left = `${pct}%`;
+      }
+    },
+    [min, max]
+  );
+
+  // Sync external value updates when not actively dragging
+  useEffect(() => {
+    valueRef.current = value;
+    if (!isDraggingRef.current) {
+      setVisualPercent(value);
+    }
+  }, [value, setVisualPercent]);
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, []);
+
+  const emitChange = useCallback(
+    (nextVal: number) => {
+      if (nextVal === valueRef.current) return;
+      valueRef.current = nextVal;
+      setVisualPercent(nextVal);
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+      }
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        onChangeRef.current(nextVal);
+      });
+    },
+    [setVisualPercent]
+  );
 
   const touchStateRef = useRef<{
     active: boolean;
@@ -58,6 +109,7 @@ export default function ScrollSafeSlider({
       lastScrollTimeRef.current = performance.now();
       if (touchStateRef.current.active && touchStateRef.current.mode !== 'horizontal') {
         touchStateRef.current.mode = 'vertical';
+        isDraggingRef.current = false;
       }
     };
     window.addEventListener('scroll', handleScroll, { passive: true, capture: true });
@@ -71,12 +123,11 @@ export default function ScrollSafeSlider({
     const handleMouseMove = (e: MouseEvent) => {
       if (!mouseDownRef.current) return;
       const next = computeValueFromClientX(e.clientX);
-      if (next !== valueRef.current) {
-        onChange(next);
-      }
+      emitChange(next);
     };
     const handleMouseUp = () => {
       mouseDownRef.current = false;
+      isDraggingRef.current = false;
     };
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
@@ -84,23 +135,25 @@ export default function ScrollSafeSlider({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [computeValueFromClientX, onChange]);
+  }, [computeValueFromClientX, emitChange]);
 
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     if (e.touches.length !== 1) {
       touchStateRef.current.active = false;
       touchStateRef.current.mode = 'vertical';
+      isDraggingRef.current = false;
       return;
     }
     const now = performance.now();
-    // If user is currently scrolling or just scrolled within 280ms, ignore touch completely
-    if (now - lastScrollTimeRef.current < 280) {
+    // If user is currently scrolling or just scrolled within 240ms, ignore touch completely
+    if (now - lastScrollTimeRef.current < 240) {
       touchStateRef.current = {
         active: true,
         startX: e.touches[0].clientX,
         startY: e.touches[0].clientY,
         mode: 'vertical',
       };
+      isDraggingRef.current = false;
       return;
     }
 
@@ -118,8 +171,9 @@ export default function ScrollSafeSlider({
     if (!state.active || state.mode === 'vertical' || e.touches.length !== 1) return;
 
     // If any scroll occurred since touchstart, abort slider activation
-    if (performance.now() - lastScrollTimeRef.current < 280) {
+    if (performance.now() - lastScrollTimeRef.current < 240) {
       state.mode = 'vertical';
+      isDraggingRef.current = false;
       return;
     }
 
@@ -131,11 +185,13 @@ export default function ScrollSafeSlider({
       // Any vertical movement >= 5px immediately locks to vertical page scroll
       if (dy >= 5 && dy >= dx * 0.7) {
         state.mode = 'vertical';
+        isDraggingRef.current = false;
         return;
       }
-      // Require intentional horizontal drag (> 12px and clearly horizontal) before activating slider
-      if (dx > 12 && dx > dy * 1.8) {
+      // Require intentional horizontal drag (> 7px and clearly horizontal) before activating slider
+      if (dx > 7 && dx > dy * 1.5) {
         state.mode = 'horizontal';
+        isDraggingRef.current = true;
       } else {
         return;
       }
@@ -143,24 +199,22 @@ export default function ScrollSafeSlider({
 
     if (state.mode === 'horizontal') {
       const next = computeValueFromClientX(t.clientX);
-      if (next !== valueRef.current) {
-        onChange(next);
-      }
+      emitChange(next);
     }
   };
 
   const handleTouchEnd = () => {
     touchStateRef.current.active = false;
     touchStateRef.current.mode = 'undecided';
+    isDraggingRef.current = false;
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     mouseDownRef.current = true;
+    isDraggingRef.current = true;
     const next = computeValueFromClientX(e.clientX);
-    if (next !== valueRef.current) {
-      onChange(next);
-    }
+    emitChange(next);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -179,7 +233,7 @@ export default function ScrollSafeSlider({
       next = max;
     }
     if (next !== value) {
-      onChange(next);
+      emitChange(next);
     }
   };
 
@@ -206,6 +260,7 @@ export default function ScrollSafeSlider({
       {/* Track */}
       <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden relative pointer-events-none">
         <div
+          ref={fillRef}
           className="h-full bg-slate-950 dark:bg-white rounded-full"
           style={{ width: `${percent}%` }}
         />
@@ -213,7 +268,8 @@ export default function ScrollSafeSlider({
 
       {/* Thumb */}
       <div
-        className="w-4 h-4 rounded-full bg-slate-950 dark:bg-white border-2 border-white dark:border-slate-900 shadow-sm absolute top-1/2 -translate-y-1/2 -translate-x-1/2 pointer-events-none transition-transform"
+        ref={thumbRef}
+        className="w-4 h-4 rounded-full bg-slate-950 dark:bg-white border-2 border-white dark:border-slate-900 shadow-sm absolute top-1/2 -translate-y-1/2 -translate-x-1/2 pointer-events-none"
         style={{ left: `${percent}%` }}
       />
     </div>

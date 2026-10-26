@@ -2269,6 +2269,7 @@ const lastSubmitRef = useRef<{
     if (!userId) return;
 
     const isLocal = userId === 'local-guest-session' || isOfflineFallback;
+    const isBn = (typeof localStorage !== 'undefined' ? localStorage.getItem('lang') : 'bn') !== 'en';
 
     // Validate structure
     if (!backupData || !Array.isArray(backupData.customers) || !Array.isArray(backupData.ledgerTransactions)) {
@@ -2278,7 +2279,7 @@ const lastSubmitRef = useRef<{
     onProgress?.({
       stage: 'parsing',
       percent: 5,
-      message: 'ব্যাকআপ ফাইল বিশ্লেষণ করা হচ্ছে... / Parsing backup file...'
+      message: isBn ? 'ব্যাকআপ ফাইল বিশ্লেষণ করা হচ্ছে...' : 'Parsing backup file...'
     });
     await new Promise(r => setTimeout(r, 40));
 
@@ -2286,28 +2287,113 @@ const lastSubmitRef = useRef<{
     const operations: { ref: any; data: any; type: 'set' | 'update' | 'delete' }[] = [];
 
     // Local copies of states we'll update
+    // Deleted customers in trash must remain in trash and never be recovered into active customers
     let newCustomers: Customer[] = [...customers];
     let newTrash: Customer[] = [...trashCustomers];
     let newTransactions: Transaction[] = [...transactions];
     let newReminders: Reminder[] = [...reminders];
     let newGoals: SavingGoal[] = [...goals];
 
+    // Build map of trashed customers (existing in trash + any marked deleted in backup)
+    const trashCustomerMap = new Map<string, Customer>();
+    for (const tc of newTrash) {
+      if (tc.name) {
+        trashCustomerMap.set(tc.name.trim().toLowerCase(), tc);
+      }
+    }
+
+    const incomingTrashList: any[] = [
+      ...(Array.isArray(backupData.trashCustomers) ? backupData.trashCustomers : []),
+      ...(Array.isArray(backupData.customers) ? backupData.customers.filter((c: any) => c && c.isDeleted) : [])
+    ];
+
+    for (const btc of incomingTrashList) {
+      if (!btc || !btc.name) continue;
+      const key = btc.name.trim().toLowerCase();
+      if (!trashCustomerMap.has(key)) {
+        // Check if this customer is currently in active customers; if so, move them to trash
+        const existingActiveIdx = newCustomers.findIndex(c => c.name.trim().toLowerCase() === key);
+        if (existingActiveIdx >= 0) {
+          const activeCust = newCustomers[existingActiveIdx];
+          newCustomers.splice(existingActiveIdx, 1);
+          const trashedObj: Customer = {
+            ...activeCust,
+            isDeleted: true,
+            deletedAt: btc.deletedAt ? new Date(btc.deletedAt) : new Date()
+          };
+          newTrash.push(trashedObj);
+          trashCustomerMap.set(key, trashedObj);
+          if (!isLocal) {
+            operations.push({
+              ref: doc(db, 'users', userId, 'customers', trashedObj.id),
+              data: { isDeleted: true, deletedAt: trashedObj.deletedAt },
+              type: 'update'
+            });
+          }
+        } else {
+          const customTrashId = doc(collection(db, 'temp')).id;
+          const cDate = btc.createdAt ? new Date(btc.createdAt) : new Date();
+          const dDate = btc.deletedAt ? new Date(btc.deletedAt) : new Date();
+          const acctType: 'standard' | 'credit_card' = btc.accountType === 'credit_card' ? 'credit_card' : 'standard';
+          const validBillingDay =
+            acctType === 'credit_card'
+              ? Math.min(31, Math.max(1, Math.round(Number(btc.billingDay) || 15)))
+              : btc.billingDay !== undefined
+              ? Number(btc.billingDay)
+              : undefined;
+          const trashedObj: Customer = {
+            id: customTrashId,
+            userId,
+            name: btc.name.trim(),
+            phone: (btc.phone || '').trim(),
+            outstandingDue: Number(btc.outstandingDue) || 0,
+            createdAt: cDate,
+            updatedAt: new Date(),
+            isDeleted: true,
+            deletedAt: dDate,
+            accountType: acctType,
+            ...(validBillingDay !== undefined ? { billingDay: validBillingDay } : {})
+          };
+          newTrash.push(trashedObj);
+          trashCustomerMap.set(key, trashedObj);
+          if (!isLocal) {
+            const firestoreTrashData: any = {
+              id: customTrashId,
+              userId,
+              name: trashedObj.name,
+              phone: trashedObj.phone,
+              outstandingDue: trashedObj.outstandingDue,
+              createdAt: cDate,
+              updatedAt: new Date(),
+              isDeleted: true,
+              deletedAt: dDate,
+              accountType: acctType
+            };
+            if (validBillingDay !== undefined) {
+              firestoreTrashData.billingDay = validBillingDay;
+            }
+            operations.push({
+              ref: doc(db, 'users', userId, 'customers', customTrashId),
+              data: firestoreTrashData,
+              type: 'set'
+            });
+          }
+        }
+      }
+    }
+
     if (choice === 'clear') {
-      // Clear Firestore references for existing customers, transactions, reminders, and goals
+      // Clear Firestore references for existing active customers, transactions, reminders, and goals
+      // Note: trashCustomers are preserved in trash so deleted customers stay in trash and are not recovered
       if (!isLocal) {
         for (const c of customers) {
-          operations.push({
-            ref: doc(db, 'users', userId, 'customers', c.id),
-            data: null,
-            type: 'delete'
-          });
-        }
-        for (const c of trashCustomers) {
-          operations.push({
-            ref: doc(db, 'users', userId, 'customers', c.id),
-            data: null,
-            type: 'delete'
-          });
+          if (!trashCustomerMap.has(c.name.trim().toLowerCase())) {
+            operations.push({
+              ref: doc(db, 'users', userId, 'customers', c.id),
+              data: null,
+              type: 'delete'
+            });
+          }
         }
         try {
           const allRemoteTxSnap = await getDocs(collection(db, 'users', userId, 'transactions'));
@@ -2343,18 +2429,21 @@ const lastSubmitRef = useRef<{
         }
       }
 
-      // Reset local variables
+      // Reset active local variables while keeping newTrash intact
       newCustomers = [];
-      newTrash = [];
       newTransactions = [];
       newReminders = [];
       newGoals = [];
 
-      // Create new customers from backup
+      // Create new active customers from backup (skipping any customer that is in trash)
       const customerMap = new Map<string, Customer>(); // name lowercased -> Customer object
       
       for (const bc of backupData.customers) {
-        if (!bc.name) continue;
+        if (!bc.name || bc.isDeleted) continue;
+        const key = bc.name.trim().toLowerCase();
+        // Deleted customers must stay in trash and not be recovered
+        if (trashCustomerMap.has(key)) continue;
+
         const customId = doc(collection(db, 'temp')).id;
         const cDate = bc.createdAt ? new Date(bc.createdAt) : new Date();
         const acctType: 'standard' | 'credit_card' = bc.accountType === 'credit_card' ? 'credit_card' : 'standard';
@@ -2376,7 +2465,7 @@ const lastSubmitRef = useRef<{
           accountType: acctType,
           ...(validBillingDay !== undefined ? { billingDay: validBillingDay } : {})
         };
-        customerMap.set(bc.name.trim().toLowerCase(), customerObj);
+        customerMap.set(key, customerObj);
         newCustomers.push(customerObj);
 
         if (!isLocal) {
@@ -2401,10 +2490,12 @@ const lastSubmitRef = useRef<{
         }
       }
 
-      // Create transactions from backup
+      // Create transactions from backup (skip transactions for trashed customers so they are not recovered)
       for (const bt of backupData.ledgerTransactions) {
         const cName = bt.customer || (bt as any).customerName; if (!cName) continue;
         const customerNameLower = cName.trim().toLowerCase();
+        if (trashCustomerMap.has(customerNameLower)) continue;
+
         let matchedCustomer = customerMap.get(customerNameLower);
         
         if (!matchedCustomer) {
@@ -2547,8 +2638,11 @@ const lastSubmitRef = useRef<{
       const newlyAddedCustomerIds = new Set<string>();
 
       for (const bc of backupData.customers) {
-        if (!bc.name) continue;
+        if (!bc.name || bc.isDeleted) continue;
         const key = bc.name.trim().toLowerCase();
+        // Deleted customers must stay in trash and not be recovered
+        if (trashCustomerMap.has(key)) continue;
+
         const existing = customerMap.get(key);
         const acctType: 'standard' | 'credit_card' = bc.accountType === 'credit_card' ? 'credit_card' : (bc.accountType || 'standard');
         const validBillingDay =
@@ -2642,10 +2736,12 @@ const lastSubmitRef = useRef<{
         existingTxSet.add(`${tx.customerId}|${tx.type}|${tx.amount}|${(tx.description || '').trim().toLowerCase()}|${roundedSec}`);
       }
 
-      // 2. Process transactions
+      // 2. Process transactions (skipping any customer currently in trash so they are not recovered)
       for (const bt of backupData.ledgerTransactions) {
         const cName = bt.customer || (bt as any).customerName; if (!cName) continue;
         const key = cName.trim().toLowerCase();
+        if (trashCustomerMap.has(key)) continue;
+
         let matchedCustomer = customerMap.get(key);
 
         if (!matchedCustomer) {
@@ -2959,6 +3055,9 @@ const lastSubmitRef = useRef<{
       for (const br of backupData.reminders) {
         const remType: 'customer' | 'emi' = br.type === 'emi' ? 'emi' : 'customer';
         const remCustName = (br.customerName || '').trim();
+        if (remType === 'customer' && remCustName && trashCustomerMap.has(remCustName.toLowerCase())) {
+          continue;
+        }
         let matchedCustId = br.customerId || '';
         let matchedGoalId = br.goalId;
 
@@ -3049,7 +3148,9 @@ const lastSubmitRef = useRef<{
           totalBatches: chunks.length,
           processedCount: Math.min(operations.length, batchIdx * 400),
           totalCount: operations.length,
-          message: `ক্লাউড সার্ভারে ডাটা সংরক্ষণ হচ্ছে (ব্যাচ ${batchIdx} / ${chunks.length})...`
+          message: isBn
+            ? 'ক্লাউড সার্ভারে ডাটা সংরক্ষণ হচ্ছে...'
+            : 'Saving data to cloud server...'
         });
 
         const batch = writeBatch(db);
@@ -3080,15 +3181,21 @@ const lastSubmitRef = useRef<{
     saveLocalReminders(newReminders);
     saveLocalGoals(newGoals);
 
-    // Restore and retain pinned customers from backup
+    // Restore and retain pinned customers from backup (excluding trashed customers)
     try {
       const importedPinned = new Set<string>();
       if (Array.isArray(backupData.pinnedCustomerNames)) {
-        backupData.pinnedCustomerNames.forEach((n: any) => typeof n === 'string' && importedPinned.add(n));
+        backupData.pinnedCustomerNames.forEach((n: any) => {
+          if (typeof n === 'string' && !trashCustomerMap.has(n.trim().toLowerCase())) {
+            importedPinned.add(n);
+          }
+        });
       }
       if (Array.isArray(backupData.customers)) {
         backupData.customers.forEach((c: any) => {
-          if (c.isPinned && c.name) importedPinned.add(c.name);
+          if (c.isPinned && c.name && !c.isDeleted && !trashCustomerMap.has(c.name.trim().toLowerCase())) {
+            importedPinned.add(c.name);
+          }
         });
       }
       if (importedPinned.size > 0) {
@@ -3097,9 +3204,10 @@ const lastSubmitRef = useRef<{
           const stored = localStorage.getItem('pinned_customers_names');
           if (stored) existingPinned = JSON.parse(stored);
         } catch {}
-        const mergedPinned = choice === 'clear'
+        const mergedPinned = (choice === 'clear'
           ? Array.from(importedPinned)
-          : Array.from(new Set([...existingPinned, ...Array.from(importedPinned)]));
+          : Array.from(new Set([...existingPinned, ...Array.from(importedPinned)])))
+          .filter(n => !trashCustomerMap.has(String(n).trim().toLowerCase()));
         localStorage.setItem('pinned_customers_names', JSON.stringify(mergedPinned));
         window.dispatchEvent(new Event('storage'));
       }
@@ -3134,7 +3242,7 @@ const lastSubmitRef = useRef<{
       onProgress?.({
         stage: 'summaries',
         percent: 90,
-        message: 'মাসিক সারাংশ ও এনালিটিক্স তৈরি হচ্ছে... / Rebuilding monthly analytics...'
+        message: isBn ? 'মাসিক সারাংশ ও এনালিটিক্স তৈরি হচ্ছে...' : 'Rebuilding monthly analytics...'
       });
       await rebuildMonthlySummaries(userId);
     }
@@ -3142,7 +3250,7 @@ const lastSubmitRef = useRef<{
     onProgress?.({
       stage: 'done',
       percent: 100,
-      message: 'ইম্পোর্ট সফলভাবে সম্পন্ন হয়েছে! / Data imported successfully!'
+      message: isBn ? 'ইম্পোর্ট সফলভাবে সম্পন্ন হয়েছে!' : 'Data imported successfully!'
     });
   };
 
@@ -3561,10 +3669,19 @@ const lastSubmitRef = useRef<{
       if (storedPinned) pinnedNames = JSON.parse(storedPinned);
     } catch {}
 
+    const trashIds = new Set(trashCustomers.map(tc => tc.id));
+    const trashNamesLower = new Set(trashCustomers.map(tc => (tc.name || '').trim().toLowerCase()));
+    const activeTxsForBackup = allTxs.filter(t => {
+      if (t.customerId && trashIds.has(t.customerId)) return false;
+      const tName = (t.customerName || (t as any).customer || '').trim().toLowerCase();
+      if (tName && trashNamesLower.has(tName)) return false;
+      return true;
+    });
+
     return {
       backupTimestamp: new Date().toISOString(),
       ownerEmail: settings?.email || 'unknown',
-      pinnedCustomerNames: pinnedNames,
+      pinnedCustomerNames: pinnedNames.filter(n => !trashNamesLower.has(String(n).trim().toLowerCase())),
       customers: customers.map(c => ({
         name: c.name,
         phone: c.phone,
@@ -3577,7 +3694,20 @@ const lastSubmitRef = useRef<{
         updatedAt: c.updatedAt instanceof Date ? c.updatedAt.toISOString() : (c.updatedAt?.toDate ? c.updatedAt.toDate().toISOString() : c.updatedAt),
         isPinned: pinnedNames.includes(c.name) || !!c.isPinned
       })),
-      ledgerTransactions: allTxs.map(t => ({
+      trashCustomers: trashCustomers.map(c => ({
+        name: c.name,
+        phone: c.phone,
+        outstandingDue: c.outstandingDue,
+        accountType: c.accountType || 'standard',
+        ...(c.accountType === 'credit_card' || c.billingDay !== undefined
+          ? { billingDay: c.accountType === 'credit_card' ? (c.billingDay || 15) : c.billingDay }
+          : {}),
+        isDeleted: true,
+        deletedAt: c.deletedAt instanceof Date ? c.deletedAt.toISOString() : ((c.deletedAt as any)?.toDate ? (c.deletedAt as any).toDate().toISOString() : (c.deletedAt || new Date().toISOString())),
+        createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : (c.createdAt?.toDate ? c.createdAt.toDate().toISOString() : c.createdAt),
+        updatedAt: c.updatedAt instanceof Date ? c.updatedAt.toISOString() : (c.updatedAt?.toDate ? c.updatedAt.toDate().toISOString() : c.updatedAt)
+      })),
+      ledgerTransactions: activeTxsForBackup.map(t => ({
         customer: t.customerName,
         customerName: t.customerName,
         type: t.type,

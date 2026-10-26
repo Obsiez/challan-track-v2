@@ -1523,7 +1523,7 @@ export default function SettingsManager({
                   </svg>
                   <div className="absolute flex flex-col items-center justify-center">
                     <span className="text-xs font-mono font-bold text-slate-950 dark:text-white">
-                      {importProgress?.percent || 5}%
+                      {formatNumber(importProgress?.percent || 5, lang)}%
                     </span>
                   </div>
                 </div>
@@ -1532,8 +1532,15 @@ export default function SettingsManager({
                   <h4 className="text-sm font-bold text-slate-950 dark:text-white flex items-center justify-center gap-2">
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                     <span>
-                      {importProgress?.message ||
-                        (lang === 'bn' ? 'ডাটা ইম্পোর্ট হচ্ছে...' : 'Importing data...')}
+                      {importProgress?.stage === 'parsing'
+                        ? (lang === 'bn' ? 'ব্যাকআপ ফাইল বিশ্লেষণ করা হচ্ছে...' : 'Parsing backup file...')
+                        : importProgress?.stage === 'saving'
+                        ? (lang === 'bn' ? 'ক্লাউড সার্ভারে ডাটা সংরক্ষণ হচ্ছে...' : 'Saving data to cloud server...')
+                        : importProgress?.stage === 'summaries'
+                        ? (lang === 'bn' ? 'মাসিক সারাংশ ও এনালিটিক্স তৈরি হচ্ছে...' : 'Rebuilding monthly analytics...')
+                        : importProgress?.stage === 'done'
+                        ? (lang === 'bn' ? 'ইম্পোর্ট সফলভাবে সম্পন্ন হয়েছে!' : 'Data imported successfully!')
+                        : (lang === 'bn' ? 'ডাটা ইম্পোর্ট হচ্ছে...' : 'Importing data...')}
                     </span>
                   </h4>
                   {importProgress && importProgress.totalBatches && importProgress.totalBatches > 1 && (
@@ -1556,17 +1563,17 @@ export default function SettingsManager({
                   <span className="flex items-center gap-1">
                     <Clock className="w-3.5 h-3.5" />
                     <span>
-                      {lang === 'bn' ? 'অতিবাহিত সময়:' : 'Elapsed:'}{' '}
-                      {Math.floor(elapsedSeconds / 60)}:
-                      {String(elapsedSeconds % 60).padStart(2, '0')}s
+                      {lang === 'bn'
+                        ? `অতিবাহিত সময়: ${formatNumber(Math.floor(elapsedSeconds / 60), 'bn')}:${elapsedSeconds % 60 < 10 ? `০${formatNumber(elapsedSeconds % 60, 'bn')}` : formatNumber(elapsedSeconds % 60, 'bn')} সে.`
+                        : `Elapsed: ${Math.floor(elapsedSeconds / 60)}:${String(elapsedSeconds % 60).padStart(2, '0')}s`}
                     </span>
                   </span>
                   {importProgress?.totalCount !== undefined && importProgress.totalCount > 0 ? (
                     <span>
-                      {importProgress.processedCount ?? 0} / {importProgress.totalCount}
+                      {formatNumber(importProgress.processedCount ?? 0, lang)} / {formatNumber(importProgress.totalCount, lang)}
                     </span>
                   ) : (
-                    <span>{importProgress?.percent || 5}%</span>
+                    <span>{formatNumber(importProgress?.percent || 5, lang)}%</span>
                   )}
                 </div>
 
@@ -1586,29 +1593,31 @@ export default function SettingsManager({
                       <span className="font-bold text-slate-900 dark:text-white">
                         {importState.backupData.backupTimestamp 
                           ? new Date(importState.backupData.backupTimestamp).toLocaleString(lang === 'bn' ? 'bn-BD' : 'en-US') 
-                          : 'N/A'}
+                          : (lang === 'bn' ? 'প্রযোজ্য নয়' : 'N/A')}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span>{lang === 'bn' ? 'গ্রাহক ও ক্রেডিট কার্ড হিসাব:' : 'Accounts & Credit Cards:'}</span>
                       <span className="font-bold text-slate-900 dark:text-white font-mono">
-                        {importState.backupData.customers?.length || 0}
+                        {formatNumber(importState.backupData.customers?.length || 0, lang)}
                         {Array.isArray(importState.backupData.customers) && importState.backupData.customers.some((c: any) => c.accountType === 'credit_card')
-                          ? ` (${importState.backupData.customers.filter((c: any) => c.accountType === 'credit_card').length} ${lang === 'bn' ? 'কার্ড' : 'cards'})`
+                          ? ` (${formatNumber(importState.backupData.customers.filter((c: any) => c.accountType === 'credit_card').length, lang)} ${lang === 'bn' ? 'কার্ড' : 'cards'})`
                           : ''}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span>{lang === 'bn' ? 'লেনদেনের সংখ্যা:' : 'Total Transactions:'}</span>
-                      <span className="font-bold text-slate-900 dark:text-white font-mono">{importState.backupData.ledgerTransactions?.length || 0}</span>
+                      <span className="font-bold text-slate-900 dark:text-white font-mono">
+                        {formatNumber(importState.backupData.ledgerTransactions?.length || 0, lang)}
+                      </span>
                     </div>
                     {Array.isArray(importState.backupData.goals) && (
                       <div className="flex justify-between">
                         <span>{lang === 'bn' ? 'লক্ষ্য ও উন্মুক্ত সঞ্চয়:' : 'Goals & Flexible Savings:'}</span>
                         <span className="font-bold text-slate-900 dark:text-white font-mono">
-                          {importState.backupData.goals.length}
+                          {formatNumber(importState.backupData.goals.length, lang)}
                           {importState.backupData.goals.some((g: any) => g.isOpenEnded)
-                            ? ` (${importState.backupData.goals.filter((g: any) => g.isOpenEnded).length} ${lang === 'bn' ? 'উন্মুক্ত' : 'flexible'})`
+                            ? ` (${formatNumber(importState.backupData.goals.filter((g: any) => g.isOpenEnded).length, lang)} ${lang === 'bn' ? 'উন্মুক্ত' : 'flexible'})`
                             : ''}
                         </span>
                       </div>
