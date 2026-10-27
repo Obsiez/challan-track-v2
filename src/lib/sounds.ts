@@ -43,36 +43,36 @@ export const playKeypadClick = (type: 'tick' | 'delete' | 'done' = 'tick'): void
     if (type === 'delete') {
       // Slightly lower-pitched soft pop for delete
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(420, now);
-      osc.frequency.exponentialRampToValueAtTime(140, now + 0.035);
-      gain.gain.setValueAtTime(0.08, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.035);
+      osc.frequency.setValueAtTime(440, now);
+      osc.frequency.exponentialRampToValueAtTime(150, now + 0.038);
+      gain.gain.setValueAtTime(0.24, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.038);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(now);
-      osc.stop(now + 0.035);
+      osc.stop(now + 0.038);
     } else if (type === 'done') {
       // Pleasant affirmative dual-chime for done
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(880, now);
-      osc.frequency.exponentialRampToValueAtTime(1320, now + 0.045);
-      gain.gain.setValueAtTime(0.07, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
+      osc.frequency.exponentialRampToValueAtTime(1320, now + 0.05);
+      gain.gain.setValueAtTime(0.22, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(now);
-      osc.stop(now + 0.045);
+      osc.stop(now + 0.05);
     } else {
-      // Subtle crisp iOS / Gboard style acoustic mechanical key click
+      // Crisp iOS / Gboard style acoustic mechanical key click
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(1200, now);
-      osc.frequency.exponentialRampToValueAtTime(300, now + 0.022);
-      gain.gain.setValueAtTime(0.06, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.022);
+      osc.frequency.setValueAtTime(1350, now);
+      osc.frequency.exponentialRampToValueAtTime(320, now + 0.028);
+      gain.gain.setValueAtTime(0.22, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.028);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(now);
-      osc.stop(now + 0.022);
+      osc.stop(now + 0.028);
     }
   } catch {
     // Graceful fallback if audio context cannot be initialized

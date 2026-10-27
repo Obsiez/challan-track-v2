@@ -556,7 +556,7 @@ export default function App() {
           position="bottom-center"
           duration={2500}
           toastOptions={{ 
-            className: 'sonner-custom-toast border-2 border-slate-200 dark:border-slate-700/90 font-bold text-xs bg-white/95 dark:bg-[#0D121D]/95 backdrop-blur-md text-slate-950 dark:text-white shadow-xl rounded-xl px-3.5 py-2.5'
+            className: 'sonner-custom-toast'
           }} 
         />
         <div className="flex flex-col items-center gap-4 text-center">
@@ -579,7 +579,7 @@ export default function App() {
           position="bottom-center"
           duration={2500}
           toastOptions={{ 
-            className: 'sonner-custom-toast border-2 border-slate-200 dark:border-slate-700/90 font-bold text-xs bg-white/95 dark:bg-[#0D121D]/95 backdrop-blur-md text-slate-950 dark:text-white shadow-xl rounded-xl px-3.5 py-2.5'
+            className: 'sonner-custom-toast'
           }} 
         />
         

@@ -470,6 +470,10 @@ export function applyThemePalette(paletteId: string, intensityOverride?: number)
   root.style.setProperty('--theme-light-canvas', canvasLight);
   root.style.setProperty('--theme-light-surface', surfaceLight);
 
+  // Dynamic Theme Palette Border Colors for Toasts and UI
+  root.style.setProperty('--theme-border-light', adjustedScale[300]);
+  root.style.setProperty('--theme-border-dark', adjustedScale[700]);
+
   // Override Tailwind v4 slate & zinc color tokens dynamically so all surfaces, borders & text adapt
   (Object.keys(adjustedScale) as unknown as Array<keyof typeof adjustedScale>).forEach((step) => {
     const hexVal = adjustedScale[step];
@@ -484,6 +488,13 @@ export function applyThemePalette(paletteId: string, intensityOverride?: number)
       detail: { paletteId: palette.id, intensity: rawIntensity }
     })
   );
+}
+
+// Initialize theme variables immediately in browser context
+if (typeof window !== 'undefined') {
+  try {
+    applyThemePalette(getSavedThemePalette());
+  } catch {}
 }
 
 
