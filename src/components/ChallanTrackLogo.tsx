@@ -70,11 +70,6 @@ export default function ChallanTrackLogo({
               Track
             </span>
           </div>
-          {variant === 'full' && (
-            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 tracking-wide mt-1">
-              Client Credit &amp; Ledger
-            </span>
-          )}
         </div>
       </div>
     );

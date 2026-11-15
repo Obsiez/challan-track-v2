@@ -128,7 +128,7 @@ export function AppShellSkeleton() {
       {/* Desktop Left Rail Skeleton */}
       <aside className="hidden md:flex w-60 lg:w-64 shrink-0 sticky top-0 h-screen exec-sidebar px-4 py-5 flex-col justify-between z-30 border-r">
         <div className="space-y-4">
-          <div className="flex items-center gap-3 px-2">
+          <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl skeleton-shimmer" />
             <div className="w-32 h-5 rounded-lg skeleton-shimmer" />
           </div>

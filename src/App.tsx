@@ -820,7 +820,7 @@ export default function App() {
         <div className="space-y-4">
           <div 
             onClick={() => { triggerHaptic('single'); navigateTo('home'); }}
-            className="flex items-center gap-3 px-2 py-1.5 cursor-pointer group active:scale-[0.98] transition-transform rounded-xl hover:bg-slate-100/60 dark:hover:bg-white/[0.04]"
+            className="flex items-center gap-3 py-1 cursor-pointer group select-none active:scale-[0.98] transition-transform"
             role="button"
             tabIndex={0}
             title={lang === 'bn' ? 'ড্যাশবোর্ডে ফিরে যান' : 'Go to Dashboard'}
@@ -852,12 +852,6 @@ export default function App() {
             >
               <LayoutDashboard className="w-4 h-4 stroke-[2.2] shrink-0" />
               <span className="flex-1 text-left">{t.dashboard}</span>
-              {(currentTab === 'home' || currentTab === 'daily_transactions') && (
-                <span 
-                  className="w-1.5 h-1.5 rounded-full shrink-0"
-                  style={{ backgroundColor: 'var(--accent-color)' }}
-                />
-              )}
             </button>
 
             {/* Customers / Clients */}
@@ -872,12 +866,6 @@ export default function App() {
             >
               <Users className="w-4 h-4 stroke-[2.2] shrink-0" />
               <span className="flex-1 text-left">{t.clients}</span>
-              {currentTab === 'customers' && (
-                <span 
-                  className="w-1.5 h-1.5 rounded-full shrink-0"
-                  style={{ backgroundColor: 'var(--accent-color)' }}
-                />
-              )}
             </button>
 
             {/* Goals */}
@@ -892,12 +880,6 @@ export default function App() {
             >
               <Goal className="w-4 h-4 stroke-[2.2] shrink-0" />
               <span className="flex-1 text-left">{t.goals}</span>
-              {currentTab === 'goals' && (
-                <span 
-                  className="w-1.5 h-1.5 rounded-full shrink-0"
-                  style={{ backgroundColor: 'var(--accent-color)' }}
-                />
-              )}
             </button>
 
             {/* Reminders */}
@@ -935,12 +917,6 @@ export default function App() {
             >
               <Settings className="w-4 h-4 stroke-[2.2] shrink-0" />
               <span className="flex-1 text-left">{t.settings}</span>
-              {currentTab === 'settings' && (
-                <span 
-                  className="w-1.5 h-1.5 rounded-full shrink-0"
-                  style={{ backgroundColor: 'var(--accent-color)' }}
-                />
-              )}
             </button>
           </nav>
         </div>
