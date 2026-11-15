@@ -194,17 +194,6 @@ const lastSubmitRef = useRef<{
  setTrashCustomers([]);
  }
 
- if (storedTxs) {
- setTransactions(JSON.parse(storedTxs).map((t: any) => ({
- ...t,
- description: normalizeTxDescription(t.description),
- date: new Date(t.date),
- createdAt: new Date(t.createdAt)
- })));
- } else {
- setTransactions([]);
- }
-
  if (storedReminders) {
  setReminders(JSON.parse(storedReminders).map((r: any) => ({
  ...r,
@@ -265,6 +254,8 @@ const lastSubmitRef = useRef<{
             createdAt: new Date(t.createdAt)
           }));
         setTransactions(parsedTxs);
+      } else {
+        setTransactions([]);
       }
 
  if (storedSettings) {
@@ -531,6 +522,20 @@ const lastSubmitRef = useRef<{
     return () => unsubscribe();
   }, [userId, activeCustomerId, isOfflineFallback]);
 
+  const allCustomerTransactions = useMemo(() => {
+    if (!activeCustomerId) return [];
+    if (userId === 'local-guest-session' || isOfflineFallback) {
+      return transactions
+        .filter(t => t.customerId === activeCustomerId && !archivedTxIdsRef.current.has(t.id))
+        .sort((a, b) => {
+          const dateA = parseTxDate(a.date).getTime();
+          const dateB = parseTxDate(b.date).getTime();
+          return dateB - dateA;
+        });
+    }
+    return allCustomerTxs;
+  }, [userId, isOfflineFallback, activeCustomerId, transactions, allCustomerTxs]);
+
   // 3a. Slice Customer Transactions according to pagination limit (for both cloud & guest sessions)
   useEffect(() => {
     if (!activeCustomerId) {
@@ -539,19 +544,10 @@ const lastSubmitRef = useRef<{
     }
 
     if (userId === 'local-guest-session' || isOfflineFallback) {
-      const allActiveForCust = transactions
-        .filter(t => t.customerId === activeCustomerId && !archivedTxIdsRef.current.has(t.id))
-        .sort((a, b) => {
-          const dateA = parseTxDate(a.date).getTime();
-          const dateB = parseTxDate(b.date).getTime();
-          return dateB - dateA;
-        });
-      setActiveCustomerTxCount(allActiveForCust.length);
-      setCustomerTransactions(allActiveForCust.slice(0, customerTxLimit));
-    } else {
-      setCustomerTransactions(allCustomerTxs.slice(0, customerTxLimit));
+      setActiveCustomerTxCount(allCustomerTransactions.length);
     }
-  }, [userId, isOfflineFallback, activeCustomerId, transactions, allCustomerTxs, customerTxLimit]);
+    setCustomerTransactions(allCustomerTransactions.slice(0, customerTxLimit));
+  }, [userId, isOfflineFallback, activeCustomerId, allCustomerTransactions, customerTxLimit]);
 
 // 3b. Sync Daily Archive Transactions (Option A: Instant local cache + windowed Firestore query)
   useEffect(() => {
@@ -3776,6 +3772,7 @@ const lastSubmitRef = useRef<{
     customers,
     trashCustomers,
     customerTransactions: customerTransactions.filter(t => customers.some(c => c.id === t.customerId)),
+    allCustomerTransactions: allCustomerTransactions.filter(t => customers.some(c => c.id === t.customerId)),
     dailyTransactions: dailyTransactions.filter(t => customers.some(c => c.id === t.customerId)),
     todayTransactions: todayTransactions.filter(t => customers.some(c => c.id === t.customerId)),
     reminders: reminders.filter(r => r.type === 'emi' || Boolean(r.goalId) || customers.some(c => c.id === r.customerId)),

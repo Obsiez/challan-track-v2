@@ -124,6 +124,12 @@ export default function AnalyticsManager({
 
   const [selectedMonth, setSelectedMonth] = useState<string>(availableMonths[0] || '');
 
+  useEffect(() => {
+    if (!selectedMonth || !availableMonths.includes(selectedMonth)) {
+      setSelectedMonth(availableMonths[0] || '');
+    }
+  }, [availableMonths, selectedMonth]);
+
   // Helpers
   const toBnNum = (n: string | number) =>
     n.toString().replace(/\d/g, d => '০১২৩৪৫৬৭৮৯'[Number(d)]);
@@ -246,7 +252,7 @@ export default function AnalyticsManager({
           <select
             value={selectedMonth}
             onChange={e => setSelectedMonth(e.target.value)}
-            className="bg-[#F6F6F6] dark:bg-[#0F1623] border-2 border-slate-200 dark:border-slate-800/80 rounded-[12px] px-3 py-2 text-[12px] leading-normal font-bold text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white cursor-pointer"
+            className="surface-glass border-2 border-slate-200/80 dark:border-white/10 rounded-[12px] px-3 py-2 text-[12px] leading-normal font-bold text-black dark:text-white focus:outline-none cursor-pointer"
           >
             {availableMonths.map(m => (
               <option key={m} value={m}>{getMonthName(m)}</option>
@@ -259,43 +265,43 @@ export default function AnalyticsManager({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
         {/* Credit Sales */}
-        <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-5 rounded-xl flex items-center justify-between">
+        <div className="surface-glass border p-5 rounded-2xl flex items-center justify-between">
           <div className="space-y-1">
             <span className={`text-[11px] font-bold text-[#757575] block ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
               {lang === 'bn' ? 'বাকি দেওয়া হয়েছে' : 'Credit Sales (Dues Given)'}
             </span>
-            <div className="text-2xl sm:text-3xl font-black text-[#DC2626] tabular-nums font-mono">
+            <div className="text-2xl sm:text-3xl font-black text-ledger-red tabular-nums font-mono">
               <CountUpSpan value={monthlyMetrics.dues} lang={lang} prefix="৳ " enabled={animateOnDesktop} />
             </div>
             <span className="text-xs text-[#757575]">
               {lang === 'bn' ? 'চলতি মাসে মোট বাকি বিক্রি' : 'Total credit sales logged'}
             </span>
           </div>
-          <div className="p-3 bg-[rgba(220, 38, 38, 0.08)] dark:bg-[#DC2626]/20 rounded-lg text-[#DC2626] shrink-0">
+          <div className="p-3 bg-ledger-red-subtle rounded-xl text-ledger-red shrink-0 border border-ledger-red-subtle">
             <ArrowUpRight className="w-6 h-6 stroke-[2.5]" />
           </div>
         </div>
 
         {/* Cash Collected */}
-        <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-5 rounded-xl flex items-center justify-between">
+        <div className="surface-glass border p-5 rounded-2xl flex items-center justify-between">
           <div className="space-y-1">
             <span className={`text-[11px] font-bold text-[#757575] block ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
               {lang === 'bn' ? 'নগদ আদায় হয়েছে' : 'Cash Collected (Payments Got)'}
             </span>
-            <div className="text-2xl sm:text-3xl font-black text-[#059669] tabular-nums font-mono">
+            <div className="text-2xl sm:text-3xl font-black text-ledger-green tabular-nums font-mono">
               <CountUpSpan value={monthlyMetrics.payments} lang={lang} prefix="৳ " enabled={animateOnDesktop} />
             </div>
             <span className="text-xs text-[#757575]">
               {lang === 'bn' ? 'চলতি মাসে নগদ আদায়' : 'Total payments received'}
             </span>
           </div>
-          <div className="p-3 bg-[rgba(5, 150, 105, 0.08)] dark:bg-[#059669]/20 rounded-lg text-[#059669] shrink-0">
+          <div className="p-3 bg-ledger-green-subtle rounded-xl text-ledger-green shrink-0 border border-ledger-green-subtle">
             <ArrowDownLeft className="w-6 h-6 stroke-[2.5]" />
           </div>
         </div>
 
         {/* Efficiency */}
-        <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-5 rounded-xl flex items-center justify-between">
+        <div className="surface-glass border p-5 rounded-2xl flex items-center justify-between">
           <div className="space-y-1">
             <span className={`text-[11px] font-bold text-[#757575] block ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
               {t.efficiency}
@@ -307,7 +313,7 @@ export default function AnalyticsManager({
               {lang === 'bn' ? 'বাকি আদায়ের সাফল্য হার' : 'Cash recovery progress percentage'}
             </span>
           </div>
-          <div className="p-3 bg-[#F6F6F6] dark:bg-[#1F1F1F] rounded-lg text-black dark:text-white shrink-0">
+          <div className="p-3 surface-subcard rounded-xl text-black dark:text-white shrink-0 border border-slate-200/70 dark:border-white/10">
             <Percent className="w-6 h-6 stroke-[2.5]" />
           </div>
         </div>
@@ -318,7 +324,7 @@ export default function AnalyticsManager({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
         {/* CHART PANEL */}
-        <div className="lg:col-span-2 bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-5 rounded-xl space-y-4 overflow-hidden">
+        <div className="lg:col-span-2 surface-glass border p-5 rounded-2xl space-y-4 overflow-hidden">
 
           {/* Panel header */}
           <div>
@@ -336,13 +342,13 @@ export default function AnalyticsManager({
           {/* Legend */}
           <div className="flex items-center justify-end gap-5 text-xs font-bold">
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-xs bg-[#DC2626] block shrink-0" />
+              <span className="w-2.5 h-2.5 rounded-xs bg-ledger-red-solid block shrink-0" />
               <span className="text-[#757575]">
                 {lang === 'bn' ? 'বাকি দেওয়া' : 'Credit Sales'}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-xs bg-[#059669] block shrink-0" />
+              <span className="w-2.5 h-2.5 rounded-xs bg-ledger-green-solid block shrink-0" />
               <span className="text-[#757575]">
                 {lang === 'bn' ? 'নগদ আদায়' : 'Cash Collected'}
               </span>
@@ -391,23 +397,23 @@ export default function AnalyticsManager({
                   return (
                     <div
                       key={data.key}
-                      className="relative flex-1 flex items-end justify-center gap-1 h-full group"
+                      className="relative flex-1 flex items-end justify-center gap-1 h-full group rounded-t-lg hover:bg-slate-900/[0.025] dark:hover:bg-white/[0.03] transition-colors"
                       style={{ opacity }}
                     >
-                      {/* Hover tooltip */}
-                      <div className="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 z-30 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-150 bg-black text-white dark:bg-white dark:text-black rounded-lg shadow-xl px-3 py-2 text-xs font-bold whitespace-nowrap min-w-[120px]">
+                      {/* Frosted Hover Tooltip */}
+                      <div className="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 z-30 opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-150 bg-slate-950/88 dark:bg-slate-900/90 backdrop-blur-xl text-white border border-white/15 rounded-xl shadow-2xl px-3 py-2 text-xs font-bold whitespace-nowrap min-w-[124px]">
                         <div className="text-[11px] font-black uppercase mb-1">{data.label}</div>
                         <div className="flex justify-between gap-3 text-[11px]">
-                          <span className="text-[#DC2626]">{lang === 'bn' ? 'বাকি' : 'Due'}</span>
+                          <span className="text-ledger-red">{lang === 'bn' ? 'বাকি' : 'Due'}</span>
                           <span className="font-mono">৳{compactChart(data.dues, lang)}</span>
                         </div>
                         <div className="flex justify-between gap-3 text-[11px]">
-                          <span className="text-[#059669]">{lang === 'bn' ? 'আদায়' : 'Paid'}</span>
+                          <span className="text-ledger-green">{lang === 'bn' ? 'আদায়' : 'Paid'}</span>
                           <span className="font-mono">৳{compactChart(data.payments, lang)}</span>
                         </div>
-                        <div className="border-t border-white/20 dark:border-black/20 mt-1 pt-1 flex justify-between gap-3 text-[11px]">
+                        <div className="border-t border-white/15 mt-1 pt-1 flex justify-between gap-3 text-[11px]">
                           <span className="opacity-70">{lang === 'bn' ? 'নেট' : 'Net'}</span>
-                          <span className={`font-mono ${net >= 0 ? 'text-[#059669]' : 'text-[#DC2626]'}`}>
+                          <span className={`font-mono ${net >= 0 ? 'text-ledger-green' : 'text-ledger-red'}`}>
                             {net >= 0 ? '+' : ''}৳{compactChart(Math.abs(net), lang)}
                           </span>
                         </div>
@@ -416,11 +422,11 @@ export default function AnalyticsManager({
                       {/* Bar pair */}
                       <div className="flex items-end justify-center gap-1 h-full">
                         <div
-                          className={`w-3.5 sm:w-5 rounded-t-xs bg-[#DC2626] ${animateOnDesktop ? 'dash-anim-bar-y' : ''}`}
+                          className={`w-3.5 sm:w-5 rounded-t-sm bg-ledger-red-solid ${animateOnDesktop ? 'dash-anim-bar-y' : ''}`}
                           style={{ height: `${dueH}%` }}
                         />
                         <div
-                          className={`w-3.5 sm:w-5 rounded-t-xs bg-[#059669] ${animateOnDesktop ? 'dash-anim-bar-y' : ''}`}
+                          className={`w-3.5 sm:w-5 rounded-t-sm bg-ledger-green-solid ${animateOnDesktop ? 'dash-anim-bar-y' : ''}`}
                           style={{ height: `${payH}%` }}
                         />
                       </div>
@@ -455,7 +461,7 @@ export default function AnalyticsManager({
         <div className="space-y-4">
 
           {/* TOP DEBTORS */}
-          <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-5 rounded-xl space-y-3">
+          <div className="surface-glass border p-5 rounded-2xl space-y-3">
             <h3 className="text-sm font-bold text-black dark:text-white flex items-center gap-2">
               <Users className="w-4 h-4 stroke-[2]" />
               {t.topDebtors}
@@ -472,7 +478,7 @@ export default function AnalyticsManager({
                       <span className="text-[11px] font-bold text-[#757575] w-4 shrink-0">#{formatNumber(i + 1, lang)}</span>
                       <span className="text-xs font-bold text-black dark:text-white truncate">{c.name}</span>
                     </div>
-                    <span className="text-xs font-black text-[#DC2626] tabular-nums font-mono shrink-0 ml-2">
+                    <span className="text-xs font-black text-ledger-red tabular-nums font-mono shrink-0 ml-2">
                       <CountUpSpan value={c.outstandingDue} lang={lang} prefix="৳ " enabled={animateOnDesktop} />
                     </span>
                   </div>
@@ -482,7 +488,7 @@ export default function AnalyticsManager({
           </div>
 
           {/* TOP PAYERS */}
-          <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-5 rounded-xl space-y-3">
+          <div className="surface-glass border p-5 rounded-2xl space-y-3">
             <h3 className="text-sm font-bold text-black dark:text-white flex items-center gap-2">
               <Award className="w-4 h-4 stroke-[2]" />
               {t.topEarners}
@@ -499,7 +505,7 @@ export default function AnalyticsManager({
                       <span className="text-[11px] font-bold text-[#757575] w-4 shrink-0">#{formatNumber(i + 1, lang)}</span>
                       <span className="text-xs font-bold text-black dark:text-white truncate">{p.name}</span>
                     </div>
-                    <span className="text-xs font-black text-[#059669] tabular-nums font-mono shrink-0 ml-2">
+                    <span className="text-xs font-black text-ledger-green tabular-nums font-mono shrink-0 ml-2">
                       <CountUpSpan value={p.total} lang={lang} prefix="৳ " enabled={animateOnDesktop} />
                     </span>
                   </div>

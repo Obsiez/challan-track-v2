@@ -423,7 +423,7 @@ export default function SettingsManager({
     <div className="space-y-5 no-select">
       
       {/* 1. LANGUAGE SELECTOR CARD */}
-      <div className="bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800/80 p-5 rounded-2xl space-y-4">
+      <div className="surface-glass border p-5 rounded-2xl space-y-4">
         <h2 className="text-base font-bold text-slate-950 dark:text-white flex items-center gap-2">
           <Languages className="w-4 h-4 stroke-[2]" />
           {t.displayLang}
@@ -439,7 +439,7 @@ export default function SettingsManager({
             className={`py-3.5 px-3 rounded-xl border-2 text-center transition-colors cursor-pointer ${
               lang === 'en'
                 ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 border-slate-950 dark:border-white font-bold shadow-xs'
-                : 'bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-900 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 font-semibold'
+                : 'surface-subcard hover:bg-slate-100/80 dark:hover:bg-white/[0.06] text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 font-semibold'
             }`}
           >
             <span className="text-sm font-black block">{t.english}</span>
@@ -455,7 +455,7 @@ export default function SettingsManager({
             className={`py-3.5 px-3 rounded-xl border-2 text-center transition-colors cursor-pointer ${
               lang === 'bn'
                 ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 border-slate-950 dark:border-white font-bold shadow-xs'
-                : 'bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-900 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 font-semibold'
+                : 'surface-subcard hover:bg-slate-100/80 dark:hover:bg-white/[0.06] text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 font-semibold'
             }`}
           >
             <span className="text-sm font-black block">{t.bangla}</span>
@@ -465,7 +465,7 @@ export default function SettingsManager({
       </div>
 
       {/* 2. THEME AND LIGHTING TOGGLE CARD */}
-      <div className="bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800/80 p-5 sm:p-6 rounded-2xl shadow-xs space-y-4">
+      <div className="surface-glass border p-5 sm:p-6 rounded-2xl shadow-xs space-y-4">
         <h2 className="text-base font-bold text-slate-950 dark:text-white flex items-center gap-2">
           <Contrast className="w-4 h-4 stroke-[2]" />
           {t.themeMode}
@@ -486,7 +486,7 @@ export default function SettingsManager({
             className={`py-3 px-3 rounded-xl border-2 flex items-center justify-center gap-2 cursor-pointer transition-colors ${
               activeTheme === 'light'
                 ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white font-bold shadow-xs'
-                : 'bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-900 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 font-semibold'
+                : 'surface-subcard hover:bg-slate-100/80 dark:hover:bg-white/[0.06] text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 font-semibold'
             }`}
           >
             <Sun className="w-4 h-4" />
@@ -502,7 +502,7 @@ export default function SettingsManager({
             className={`py-3 px-3 rounded-xl border-2 flex items-center justify-center gap-2 cursor-pointer transition-colors ${
               activeTheme === 'dark'
                 ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white font-bold shadow-xs'
-                : 'bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-900 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 font-semibold'
+                : 'surface-subcard hover:bg-slate-100/80 dark:hover:bg-white/[0.06] text-slate-900 dark:text-white border-slate-300 dark:border-slate-700 font-semibold'
             }`}
           >
             <Moon className="w-4 h-4" />
@@ -531,8 +531,8 @@ export default function SettingsManager({
                   }}
                   className={`p-2.5 rounded-xl border-2 flex flex-col gap-1 text-left transition-all cursor-pointer ${
                     isSelected
-                      ? 'border-slate-950 dark:border-white bg-slate-50 dark:bg-slate-900 shadow-2xs font-bold'
-                      : 'border-slate-300 dark:border-slate-700 hover:border-slate-950 dark:hover:border-white bg-white dark:bg-[#0D121D]'
+                      ? 'border-slate-950 dark:border-white bg-slate-100/80 dark:bg-white/[0.08] shadow-2xs font-bold'
+                      : 'border-slate-300 dark:border-slate-700 hover:bg-slate-100/60 dark:hover:bg-white/[0.04] surface-subcard'
                   }`}
                 >
                   <div className="flex items-center justify-between w-full">
@@ -583,7 +583,7 @@ export default function SettingsManager({
       </div>
 
       {/* 2.5 CUSTOM ACCENT COLOR CARD */}
-      <div className="bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800/80 p-5 sm:p-6 rounded-2xl shadow-xs space-y-4">
+      <div className="surface-glass border p-5 sm:p-6 rounded-2xl shadow-xs space-y-4">
         <div className="space-y-1">
           <h2 className="text-base font-bold text-slate-950 dark:text-white flex items-center gap-2">
             <Palette className="w-4 h-4 stroke-[2]" />
@@ -610,8 +610,8 @@ export default function SettingsManager({
                 }}
                 className={`p-2.5 rounded-xl border-2 flex items-center gap-2 text-left transition-all cursor-pointer ${
                   isSelected
-                    ? 'border-slate-950 dark:border-white bg-slate-50 dark:bg-slate-900 shadow-2xs font-bold'
-                    : 'border-slate-300 dark:border-slate-700 hover:border-slate-950 dark:hover:border-white bg-white dark:bg-[#0D121D]'
+                    ? 'border-slate-950 dark:border-white bg-slate-100/80 dark:bg-white/[0.08] shadow-2xs font-bold'
+                    : 'border-slate-300 dark:border-slate-700 hover:bg-slate-100/60 dark:hover:bg-white/[0.04] surface-subcard'
                 }`}
               >
                 <span 
@@ -633,7 +633,7 @@ export default function SettingsManager({
           <span className="font-mono text-slate-500 dark:text-slate-400">
             {lang === 'bn' ? 'বর্তমান হেক্স:' : 'Active Hex:'} <strong className="text-slate-900 dark:text-white">{customAccent}</strong>
           </span>
-          <label className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-xl cursor-pointer text-slate-900 dark:text-white font-bold transition-colors">
+          <label className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 rounded-xl cursor-pointer text-slate-900 dark:text-white font-bold transition-colors">
             <input 
               type="color"
               value={customAccent}
@@ -651,7 +651,7 @@ export default function SettingsManager({
       </div>
 
       {/* HAPTICS TOGGLE CARD */}
-      <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-5 rounded-xl space-y-4">
+      <div className="surface-glass border p-5 rounded-2xl space-y-4">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-base font-bold text-black dark:text-white flex items-center gap-2">
@@ -715,7 +715,7 @@ export default function SettingsManager({
       </div>
 
       {/* SWIPE GESTURES TOGGLE CARD */}
-      <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-5 rounded-xl space-y-4">
+      <div className="surface-glass border p-5 rounded-2xl space-y-4">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-base font-bold text-black dark:text-white flex items-center gap-2">
@@ -742,7 +742,7 @@ export default function SettingsManager({
       </div>
 
       {/* CUSTOM KEYPAD & SOUND TOGGLE CARD */}
-      <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-5 rounded-xl space-y-4">
+      <div className="surface-glass border p-5 rounded-2xl space-y-4">
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-1">
             <h2 className="text-base font-bold text-black dark:text-white flex items-center gap-2">
@@ -824,7 +824,7 @@ export default function SettingsManager({
       </div>
 
       {/* SEARCH BANGLA IN ENGLISH TOGGLE CARD */}
-      <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-5 rounded-xl space-y-4">
+      <div className="surface-glass border p-5 rounded-2xl space-y-4">
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-1">
             <h2 className="text-base font-bold text-black dark:text-white flex items-center gap-2">
@@ -858,7 +858,7 @@ export default function SettingsManager({
       </div>
 
       {/* BIOMETRIC AUTHENTICATION SECURITY CARD */}
-      <div className="bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800/80 p-5 rounded-2xl space-y-4 shadow-xs">
+      <div className="surface-glass border p-5 rounded-2xl space-y-4 shadow-xs">
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-1">
             <h2 className="text-base font-bold text-slate-950 dark:text-white flex items-center gap-2">
@@ -906,7 +906,7 @@ export default function SettingsManager({
                   triggerHaptic('single');
                   onLockBiometricSession();
                 }}
-                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-700 hover:border-slate-950 dark:hover:border-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
               >
                 <Lock className="w-3.5 h-3.5" />
                 <span>{lang === 'bn' ? 'এখনই লক স্ক্রিন দেখুন' : 'Lock Screen Now'}</span>
@@ -917,7 +917,7 @@ export default function SettingsManager({
       </div>
 
       {/* AUTO MERGE / ARCHIVE LEDGER STATEMENTS CARD */}
-      <div className="bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800/80 p-5 rounded-2xl space-y-4 shadow-xs">
+      <div className="surface-glass border p-5 rounded-2xl space-y-4 shadow-xs">
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-1">
             <h2 className="text-base font-bold text-slate-950 dark:text-white flex items-center gap-2">
@@ -1078,7 +1078,7 @@ export default function SettingsManager({
               type="button"
               disabled={exportingArchive || archivedStatements.length === 0}
               onClick={() => handleDownloadArchivedRecords('csv')}
-              className="px-3 py-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-700 hover:border-slate-950 dark:hover:border-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-45 disabled:cursor-not-allowed"
+              className="px-3 py-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-45 disabled:cursor-not-allowed"
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
               <span>CSV</span>
@@ -1097,18 +1097,18 @@ export default function SettingsManager({
       </div>
 
       {/* 3. BUSINESS LEDGER INSIGHT STATISTICS */}
-      <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-5 rounded-xl space-y-3">
+      <div className="surface-glass border p-5 rounded-2xl space-y-3">
         <h3 className="text-xs font-bold text-[#757575] uppercase tracking-wider">
           {t.ledgerInsights}
         </h3>
         <div className="grid grid-cols-2 gap-3">
-          <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-lg border border-slate-200 dark:border-slate-800/80">
+          <div className="p-3.5 surface-subcard rounded-xl border">
             <span className="text-[10px] font-bold text-[#757575] block uppercase tracking-wider">{t.totalClients}</span>
             <span className="text-xl font-black text-black dark:text-white mt-1 block tabular-nums font-mono">
               {formatNumber(customers.length, lang)}
             </span>
           </div>
-          <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-lg border border-slate-200 dark:border-slate-800/80">
+          <div className="p-3.5 surface-subcard rounded-xl border">
             <span className="text-[10px] font-bold text-[#757575] block uppercase tracking-wider">{t.totalTransactions}</span>
             <span className="text-xl font-black text-black dark:text-white mt-1 block tabular-nums font-mono">
               {formatNumber(settings?.transactionsCount || 0, lang)}
@@ -1118,13 +1118,13 @@ export default function SettingsManager({
       </div>
 
       {/* 4. AUTOMATIC CLOUD AND OFFLINE BACKUP */}
-      <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-5 rounded-xl space-y-4">
+      <div className="surface-glass border p-5 rounded-2xl space-y-4">
         <h3 className="text-base font-bold text-black dark:text-white flex items-center gap-2">
           <Cloud className="w-4 h-4 stroke-[2]" />
           {t.databaseSafety}
         </h3>
         
-        <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg space-y-2">
+        <div className="p-3.5 surface-subcard border rounded-xl space-y-2">
           <div className="flex items-start gap-2.5">
             <CheckCircle2 className="w-4 h-4 text-[#059669] shrink-0 mt-0.5" />
             <div>
@@ -1173,7 +1173,7 @@ export default function SettingsManager({
       </div>
 
       {/* 5. OWNER PROFILE ACCOUNT DETAIL */}
-      <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-5 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="surface-glass border p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="text-[10px] font-bold text-[#757575] uppercase tracking-wider">{lang === 'bn' ? 'মালিকানা অ্যাকাউন্ট' : 'Owner Account'}</div>
           <div className="text-sm font-bold text-black dark:text-white mt-0.5">
@@ -1196,7 +1196,7 @@ export default function SettingsManager({
 
       {/* 6. NATIVE PWA INSTALL APP */}
       {!isDismissed && !isStandalone && deferredPrompt && (
-        <div className="relative bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-5 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="relative surface-glass border p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <button 
             onClick={() => {
               localStorage.setItem('install_card_dismissed', 'true');
@@ -1249,7 +1249,7 @@ export default function SettingsManager({
       )}
 
       {/* TRASH / DELETED CUSTOMER ACCOUNTS CARD */}
-      <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-5 rounded-xl space-y-4">
+      <div className="surface-glass border p-5 rounded-2xl space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-bold text-black dark:text-white flex items-center gap-2">
@@ -1310,9 +1310,9 @@ export default function SettingsManager({
                       </div>
                       <div className={`text-sm font-black font-mono tabular-nums ${
                         c.outstandingDue > 0 
-                          ? 'text-[#DC2626]' 
+                          ? 'text-ledger-red' 
                           : c.outstandingDue < 0 
-                            ? 'text-[#059669]' 
+                            ? 'text-ledger-green' 
                             : 'text-[#757575]'
                       }`}>
                         ৳ {formatNumber(c.outstandingDue || 0, lang)}
@@ -1356,14 +1356,14 @@ export default function SettingsManager({
       {/* Trash Action Confirmation Modal */}
       {confirmAction && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
           onClick={closeConfirmAction}
         >
           <motion.div
             onClick={(e) => e.stopPropagation()}
             initial={{ opacity: 0, scale: 0.96 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-white dark:bg-[#0D121D] w-full max-w-sm rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-6"
+            className="glass-modal w-full max-w-sm rounded-2xl border shadow-2xl p-6"
           >
             <div className="text-center mb-5">
               <div className="w-12 h-12 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl flex items-center justify-center mx-auto mb-3">
@@ -1414,12 +1414,14 @@ export default function SettingsManager({
                     <span className="font-bold text-slate-500 dark:text-slate-400 uppercase text-[10px]">{lang === 'bn' ? 'বর্তমান ব্যালেন্স' : 'Current Balance'}</span>
                     <span className={`font-mono font-bold ${
                       confirmAction.customer.outstandingDue > 0 
-                        ? 'text-rose-600 dark:text-rose-400' 
+                        ? 'text-ledger-red' 
                         : confirmAction.customer.outstandingDue < 0 
-                          ? 'text-emerald-600 dark:text-emerald-400' 
+                          ? 'text-ledger-green' 
                           : 'text-slate-500'
                     }`}>
-                      {confirmAction.customer.outstandingDue === 0 ? (lang === 'bn' ? 'পরিশোধিত' : 'Settled') : "৳ " + formatNumber(confirmAction.customer.outstandingDue, lang)}
+                      {confirmAction.customer.outstandingDue === 0
+                        ? (lang === 'bn' ? 'পরিশোধিত' : 'Settled')
+                        : `৳ ${formatNumber(confirmAction.customer.outstandingDue, lang)}`}
                     </span>
                   </div>
                 </div>
@@ -1453,7 +1455,7 @@ export default function SettingsManager({
                 className={`w-full py-2.5 font-bold rounded-xl border-2 cursor-pointer text-xs transition-colors ${
                   confirmAction.type === 'restore' 
                     ? 'bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 border-slate-950 dark:border-white' 
-                    : 'bg-rose-600 hover:bg-rose-700 text-white border-transparent hover:border-slate-950 dark:hover:border-white'
+                    : 'bg-rose-600 hover:bg-rose-700 text-white border-transparent'
                 }`}
               >
                 {confirmAction.type === 'restore' && (lang === 'bn' ? 'হ্যাঁ, পুনরুদ্ধার করুন' : 'Yes, Restore')}
@@ -1463,7 +1465,7 @@ export default function SettingsManager({
               
               <button
                 onClick={closeConfirmAction}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer text-xs transition-colors"
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer text-xs transition-colors"
               >
                 {lang === 'bn' ? 'বাতিল' : 'Cancel'}
               </button>
@@ -1475,12 +1477,12 @@ export default function SettingsManager({
       {/* JSON Backup Import Modal */}
       {importState.showModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 no-select backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/55 dark:bg-black/75 no-select backdrop-blur-md"
           onClick={() => !importState.loading && setImportState(prev => ({ ...prev, showModal: false }))}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="animate-reveal bg-white dark:bg-[#0D121D] w-full max-w-md rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-6 space-y-5 max-h-[88vh] overflow-y-auto hide-scrollbar"
+            className="animate-reveal glass-modal w-full max-w-md rounded-2xl border shadow-2xl p-6 space-y-5 max-h-[88vh] overflow-y-auto hide-scrollbar"
           >
             <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-3.5">
               <div>
@@ -1504,7 +1506,7 @@ export default function SettingsManager({
                     triggerHaptic('medium');
                     setImportState(prev => ({ ...prev, showModal: false }));
                   }}
-                  className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-lg text-slate-600 dark:text-slate-300 cursor-pointer transition-colors"
+                  className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 cursor-pointer transition-colors"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1649,7 +1651,7 @@ export default function SettingsManager({
                       className={`w-full text-left p-3.5 rounded-xl border-2 transition-all cursor-pointer flex gap-3 ${
                         importState.choice === 'merge'
                           ? 'border-slate-950 dark:border-white bg-slate-50 dark:bg-slate-900'
-                          : 'border-slate-300 dark:border-slate-700 bg-transparent hover:border-slate-900 dark:hover:border-white'
+                          : 'border-slate-300 dark:border-slate-700 bg-transparent hover:bg-slate-50 dark:hover:bg-white/[0.04]'
                       }`}
                     >
                       <div className="shrink-0 mt-0.5">
@@ -1684,7 +1686,7 @@ export default function SettingsManager({
                       className={`w-full text-left p-3.5 rounded-xl border-2 transition-all cursor-pointer flex gap-3 ${
                         importState.choice === 'skip'
                           ? 'border-slate-950 dark:border-white bg-slate-50 dark:bg-slate-900'
-                          : 'border-slate-300 dark:border-slate-700 bg-transparent hover:border-slate-900 dark:hover:border-white'
+                          : 'border-slate-300 dark:border-slate-700 bg-transparent hover:bg-slate-50 dark:hover:bg-white/[0.04]'
                       }`}
                     >
                       <div className="shrink-0 mt-0.5">
@@ -1795,7 +1797,7 @@ export default function SettingsManager({
                     disabled={importState.choice === 'clear' && importState.confirmText !== 'RESTORE'}
                     className={`w-full py-2.5 text-white font-bold rounded-xl border-2 text-xs flex items-center justify-center gap-2 cursor-pointer transition-all ${
                       importState.choice === 'clear'
-                        ? 'bg-rose-600 hover:bg-rose-700 border-transparent hover:border-slate-950 dark:hover:border-white disabled:opacity-40'
+                        ? 'bg-rose-600 hover:bg-rose-700 border-transparent disabled:opacity-40'
                         : 'bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 dark:text-slate-950 border-slate-950 dark:border-white disabled:opacity-40'
                     }`}
                   >
@@ -1805,7 +1807,7 @@ export default function SettingsManager({
                   <button
                     type="button"
                     onClick={() => setImportState(prev => ({ ...prev, showModal: false }))}
-                    className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-xs cursor-pointer transition-colors"
+                    className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 text-xs cursor-pointer transition-colors"
                   >
                     {lang === 'bn' ? 'বাতিল' : 'Cancel'}
                   </button>
@@ -1819,12 +1821,12 @@ export default function SettingsManager({
       {/* AUTO-MERGE STATEMENTS ACTIVATION MODAL (Center-staged popup, clean header, keyboard-aware & scroll-locked) */}
       {showAutoMergeWarning && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 no-select"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md no-select"
           onClick={() => !archivingBusy && setShowAutoMergeWarning(false)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="animate-reveal bg-white dark:bg-[#0D121D] w-full max-w-md rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-6 space-y-5 max-h-[88vh] overflow-y-auto hide-scrollbar"
+            className="animate-reveal glass-modal w-full max-w-md rounded-2xl border shadow-2xl p-6 space-y-5 max-h-[88vh] overflow-y-auto hide-scrollbar"
           >
             <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-3.5">
               <div>
@@ -1846,7 +1848,7 @@ export default function SettingsManager({
                     triggerHaptic('medium');
                     setShowAutoMergeWarning(false);
                   }}
-                  className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-lg text-slate-600 dark:text-slate-300 cursor-pointer transition-colors"
+                  className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 cursor-pointer transition-colors"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -2033,7 +2035,7 @@ export default function SettingsManager({
                         setArchiveProgress(null);
                       }
                     }}
-                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl border-2 border-transparent hover:border-slate-950 dark:hover:border-white text-xs cursor-pointer transition-colors"
+                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl border-2 border-transparent text-xs cursor-pointer transition-colors"
                   >
                     {lang === 'bn'
                       ? 'অটো-মার্জ চালু করুন'
@@ -2044,7 +2046,7 @@ export default function SettingsManager({
                     type="button"
                     disabled={archivingBusy}
                     onClick={() => setShowAutoMergeWarning(false)}
-                    className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-xs cursor-pointer transition-colors"
+                    className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 text-xs cursor-pointer transition-colors"
                   >
                     {lang === 'bn' ? 'বাতিল করুন' : 'Cancel'}
                   </button>

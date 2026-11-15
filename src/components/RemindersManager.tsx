@@ -235,7 +235,7 @@ export default function RemindersManager({
             initial={{ opacity: 0, scale: 0.95, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 12 }}
-            className="fixed bottom-20 sm:bottom-6 left-1/2 -translate-x-1/2 w-[calc(100vw-32px)] max-w-sm bg-white dark:bg-[#0D121D] text-slate-950 dark:text-white p-4 rounded-2xl shadow-2xl z-50 flex flex-col gap-2.5 border-2 border-slate-300 dark:border-slate-700"
+            className="fixed bottom-20 sm:bottom-6 left-1/2 -translate-x-1/2 w-[calc(100vw-32px)] max-w-sm glass-modal text-slate-950 dark:text-white p-4 rounded-2xl z-50 flex flex-col gap-2.5 border-2 border-slate-300 dark:border-slate-700"
           >
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-black flex items-center gap-1.5 uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
@@ -267,7 +267,7 @@ export default function RemindersManager({
       </AnimatePresence>
 
       {/* Header section with Daily Reminder trigger settings */}
-      <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-6 rounded-xl space-y-4">
+      <div className="surface-glass border p-6 rounded-2xl space-y-4">
         <h2 className="text-lg sm:text-xl font-black text-black dark:text-white flex items-center gap-2.5 tracking-tight">
           <Bell className="w-5 h-5 stroke-[2.2]" />
           {t.alarmTitle}
@@ -288,7 +288,7 @@ export default function RemindersManager({
           <div className="flex items-center gap-2.5">
             <input 
               type="time"
-              defaultValue={dailyReminderTime}
+              value={dailyReminderTime || '09:00'}
               onChange={(e) => updateSettings(e.target.value)}
               className="px-3 py-2 border border-slate-200 dark:border-slate-800/80 rounded-lg bg-slate-50 dark:bg-slate-900/60 text-black dark:text-white font-mono font-bold text-xs"
             />
@@ -323,7 +323,7 @@ export default function RemindersManager({
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.98 }}
             onSubmit={handleSubmit}
-            className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-5 rounded-xl space-y-4"
+            className="surface-glass border p-5 rounded-2xl space-y-4"
           >
             <div className="text-sm font-bold text-black dark:text-white flex items-center gap-2">
               <Calendar className="w-4 h-4 stroke-[2]" />
@@ -331,7 +331,7 @@ export default function RemindersManager({
             </div>
 
             {/* Category Switcher: Customer Due vs Monthly EMI */}
-            <div className="grid grid-cols-2 gap-2 p-1 bg-slate-50 dark:bg-slate-900/60 rounded-lg border border-slate-200 dark:border-slate-800/80">
+            <div className="surface-subcard grid grid-cols-2 gap-2 p-1 rounded-xl border border-slate-200/80 dark:border-white/[0.08]">
               <button
                 type="button"
                 onClick={() => { setReminderCategory('customer'); setErrorMsg(''); }}
@@ -369,7 +369,7 @@ export default function RemindersManager({
                   <select
                     value={selectedCustomerId}
                     onChange={(e) => setSelectedCustomerId(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs font-medium focus:border-black dark:focus:border-white outline-none"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs font-medium outline-none"
                     required
                   >
                     <option value="">{t.selectCustomerPrompt}</option>
@@ -399,7 +399,7 @@ export default function RemindersManager({
                     placeholder="e.g. Call for rice payment"
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs outline-none focus:border-black dark:focus:border-white"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs outline-none"
                   />
                 </div>
 
@@ -411,7 +411,7 @@ export default function RemindersManager({
                     type="date"
                     value={dueDateStr}
                     onChange={(e) => setDueDateStr(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs outline-none focus:border-black dark:focus:border-white font-mono"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs outline-none font-mono"
                     required
                   />
                 </div>
@@ -424,7 +424,7 @@ export default function RemindersManager({
                     type="time"
                     value={dueTimeStr}
                     onChange={(e) => setDueTimeStr(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs outline-none focus:border-black dark:focus:border-white font-mono"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs outline-none font-mono"
                     required
                   />
                 </div>
@@ -453,7 +453,7 @@ export default function RemindersManager({
                       <select
                         value={selectedGoalId}
                         onChange={(e) => handleGoalSelect(e.target.value)}
-                        className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs outline-none focus:border-black dark:focus:border-white"
+                        className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs outline-none"
                       >
                         <option value="">{lang === 'bn' ? '-- নতুন কিস্তির নাম লিখুন --' : '-- Custom EMI Title --'}</option>
                         {goals.filter(g => g.status === 'active').map(g => {
@@ -484,7 +484,7 @@ export default function RemindersManager({
                       placeholder="e.g. TV Installment, Bank Loan"
                       value={emiTitle}
                       onChange={(e) => setEmiTitle(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs outline-none focus:border-black dark:focus:border-white"
+                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs outline-none"
                       required
                     />
                   </div>
@@ -498,7 +498,7 @@ export default function RemindersManager({
                     <select
                       value={emiDayOfMonth}
                       onChange={(e) => setEmiDayOfMonth(Number(e.target.value))}
-                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs font-bold outline-none focus:border-black dark:focus:border-white"
+                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs font-bold outline-none"
                       required
                     >
                       {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
@@ -519,7 +519,7 @@ export default function RemindersManager({
                       placeholder="e.g. 5000"
                       value={emiAmount}
                       onChange={(e) => setEmiAmount(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs font-mono font-bold outline-none focus:border-black dark:focus:border-white"
+                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs font-mono font-bold outline-none"
                     />
                   </div>
 
@@ -532,7 +532,7 @@ export default function RemindersManager({
                       type="time"
                       value={emiTimeStr}
                       onChange={(e) => setEmiTimeStr(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs font-mono font-bold outline-none focus:border-black dark:focus:border-white"
+                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs font-mono font-bold outline-none"
                     />
                   </div>
 
@@ -546,7 +546,7 @@ export default function RemindersManager({
                       placeholder="e.g. Pay via Bkash or bank transfer"
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs outline-none focus:border-black dark:focus:border-white"
+                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-black dark:text-white text-xs outline-none"
                     />
                   </div>
                 </div>
@@ -586,7 +586,7 @@ export default function RemindersManager({
       {/* List of active scheduled alarms */}
       <div className="space-y-3">
         {reminders.length === 0 ? (
-          <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-8 text-center rounded-xl text-[#757575]">
+          <div className="surface-glass border p-8 text-center rounded-2xl text-[#757575]">
             <AlertTriangle className="w-10 h-10 mx-auto stroke-[1.5] mb-2" />
             <p className="font-bold text-sm text-black dark:text-white">{t.noRemindersYet}</p>
             <p className="text-xs mt-1">{t.scheduleOneNotice}</p>
@@ -598,10 +598,10 @@ export default function RemindersManager({
               return (
                 <div 
                   key={rem.id}
-                  className={`p-4 rounded-xl border transition-all flex items-center justify-between gap-4 ${
+                  className={`p-4 rounded-2xl border transition-all flex items-center justify-between gap-4 ${
                     rem.active 
-                      ? 'bg-white border-black/[0.08] dark:bg-[#0F1623] dark:border-white/[0.12]' 
-                      : 'bg-slate-50 border-black/[0.04] dark:bg-slate-900/60 dark:border-white/[0.06] opacity-60'
+                      ? 'surface-glass' 
+                      : 'surface-subcard border-black/[0.05] dark:border-white/[0.06] opacity-60'
                   }`}
                 >
                   <div className="flex items-start gap-3 min-w-0">

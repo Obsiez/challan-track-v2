@@ -863,12 +863,12 @@ export default function GoalsManager({
       </div>
 
       {/* FILTER TABS */}
-      <div className="flex w-full bg-slate-50 dark:bg-slate-900/60 p-1 rounded-lg border border-slate-200 dark:border-slate-800/80">
+      <div className="flex w-full surface-subcard p-1 rounded-xl border border-slate-200/80 dark:border-slate-800">
         <button
           onClick={() => { triggerHaptic('single'); setFilterTab('active'); }}
-          className={`flex-1 py-2 text-center text-xs font-bold rounded-md transition-all cursor-pointer ${
+          className={`flex-1 py-2 text-center text-xs font-bold rounded-lg transition-colors duration-150 cursor-pointer ${
             filterTab === 'active'
-              ? 'bg-black text-white dark:bg-white dark:text-black shadow-xs'
+              ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 shadow-xs'
               : 'text-[#757575] hover:text-black dark:hover:text-white'
           }`}
         >
@@ -876,9 +876,9 @@ export default function GoalsManager({
         </button>
         <button
           onClick={() => { triggerHaptic('single'); setFilterTab('history'); }}
-          className={`flex-1 py-2 text-center text-xs font-bold rounded-md transition-all cursor-pointer ${
+          className={`flex-1 py-2 text-center text-xs font-bold rounded-lg transition-colors duration-150 cursor-pointer ${
             filterTab === 'history'
-              ? 'bg-black text-white dark:bg-white dark:text-black shadow-xs'
+              ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 shadow-xs'
               : 'text-[#757575] hover:text-black dark:hover:text-white'
           }`}
         >
@@ -888,13 +888,19 @@ export default function GoalsManager({
 
       {/* GOALS GRID */}
       {visibleGoals.length === 0 ? (
-        <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 rounded-xl p-10 text-center text-[#757575] flex flex-col items-center justify-center gap-2.5">
+        <div
+          key={`goals-empty-${filterTab}`}
+          className="surface-glass border border-slate-200 dark:border-slate-800 rounded-2xl p-10 text-center text-[#757575] flex flex-col items-center justify-center gap-2.5"
+        >
           <Target className="w-10 h-10 stroke-[1.5]" />
           <p className="font-bold text-sm text-black dark:text-white">{t.noGoals}</p>
           <p className="text-xs max-w-xs">{lang === 'bn' ? 'ইএমআই বা সঞ্চয় লক্ষ্য তৈরি করতে উপরের বাটনে চাপ দিন।' : 'Create EMI installment plans or savings targets using the button above.'}</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+        <div
+          key={`goals-grid-${filterTab}`}
+          className="grid grid-cols-1 md:grid-cols-2 gap-3.5"
+        >
           {visibleGoals.map(goal => {
             const percent = Math.min(100, Math.round(((goal.savedAmount || 0) / (goal.targetAmount || 1)) * 100));
             const isSavings = goal.type === 'savings';
@@ -911,7 +917,7 @@ export default function GoalsManager({
                     openGoalDetail(goal);
                   }
                 }}
-                className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 hover:bg-slate-50 dark:hover:bg-[#1F1F1F] p-4.5 rounded-xl transition-colors cursor-pointer relative group flex flex-col justify-between min-h-[160px] touch-manipulation select-none active:scale-[0.99]"
+                className="surface-glass-interactive border border-slate-200 dark:border-slate-800 p-4.5 rounded-2xl overflow-hidden transition-none cursor-pointer relative group flex flex-col justify-between min-h-[160px] touch-manipulation select-none focus:outline-none active:scale-[0.99]"
               >
                 <div>
                   {/* Title & Badge */}
@@ -1028,8 +1034,8 @@ export default function GoalsManager({
 
                 {/* Status indicator overlay for finished */}
                 {goal.status !== 'active' && (
-                  <div className="absolute inset-0 bg-white/70 dark:bg-black/70 backdrop-blur-xs rounded-xl flex items-center justify-center">
-                    <span className="px-3 py-1 rounded-md font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 border border-black/10 dark:border-white/10 bg-white dark:bg-[#0F1623] text-black dark:text-white">
+                  <div className="absolute inset-0 bg-white/75 dark:bg-[#09090B]/70 rounded-[15px] flex items-center justify-center pointer-events-none">
+                    <span className="px-3 py-1 rounded-md font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 border border-black/10 dark:border-slate-700/80 bg-white dark:bg-[#0F1623] text-black dark:text-white">
                       {goal.status === 'completed' ? (
                         <>
                           <CheckCircle2 className="w-3.5 h-3.5 text-[#059669]" />
@@ -1050,12 +1056,12 @@ export default function GoalsManager({
       {/* ── CREATE GOAL MODAL ── */}
       {showCreateModal && (
         <div
-          className="fixed inset-0 bg-black/65 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-y-auto hide-scrollbar"
+          className="fixed inset-0 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-y-auto hide-scrollbar"
         >
           <div className="absolute inset-0" onClick={closeCreateGoalModal} />
           
           <div
-            className="animate-slide-up bg-white dark:bg-[#0D121D] w-full sm:max-w-xl rounded-t-3xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col relative z-10"
+            className="animate-slide-up glass-modal w-full sm:max-w-xl rounded-t-3xl sm:rounded-2xl border shadow-2xl overflow-hidden max-h-[92vh] flex flex-col relative z-10"
           >
 
             {/* Header */}
@@ -1069,7 +1075,7 @@ export default function GoalsManager({
                   triggerHaptic('medium');
                   closeCreateGoalModal();
                 }}
-                className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-lg text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+                className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
                 aria-label="Close"
                 id="close_goal_modal_btn"
               >
@@ -1234,7 +1240,7 @@ export default function GoalsManager({
                     )}
                   </div>
                   <div className="relative">
-                    <span className={`absolute left-4 top-1/2 -translate-y-1/2 text-2xl font-black select-none ${
+                    <span className={`absolute left-3.5 top-1/2 -translate-y-1/2 text-2xl font-black select-none pointer-events-none ${
                       goalType === 'savings' && isOpenEndedSavings
                         ? 'text-slate-300 dark:text-slate-700'
                         : 'text-slate-400 dark:text-slate-500'
@@ -1272,7 +1278,7 @@ export default function GoalsManager({
                           const cur = parseAmount(targetAmount);
                           setTargetAmount(formatIndianNumberString(String(cur + val)));
                         }}
-                        className="px-2.5 py-1.5 bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-900 dark:text-white font-bold rounded-lg transition-colors text-xs cursor-pointer tabular-nums font-mono disabled:cursor-not-allowed"
+                        className="px-2.5 py-1.5 bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-bold rounded-lg transition-colors text-xs cursor-pointer tabular-nums font-mono disabled:cursor-not-allowed"
                       >
                         +{formatNumber(val, lang)}
                       </button>
@@ -1364,7 +1370,7 @@ export default function GoalsManager({
                             className={`px-2.5 py-1 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer font-mono ${
                               tenure === String(n)
                                 ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
-                                : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-900 dark:text-white'
+                                : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/70 text-slate-900 dark:text-white'
                             }`}
                           >
                             {formatNumber(n, lang)} {lang === 'bn' ? 'মাস' : 'Mo'}
@@ -1378,7 +1384,7 @@ export default function GoalsManager({
                             className={`px-2.5 py-1 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer font-mono ${
                               tenure === String(n)
                                 ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
-                                : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-900 dark:text-white'
+                                : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/70 text-slate-900 dark:text-white'
                             }`}
                           >
                             {formatNumber(n, lang)} {lang === 'bn' ? 'সপ্তাহ' : 'Wk'}
@@ -1392,7 +1398,7 @@ export default function GoalsManager({
                             className={`px-2.5 py-1 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer font-mono ${
                               tenure === String(n)
                                 ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
-                                : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-900 dark:text-white'
+                                : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/70 text-slate-900 dark:text-white'
                             }`}
                           >
                             {formatNumber(n, lang)} {lang === 'bn' ? 'দিন' : 'Days'}
@@ -1495,7 +1501,7 @@ export default function GoalsManager({
                         {t.installmentAmount}
                       </span>
                       <div className="relative">
-                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400 select-none">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400 select-none pointer-events-none">
                           ৳
                         </span>
                         <input
@@ -1579,7 +1585,7 @@ export default function GoalsManager({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className={`w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center transition-all cursor-pointer select-none active:scale-[0.99] border-2 border-transparent hover:border-slate-950 dark:hover:border-white shadow-xs ${
+                  className={`w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center transition-all cursor-pointer select-none active:scale-[0.99] border-2 border-transparent shadow-xs ${
                     goalType === 'deposit'
                       ? 'bg-rose-600 hover:bg-rose-700 text-white'
                       : 'bg-emerald-600 hover:bg-emerald-700 text-white'
@@ -1606,16 +1612,16 @@ export default function GoalsManager({
       {selectedGoal && (
         <div 
           key={selectedGoal.id}
-          className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 no-select"
+          className="fixed inset-0 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 no-select"
         >
           <div className="absolute inset-0" onClick={closeGoalDetail} />
 
           <div
-            className="bg-white dark:bg-[#0D121D] w-full sm:max-w-xl rounded-t-2xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col relative z-10"
+            className="glass-modal w-full sm:max-w-xl rounded-t-2xl sm:rounded-2xl border shadow-2xl overflow-hidden max-h-[90vh] flex flex-col relative z-10"
           >
             
             {/* Header */}
-            <div className="px-5 py-4 sm:px-6 border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/70 dark:bg-slate-900/50 shrink-0">
+            <div className="px-5 py-4 sm:px-6 border-b border-slate-200/70 dark:border-white/[0.08] bg-slate-50/50 dark:bg-white/[0.02] shrink-0">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1 flex items-center">
                   <button
@@ -1641,7 +1647,7 @@ export default function GoalsManager({
                       className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors cursor-pointer border-2 ${
                         reminders.some(r => r.goalId === selectedGoal.id && r.active)
                           ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
-                          : 'bg-white dark:bg-[#0D121D] text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white'
+                          : 'bg-white dark:bg-[#0D121D] hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700'
                       }`}
                       title={lang === 'bn' ? 'কিস্তির নোটিফিকেশন রিমাইন্ডার' : 'EMI Notification Reminder'}
                     >
@@ -1664,7 +1670,7 @@ export default function GoalsManager({
                       triggerHaptic('medium');
                       closeGoalDetail();
                     }}
-                    className="w-9 h-9 bg-white hover:bg-slate-100 dark:bg-[#0D121D] dark:hover:bg-slate-800 rounded-xl text-slate-600 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white"
+                    className="w-9 h-9 bg-white hover:bg-slate-100 dark:bg-[#0D121D] dark:hover:bg-slate-800 rounded-xl text-slate-600 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer border-2 border-slate-300 dark:border-slate-700"
                     aria-label="Close"
                   >
                     <X className="w-4 h-4" />
@@ -1677,12 +1683,12 @@ export default function GoalsManager({
             <div className="flex-1 min-h-0 overflow-y-auto hide-scrollbar p-4 sm:p-5 pb-6 space-y-4">
               
               {/* Financial Progress & Overview Card */}
-              <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="surface-subcard border rounded-xl p-4 space-y-3">
                 {selectedGoal.isOpenEnded && (!selectedGoal.targetAmount || selectedGoal.targetAmount === 0) ? (
                   <>
                     {/* 3 Main Numbers for Open-Ended Piggy Bank */}
                     <div className="grid grid-cols-3 gap-2 text-center">
-                      <div className="p-2.5 bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800 rounded-lg">
+                      <div className="p-2.5 bg-white/80 dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.08] rounded-lg">
                         <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                           {lang === 'bn' ? 'ব্যালেন্স' : 'Balance'}
                         </span>
@@ -1690,7 +1696,7 @@ export default function GoalsManager({
                           ৳{formatNumber(selectedGoal.savedAmount || 0, lang)}
                         </span>
                       </div>
-                      <div className="p-2.5 bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800 rounded-lg">
+                      <div className="p-2.5 bg-white/80 dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.08] rounded-lg">
                         <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                           {lang === 'bn' ? 'মোট জমা' : 'Total In'}
                         </span>
@@ -1698,7 +1704,7 @@ export default function GoalsManager({
                           +৳{formatNumber((selectedGoal.contributions || []).filter(c => c.type !== 'withdrawal').reduce((sum, c) => sum + (c.amount || 0), 0), lang)}
                         </span>
                       </div>
-                      <div className="p-2.5 bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800 rounded-lg">
+                      <div className="p-2.5 bg-white/80 dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.08] rounded-lg">
                         <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                           {lang === 'bn' ? 'মোট উত্তোলন' : 'Total Out'}
                         </span>
@@ -1721,19 +1727,19 @@ export default function GoalsManager({
                   <>
                     {/* 3 Main Numbers for Fixed Target Goal */}
                     <div className="grid grid-cols-3 gap-2 text-center">
-                      <div className="p-2.5 bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800 rounded-lg">
+                      <div className="p-2.5 bg-white/80 dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.08] rounded-lg">
                         <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                           {lang === 'bn' ? 'টার্গেট' : 'Target'}
                         </span>
                         <span className="text-sm sm:text-base font-bold font-mono text-slate-950 dark:text-white mt-0.5 block truncate">৳{formatNumber(selectedGoal.targetAmount, lang)}</span>
                       </div>
-                      <div className="p-2.5 bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800 rounded-lg">
+                      <div className="p-2.5 bg-white/80 dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.08] rounded-lg">
                         <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                           {lang === 'bn' ? 'জমা' : 'Saved'}
                         </span>
                         <span className="text-sm sm:text-base font-bold font-mono text-emerald-600 dark:text-emerald-400 mt-0.5 block truncate">৳{formatNumber(selectedGoal.savedAmount || 0, lang)}</span>
                       </div>
-                      <div className="p-2.5 bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800 rounded-lg">
+                      <div className="p-2.5 bg-white/80 dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.08] rounded-lg">
                         <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">{t.remaining}</span>
                         <span className="text-sm sm:text-base font-bold font-mono text-rose-600 dark:text-rose-400 mt-0.5 block truncate">৳{formatNumber(Math.max(0, selectedGoal.targetAmount - (selectedGoal.savedAmount || 0)), lang)}</span>
                       </div>
@@ -1797,7 +1803,7 @@ export default function GoalsManager({
                             setEditedGoalNotes(cleanSelectedGoalNotes);
                             setIsEditingGoalNotes(true);
                           }}
-                          className="p-1 px-2 rounded-lg text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white bg-white dark:bg-[#0D121D] border border-slate-200 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white flex items-center gap-1 cursor-pointer transition-colors"
+                          className="p-1 px-2 rounded-lg text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white bg-white dark:bg-[#0D121D] hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center gap-1 cursor-pointer transition-colors"
                           title={lang === 'bn' ? 'নোট সম্পাদনা করুন' : 'Edit Notes'}
                         >
                           <Pencil className="w-3 h-3" />
@@ -1830,14 +1836,14 @@ export default function GoalsManager({
                           <button
                             type="button"
                             onClick={() => setIsEditingGoalNotes(false)}
-                            className="px-3 py-1.5 bg-white dark:bg-[#0D121D] hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-xs cursor-pointer transition-colors"
+                            className="px-3 py-1.5 bg-white dark:bg-[#0D121D] hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 text-xs cursor-pointer transition-colors"
                           >
                             {lang === 'bn' ? 'বাতিল' : 'Cancel'}
                           </button>
                           <button
                             type="submit"
                             disabled={isSavingGoalNotes}
-                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl border-2 border-transparent hover:border-slate-950 dark:hover:border-white text-xs cursor-pointer transition-colors"
+                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl border-2 border-transparent text-xs cursor-pointer transition-colors"
                           >
                             {lang === 'bn' ? 'সেভ' : 'Save'}
                           </button>
@@ -1862,14 +1868,14 @@ export default function GoalsManager({
 
               {/* EMI & Loan Details Card */}
               {selectedGoalEmiDetails && (
-                <div className="bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200/80 dark:border-slate-800 overflow-hidden">
+                <div className="surface-subcard rounded-xl border overflow-hidden">
                   <button
                     type="button"
                     onClick={() => {
                       triggerHaptic('single');
                       setIsEmiBreakdownOpen(prev => !prev);
                     }}
-                    className="w-full p-3.5 flex items-center justify-between text-left hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
+                    className="w-full p-3.5 flex items-center justify-between text-left hover:bg-slate-100/80 dark:hover:bg-white/[0.04] transition-colors cursor-pointer"
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <CreditCard className="w-4 h-4 text-slate-900 dark:text-white shrink-0" />
@@ -1898,7 +1904,7 @@ export default function GoalsManager({
                   {isEmiBreakdownOpen && (
                     <div className="px-3 pb-3 pt-1 border-t border-slate-200/80 dark:border-slate-800">
                       <div className="grid grid-cols-2 gap-2 pt-1">
-                        <div className="bg-white dark:bg-[#0D121D] p-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800">
+                        <div className="bg-white/80 dark:bg-white/[0.04] p-2.5 rounded-lg border border-slate-200/80 dark:border-white/[0.08]">
                           <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">
                             {lang === 'bn' ? 'মূল পরিমাণ (Principal)' : 'Principal Amount'}
                           </span>
@@ -1907,18 +1913,18 @@ export default function GoalsManager({
                           </span>
                         </div>
 
-                        <div className="bg-white dark:bg-[#0D121D] p-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800">
+                        <div className="bg-white/80 dark:bg-white/[0.04] p-2.5 rounded-lg border border-slate-200/80 dark:border-white/[0.08]">
                           <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">
                             {lang === 'bn' ? 'মুনাফা / ফি (Fee)' : 'Interest / Fee'}
                           </span>
                           <span className="text-xs font-bold font-mono text-rose-600 dark:text-rose-400 mt-0.5 block">
                             {selectedGoalEmiDetails.interestAmount > 0 
-                              ? `+৳${formatNumber(selectedGoalEmiDetails.interestAmount, lang)} ${selectedGoalEmiDetails.interestRate ? `(${selectedGoalEmiDetails.interestRate}%)` : ''}` 
+                              ? `+৳${formatNumber(selectedGoalEmiDetails.interestAmount, lang)}${selectedGoalEmiDetails.interestRate ? ` (${selectedGoalEmiDetails.interestRate}%)` : ''}` 
                               : (lang === 'bn' ? '০% (ফি প্রযোজ্য নয়)' : '0% (No Fee)')}
                           </span>
                         </div>
 
-                        <div className="bg-white dark:bg-[#0D121D] p-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800">
+                        <div className="bg-white/80 dark:bg-white/[0.04] p-2.5 rounded-lg border border-slate-200/80 dark:border-white/[0.08]">
                           <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">
                             {lang === 'bn' ? 'প্রতি কিস্তি (Per Installment)' : 'Installment Rate'}
                           </span>
@@ -1927,7 +1933,7 @@ export default function GoalsManager({
                           </span>
                         </div>
 
-                        <div className="bg-white dark:bg-[#0D121D] p-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800">
+                        <div className="bg-white/80 dark:bg-white/[0.04] p-2.5 rounded-lg border border-slate-200/80 dark:border-white/[0.08]">
                           <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">
                             {lang === 'bn' ? 'মোট প্রদেয় (Total Payable)' : 'Total Payable'}
                           </span>
@@ -1955,7 +1961,7 @@ export default function GoalsManager({
                             setContributionActionType('deposit');
                             setShowInstallmentForm(true);
                           }}
-                          className="py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl border-2 border-emerald-600 hover:border-slate-950 dark:hover:border-white transition-colors flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm active:scale-95 shadow-xs"
+                          className="py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl border-2 border-emerald-600 transition-colors flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm active:scale-95 shadow-xs"
                         >
                           <Plus className="w-4 h-4 stroke-[2.5]" />
                           <span>{lang === 'bn' ? 'টাকা জমা' : 'Deposit'}</span>
@@ -2007,7 +2013,7 @@ export default function GoalsManager({
                         <button 
                           type="button"
                           onClick={() => setShowInstallmentForm(false)}
-                          className="p-1.5 text-slate-500 hover:text-slate-950 dark:hover:text-white rounded-lg border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer"
+                          className="p-1.5 text-slate-500 hover:text-slate-950 dark:hover:text-white rounded-lg border-2 border-slate-300 dark:border-slate-700 cursor-pointer transition-colors"
                         >
                           <X className="w-4 h-4" />
                         </button>
@@ -2020,7 +2026,7 @@ export default function GoalsManager({
                             : `${t.amountPaid} *`}
                         </label>
                         <div className="relative">
-                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-400 select-none">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-400 select-none pointer-events-none">
                             ৳
                           </span>
                           <input
@@ -2073,7 +2079,7 @@ export default function GoalsManager({
                                 const cur = parseAmount(installmentInput);
                                 setInstallmentInput(formatIndianNumberString(String(cur + val)));
                               }}
-                              className="px-2.5 py-1 bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-900 dark:text-white font-mono font-bold rounded-lg transition-colors text-xs cursor-pointer"
+                              className="px-2.5 py-1 bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-mono font-bold rounded-lg transition-colors text-xs cursor-pointer"
                             >
                               +{formatNumber(val, lang)}
                             </button>
@@ -2128,7 +2134,7 @@ export default function GoalsManager({
                       <button
                         type="submit"
                         disabled={isSubmitting}
-                        className={`w-full py-2.5 font-bold rounded-xl border-2 border-transparent hover:border-slate-950 dark:hover:border-white transition-colors cursor-pointer text-xs flex items-center justify-center gap-2 ${
+                        className={`w-full py-2.5 font-bold rounded-xl border-2 border-transparent transition-colors cursor-pointer text-xs flex items-center justify-center gap-2 ${
                           contributionActionType === 'withdrawal'
                             ? 'bg-rose-600 hover:bg-rose-700 text-white'
                             : 'bg-emerald-600 hover:bg-emerald-700 text-white'
@@ -2158,7 +2164,7 @@ export default function GoalsManager({
                     : (lang === 'bn' ? 'জমার বিবরণী' : 'Contribution Ledger')} ({selectedGoal.contributions?.length || 0})
                 </span>
 
-                <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl overflow-hidden">
+                <div className="surface-subcard border rounded-xl overflow-hidden">
                   <div className="max-h-[220px] overflow-y-auto divide-y divide-slate-200/70 dark:divide-slate-800/80">
                     {(!selectedGoal.contributions || selectedGoal.contributions.length === 0) ? (
                       <div className="p-6 text-center text-xs font-bold text-slate-500 dark:text-slate-400 flex flex-col items-center gap-1.5">
@@ -2256,12 +2262,12 @@ export default function GoalsManager({
       {/* ── 1 & 2. CUSTOM REACTIVATION CONFIRMATION POPUP ── */}
       {showReactivateConfirm && selectedGoal && (
         <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs"
+          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
           onClick={closeReactivateGoalConfirm}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-[#0D121D] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-6"
+            className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border shadow-2xl p-6"
           >
             <div className="text-center mb-6">
               <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-center mx-auto mb-3">
@@ -2309,7 +2315,7 @@ export default function GoalsManager({
               <button
                 type="button"
                 onClick={closeReactivateGoalConfirm}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer transition-colors text-xs"
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer transition-colors text-xs"
               >
                 {lang === 'bn' ? 'বাতিল' : 'Cancel'}
               </button>
@@ -2321,12 +2327,12 @@ export default function GoalsManager({
       {/* ── 2. CUSTOM CANCEL CONFIRMATION POPUP ── */}
       {showCancelConfirm && selectedGoal && (
         <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs"
+          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
           onClick={closeCancelGoalConfirm}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-[#0D121D] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-6"
+            className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border shadow-2xl p-6"
           >
             <div className="text-center mb-6">
               <div className="w-12 h-12 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3">
@@ -2363,14 +2369,14 @@ export default function GoalsManager({
                   closeGoalDetail();
                   toast.success(lang === 'bn' ? 'লক্ষ্যটি বাতিল করা হয়েছে' : 'Goal cancelled');
                 }}
-                className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent hover:border-slate-950 dark:hover:border-white cursor-pointer transition-colors text-xs"
+                className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent cursor-pointer transition-colors text-xs"
               >
                 {lang === 'bn' ? 'হ্যাঁ, বাতিল করুন' : 'Yes, Cancel Goal'}
               </button>
               <button
                 type="button"
                 onClick={closeCancelGoalConfirm}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer transition-colors text-xs"
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer transition-colors text-xs"
               >
                 {lang === 'bn' ? 'না, ফেরত যান' : 'No, Go Back'}
               </button>
@@ -2382,12 +2388,12 @@ export default function GoalsManager({
       {/* ── 2. CUSTOM DELETE CONFIRMATION POPUP ── */}
       {showDeleteConfirm && selectedGoal && (
         <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs"
+          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
           onClick={closeDeleteGoalConfirm}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-[#0D121D] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-6"
+            className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border shadow-2xl p-6"
           >
             <div className="text-center mb-6">
               <div className="w-12 h-12 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3">
@@ -2424,14 +2430,14 @@ export default function GoalsManager({
                   closeGoalDetail();
                   toast.success(lang === 'bn' ? 'লক্ষ্যটি মুছে ফেলা হয়েছে' : 'Goal deleted successfully');
                 }}
-                className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent hover:border-slate-950 dark:hover:border-white cursor-pointer transition-colors text-xs"
+                className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent cursor-pointer transition-colors text-xs"
               >
                 {lang === 'bn' ? 'হ্যাঁ, স্থায়ীভাবে মুছুন' : 'Yes, Delete Permanently'}
               </button>
               <button
                 type="button"
                 onClick={closeDeleteGoalConfirm}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer transition-colors text-xs"
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer transition-colors text-xs"
               >
                 {lang === 'bn' ? 'বাতিল' : 'Cancel'}
               </button>
@@ -2443,17 +2449,17 @@ export default function GoalsManager({
       {/* ── EMI NOTIFICATION REMINDER MODAL ── */}
       {emiReminderGoal && (
         <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs overflow-hidden"
+          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md overflow-hidden"
           onClick={closeEmiReminderModal}
         >
           <div className="absolute inset-0" onClick={closeEmiReminderModal} />
 
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-[#0D121D] w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col relative z-10"
+            className="glass-modal w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border shadow-2xl overflow-hidden max-h-[92vh] flex flex-col relative z-10"
           >
             {/* Header */}
-            <div className="p-4 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between bg-slate-50/70 dark:bg-slate-900/50">
+            <div className="p-4 border-b border-slate-200/70 dark:border-white/[0.08] flex items-center justify-between bg-slate-50/50 dark:bg-white/[0.02]">
               <div>
                 <h3 className="text-base font-bold text-slate-950 dark:text-white leading-tight">
                   {lang === 'bn' ? 'কিস্তি রিমাইন্ডার' : 'Monthly EMI Reminder'}
@@ -2464,7 +2470,7 @@ export default function GoalsManager({
               </div>
               <button
                 onClick={closeEmiReminderModal}
-                className="p-1.5 bg-white dark:bg-[#0D121D] hover:bg-slate-100 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-lg text-slate-500 dark:text-slate-400 transition-colors cursor-pointer"
+                className="p-1.5 bg-white dark:bg-[#0D121D] hover:bg-slate-100 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-500 dark:text-slate-400 transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -2551,7 +2557,7 @@ export default function GoalsManager({
             </div>
 
             {/* Actions */}
-            <div className="p-4 border-t border-slate-100 dark:border-slate-800/80 bg-white dark:bg-[#0D121D] space-y-2">
+            <div className="p-4 border-t border-slate-200/70 dark:border-white/[0.08] bg-white/60 dark:bg-white/[0.02] space-y-2">
               <button
                 type="button"
                 disabled={isSavingEmiReminder}
@@ -2577,7 +2583,7 @@ export default function GoalsManager({
               <button
                 type="button"
                 onClick={closeEmiReminderModal}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer transition-colors"
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer transition-colors"
               >
                 {lang === 'bn' ? 'বাতিল' : 'Cancel'}
               </button>
@@ -2589,12 +2595,12 @@ export default function GoalsManager({
       {/* ── EDIT CONTRIBUTION MODAL ── */}
       {editingContribution && selectedGoal && (
         <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs"
+          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
           onClick={closeEditContributionModal}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-[#0D121D] w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-5 relative"
+            className="glass-modal w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border shadow-2xl p-5 relative"
           >
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800/80 mb-4">
               <div className="flex items-center gap-2.5">
@@ -2613,7 +2619,7 @@ export default function GoalsManager({
               <button
                 type="button"
                 onClick={closeEditContributionModal}
-                className="p-1.5 text-slate-500 hover:text-slate-950 dark:hover:text-white rounded-lg border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white transition-colors cursor-pointer"
+                className="p-1.5 text-slate-500 hover:text-slate-950 dark:hover:text-white rounded-lg border-2 border-slate-300 dark:border-slate-700 transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -2654,14 +2660,14 @@ export default function GoalsManager({
                 <button
                   type="button"
                   onClick={closeEditContributionModal}
-                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer transition-colors"
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer transition-colors"
                 >
                   {lang === 'bn' ? 'বাতিল' : 'Cancel'}
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingEditContrib}
-                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl border-2 border-transparent hover:border-slate-950 dark:hover:border-white text-xs cursor-pointer transition-colors flex items-center justify-center gap-2"
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl border-2 border-transparent text-xs cursor-pointer transition-colors flex items-center justify-center gap-2"
                 >
                   {isSavingEditContrib ? (
                     <span className="flex items-center gap-2">
@@ -2681,12 +2687,12 @@ export default function GoalsManager({
       {/* ── DELETE CONTRIBUTION CONFIRMATION MODAL ── */}
       {deletingContribution && selectedGoal && (
         <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs"
+          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
           onClick={closeDeleteContributionModal}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-[#0D121D] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-5"
+            className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border shadow-2xl p-5"
           >
             <div className="text-center mb-5">
               <div className="w-12 h-12 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3">
@@ -2720,7 +2726,7 @@ export default function GoalsManager({
                 type="button"
                 disabled={isDeletingContrib}
                 onClick={handleConfirmDeleteContribution}
-                className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent hover:border-slate-950 dark:hover:border-white text-xs cursor-pointer transition-colors flex items-center justify-center gap-2"
+                className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent text-xs cursor-pointer transition-colors flex items-center justify-center gap-2"
               >
                 {isDeletingContrib ? (
                   <span className="flex items-center gap-2">
@@ -2735,7 +2741,7 @@ export default function GoalsManager({
               <button
                 type="button"
                 onClick={closeDeleteContributionModal}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer transition-colors"
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer transition-colors"
               >
                 {lang === 'bn' ? 'বাতিল' : 'Cancel'}
               </button>
@@ -2747,12 +2753,12 @@ export default function GoalsManager({
       {/* ── RENAME GOAL POPUP MODAL ── */}
       {isEditingGoalTitle && selectedGoal && (
         <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs"
+          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
           onClick={closeRenameGoal}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-[#0D121D] w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-5 relative"
+            className="glass-modal w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border shadow-2xl p-5 relative"
           >
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800/80 mb-4">
               <div className="flex items-center gap-2.5">
@@ -2771,7 +2777,7 @@ export default function GoalsManager({
               <button
                 type="button"
                 onClick={closeRenameGoal}
-                className="p-1.5 text-slate-500 hover:text-slate-950 dark:hover:text-white rounded-lg border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white transition-colors cursor-pointer"
+                className="p-1.5 text-slate-500 hover:text-slate-950 dark:hover:text-white rounded-lg border-2 border-slate-300 dark:border-slate-700 transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -2798,7 +2804,7 @@ export default function GoalsManager({
                 <button
                   type="button"
                   onClick={closeRenameGoal}
-                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer transition-colors"
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer transition-colors"
                 >
                   {lang === 'bn' ? 'বাতিল' : 'Cancel'}
                 </button>

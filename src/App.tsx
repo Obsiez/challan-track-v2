@@ -22,8 +22,9 @@ import CalculatorKeypad from './components/CalculatorKeypad';
 import { isBiometricEnabled, isBiometricSessionUnlocked, setBiometricSessionUnlocked } from './lib/biometrics';
 import { getSavedAccentColor, applyAccentColor, getSavedThemePalette, applyThemePalette } from './lib/accentTheme';
 import {
-  LayoutDashboard, Users, Bell, Settings, BookOpen, Clock, Globe, Plus, Moon, Sun, ArrowUpRight, ArrowDownLeft, ChevronRight, BarChart3, ArrowLeft, ClipboardList, Lock, Loader2, Calendar, PiggyBank, Goal, Palette
+  LayoutDashboard, Users, Bell, BellDot, Settings, BookOpen, Clock, Globe, Plus, Moon, Sun, ArrowUpRight, ArrowDownLeft, ChevronRight, BarChart3, ArrowLeft, ClipboardList, Lock, Loader2, Calendar, PiggyBank, Goal, Palette
 } from 'lucide-react';
+import { AppShellSkeleton, DashboardSkeleton } from './components/AppSkeletonLoader';
 import { showNotification } from './lib/notifications';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
@@ -230,6 +231,7 @@ export default function App() {
   const {
     customers,
     customerTransactions,
+    allCustomerTransactions,
     dailyTransactions,
     todayTransactions,
     reminders,
@@ -550,7 +552,7 @@ export default function App() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-white dark:bg-black flex flex-col items-center justify-center p-6 transition-colors">
+      <>
         <Toaster 
           theme={theme} 
           position="bottom-center"
@@ -559,24 +561,21 @@ export default function App() {
             className: 'sonner-custom-toast'
           }} 
         />
-        <div className="flex flex-col items-center gap-4 text-center">
-          <div className="w-10 h-10 border-2 border-black dark:border-white border-t-transparent dark:border-t-transparent rounded-full animate-spin" />
-          <div>
-            <h3 className="text-base font-bold text-black dark:text-white tracking-tight">{t.openingLedger}</h3>
-            <p className="text-xs text-[#757575] mt-1">{t.applyingCloud}</p>
-          </div>
-        </div>
-      </div>
+        <AppShellSkeleton />
+      </>
     );
   }
 
- // --- 1. SIGN IN LANDING SCREEN (WITH TRANSLATIONS) ---
+  // --- 1. SIGN IN LANDING SCREEN (WITH TRANSLATIONS) ---
   if (!user) {
     return (
-      <div id="auth_view" className="min-h-screen bg-white dark:bg-[#090D14] text-slate-900 dark:text-slate-100 flex flex-col items-center justify-center p-4 sm:p-6 no-select transition-colors">
+      <div id="auth_view" className="relative min-h-screen bg-white dark:bg-[#090D14] text-slate-900 dark:text-slate-100 flex flex-col items-center justify-center p-4 sm:p-6 no-select transition-colors">
+        <div aria-hidden="true" className="app-ambient-backdrop">
+          <div className="app-ambient-grid" />
+        </div>
         <Toaster 
           theme={theme} 
-          position="bottom-center"
+          position="bottom-center" 
           duration={2500}
           toastOptions={{ 
             className: 'sonner-custom-toast'
@@ -584,13 +583,13 @@ export default function App() {
         />
         
         {/* Top Controls: Language & Theme Switchers */}
-        <div className="w-full max-w-sm md:max-w-3xl lg:max-w-4xl flex items-center justify-between mb-6 sm:mb-8">
+        <div className="relative z-10 w-full max-w-sm md:max-w-3xl lg:max-w-4xl flex items-center justify-between mb-6 sm:mb-8">
           <button
             onClick={() => {
               triggerHaptic('single');
               handleThemeChange(theme === 'dark' ? 'light' : 'dark');
             }}
-            className="px-3 py-1.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer flex items-center gap-2 text-xs font-semibold transition-colors"
+            className="surface-glass-interactive px-3 py-1.5 border border-slate-200/80 dark:border-slate-700/80 rounded-xl text-slate-700 dark:text-slate-200 cursor-pointer flex items-center gap-2 text-xs font-semibold"
             title="Toggle theme"
           >
             {theme === 'dark' ? <Sun className="w-3.5 h-3.5 text-white" /> : <Moon className="w-3.5 h-3.5 text-slate-700" />}
@@ -602,7 +601,7 @@ export default function App() {
               triggerHaptic('single');
               handleLangChange(lang === 'bn' ? 'en' : 'bn');
             }}
-            className="px-3 py-1.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg font-bold text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5 cursor-pointer transition-colors"
+            className="surface-glass-interactive px-3 py-1.5 border border-slate-200/80 dark:border-slate-700/80 rounded-xl font-bold text-xs text-slate-700 dark:text-slate-200 flex items-center gap-1.5 cursor-pointer"
           >
             <Globe className="w-3.5 h-3.5" />
             {lang === 'bn' ? 'English' : 'বাংলা'}
@@ -610,8 +609,14 @@ export default function App() {
         </div>
 
         {/* Auth Card Container: Compact on mobile, expansive split showcase on desktop */}
-        <div className="w-full max-w-sm md:max-w-3xl lg:max-w-4xl bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 rounded-2xl p-6 sm:p-8 md:p-10 shadow-xs md:shadow-md transition-all">
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-10 items-stretch">
+        <div className="relative z-10 w-full max-w-sm md:max-w-3xl lg:max-w-4xl surface-hero-glass border rounded-2xl p-6 sm:p-8 md:p-10 transition-all overflow-hidden">
+          {/* Subtle top-right blurred accent aura */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -top-24 -right-24 w-64 h-64 rounded-full blur-3xl opacity-20 dark:opacity-25"
+            style={{ backgroundColor: 'var(--accent-color)' }}
+          />
+          <div className="relative z-10 grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-10 items-stretch">
             
             {/* Left Column (Brand + Key Features Showcase on desktop) */}
             <div className="md:col-span-7 flex flex-col justify-between space-y-6">
@@ -624,9 +629,9 @@ export default function App() {
               </div>
 
               {/* Key Features List */}
-              <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800/80">
-                <div className="flex items-start gap-3 p-2.5 rounded-xl md:bg-slate-50/50 md:dark:bg-slate-900/30 md:border md:border-slate-100 md:dark:border-slate-800/50 transition-colors">
-                  <div className="p-2 bg-slate-50 dark:bg-slate-900/60 text-slate-700 dark:text-slate-300 rounded-md shrink-0 border border-slate-200/60 dark:border-slate-800/60">
+              <div className="space-y-3 pt-3 border-t border-slate-200/60 dark:border-white/[0.07]">
+                <div className="flex items-start gap-3 p-2.5 rounded-xl surface-subcard border border-slate-200/50 dark:border-white/[0.06] transition-colors">
+                  <div className="p-2 bg-white/80 dark:bg-white/[0.06] text-slate-700 dark:text-slate-300 rounded-lg shrink-0 border border-slate-200/70 dark:border-white/10">
                     <ArrowUpRight className="w-4 h-4 stroke-[2.2]" />
                   </div>
                   <div>
@@ -635,8 +640,8 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex items-start gap-3 p-2.5 rounded-xl md:bg-slate-50/50 md:dark:bg-slate-900/30 md:border md:border-slate-100 md:dark:border-slate-800/50 transition-colors">
-                  <div className="p-2 bg-slate-50 dark:bg-slate-900/60 text-slate-700 dark:text-slate-300 rounded-md shrink-0 border border-slate-200/60 dark:border-slate-800/60">
+                <div className="flex items-start gap-3 p-2.5 rounded-xl surface-subcard border border-slate-200/50 dark:border-white/[0.06] transition-colors">
+                  <div className="p-2 bg-white/80 dark:bg-white/[0.06] text-slate-700 dark:text-slate-300 rounded-lg shrink-0 border border-slate-200/70 dark:border-white/10">
                     <Globe className="w-4 h-4 stroke-[2.2]" />
                   </div>
                   <div>
@@ -645,8 +650,8 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex items-start gap-3 p-2.5 rounded-xl md:bg-slate-50/50 md:dark:bg-slate-900/30 md:border md:border-slate-100 md:dark:border-slate-800/50 transition-colors">
-                  <div className="p-2 bg-slate-50 dark:bg-slate-900/60 text-slate-700 dark:text-slate-300 rounded-md shrink-0 border border-slate-200/60 dark:border-slate-800/60">
+                <div className="flex items-start gap-3 p-2.5 rounded-xl surface-subcard border border-slate-200/50 dark:border-white/[0.06] transition-colors">
+                  <div className="p-2 bg-white/80 dark:bg-white/[0.06] text-slate-700 dark:text-slate-300 rounded-lg shrink-0 border border-slate-200/70 dark:border-white/10">
                     <Bell className="w-4 h-4 stroke-[2.2]" />
                   </div>
                   <div>
@@ -789,9 +794,13 @@ export default function App() {
    );
  }
 
- // --- 2. MAIN APP CONTAINER (LOGGED IN & TRANSLATED) ---
+  // --- 2. MAIN APP CONTAINER (LOGGED IN & TRANSLATED) ---
   return (
-    <div className="min-h-screen bg-white dark:bg-[#090D14] text-slate-900 dark:text-slate-100 flex flex-col no-select pb-24 transition-colors">
+    <div className="relative min-h-screen bg-white dark:bg-[#090D14] text-slate-900 dark:text-slate-100 flex flex-col no-select pb-24 transition-colors">
+      <div aria-hidden="true" className="app-ambient-backdrop">
+        <div className="app-ambient-grid" />
+      </div>
+
       <Toaster 
         theme={theme} 
         position="bottom-center" 
@@ -805,8 +814,8 @@ export default function App() {
         }}
       />
       
-      {/* 1-Row, 3-Zone Top Bar */}
-      <header className="bg-white dark:bg-[#0D121D] border-b border-slate-200 dark:border-slate-800/80 py-3 px-4 sm:px-6 sticky top-0 z-30 transition-colors">
+      {/* 1-Row, 3-Zone Frosted Glass Top Bar */}
+      <header className="glass-chrome-header border-b border-slate-200/70 dark:border-white/[0.08] py-3 px-4 sm:px-6 sticky top-0 z-30 transition-colors">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-3 sm:gap-4">
           
           {/* Zone 1: Pure Typographic Logo with Squircle Mark */}
@@ -824,7 +833,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             <button
               onClick={openQuickEntry}
-              className="hidden sm:flex px-3.5 py-2 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 font-bold text-xs rounded-xl items-center gap-1.5 cursor-pointer shadow-xs active:scale-[0.98] transition-all border-2 border-slate-950 dark:border-white"
+              className="hidden sm:flex px-3.5 py-2 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 font-bold text-xs rounded-xl items-center gap-1.5 cursor-pointer shadow-sm active:scale-[0.98] transition-all border-2 border-slate-950 dark:border-white"
               id="top_quick_entry_btn"
             >
               <Plus className="w-3.5 h-3.5 stroke-[3]" />
@@ -837,7 +846,7 @@ export default function App() {
                 triggerHaptic('single');
                 setIsAccentModalOpen(true);
               }}
-              className="p-2 rounded-xl bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-900 border-2 border-slate-300 hover:border-slate-800 dark:border-slate-700 dark:hover:border-slate-200 cursor-pointer transition-all shadow-2xs relative active:scale-95"
+              className="p-2 rounded-xl bg-white/75 dark:bg-white/[0.04] hover:bg-white dark:hover:bg-white/[0.09] backdrop-blur-md border-2 border-slate-300/90 dark:border-slate-700/90 cursor-pointer transition-all shadow-2xs relative active:scale-95"
               title={lang === 'bn' ? 'থিম ও অ্যাকসেন্ট কালার পরিবর্তন' : 'Theme & Accent Palette'}
               id="header_accent_palette_btn"
             >
@@ -847,22 +856,20 @@ export default function App() {
             {/* Reminders Header Action Button */}
             <button
               onClick={() => { triggerHaptic('single'); navigateTo('reminders'); }}
-              className={`p-2 sm:px-3 sm:py-2 rounded-xl border-2 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs ${
+              className={`p-2 sm:px-3 sm:py-2 rounded-xl border-2 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs backdrop-blur-md ${
                 currentTab === 'reminders'
                   ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
-                  : 'bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-300 hover:border-slate-800 dark:border-slate-700 dark:hover:border-slate-200'
+                  : 'bg-white/75 hover:bg-white dark:bg-white/[0.04] dark:hover:bg-white/[0.09] text-slate-800 dark:text-slate-200 border-slate-300/90 dark:border-slate-700/90'
               }`}
               title={t.reminders}
               id="header_reminders_btn"
             >
-              <Bell className="w-3.5 h-3.5 stroke-[2]" />
-              <span className="hidden sm:inline">{t.reminders}</span>
-              {reminders.filter(r => r.active).length > 0 && (
-                <span 
-                  className="w-2 h-2 rounded-full inline-block animate-pulse"
-                  style={{ backgroundColor: 'var(--accent-color)' }}
-                />
+              {reminders.some(r => r.active) ? (
+                <BellDot className="w-3.5 h-3.5 stroke-[2]" />
+              ) : (
+                <Bell className="w-3.5 h-3.5 stroke-[2]" />
               )}
+              <span className="hidden sm:inline">{t.reminders}</span>
             </button>
 
             {/* Theme Toggle */}
@@ -871,21 +878,10 @@ export default function App() {
                 triggerHaptic('single');
                 handleThemeChange(theme === 'dark' ? 'light' : 'dark');
               }}
-              className="p-2 rounded-xl bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-900 text-slate-900 dark:text-white border-2 border-slate-300 hover:border-slate-800 dark:border-slate-700 dark:hover:border-slate-200 cursor-pointer transition-colors shadow-2xs active:scale-95"
+              className="p-2 rounded-xl bg-white/75 hover:bg-white dark:bg-white/[0.04] dark:hover:bg-white/[0.09] backdrop-blur-md text-slate-900 dark:text-white border-2 border-slate-300/90 dark:border-slate-700/90 cursor-pointer transition-all shadow-2xs active:scale-95"
               title="Toggle theme"
             >
               {theme === 'dark' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
-            </button>
-
-            {/* Language Toggle */}
-            <button
-              onClick={() => {
-                triggerHaptic('single');
-                handleLangChange(lang === 'bn' ? 'en' : 'bn');
-              }}
-              className="px-2.5 py-2 rounded-xl bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-900 text-slate-900 dark:text-white border-2 border-slate-300 hover:border-slate-800 dark:border-slate-700 dark:hover:border-slate-200 font-bold text-xs cursor-pointer transition-colors shadow-2xs active:scale-95"
-            >
-              {lang === 'bn' ? 'EN' : 'বাং'}
             </button>
           </div>
 
@@ -893,13 +889,11 @@ export default function App() {
       </header>
 
       {/* Main Core Content Stage */}
-      <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 mb-16 sm:mb-24">
+      <main className="relative flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 mb-16 sm:mb-24">
  
- {/* Loading overlay for operations */}
+ {/* Loading skeleton for ledger initialization */}
  {ledgerLoading && (
- <div className="text-center py-10 text-zinc-400 font-bold text-sm">
- {t.updatingBackup}
- </div>
+   <DashboardSkeleton />
  )}
 
  {/* Dynamic Route/Component loading */}
@@ -922,6 +916,7 @@ export default function App() {
  <CustomerManager 
  customers={customers}
  transactions={customerTransactions}
+ allTransactions={allCustomerTransactions}
  createCustomer={createCustomer}
  addTransaction={addTransaction}
  editTransaction={editTransaction}
@@ -1068,12 +1063,12 @@ updateSettings={updateSettings}
           </div>
 
           {/* Uber Base Horizontal Totals Summary Grid */}
-          <div className="grid grid-cols-3 gap-0 bg-white dark:bg-[#0F1623] rounded-xl border border-slate-200 dark:border-slate-800/80 divide-x divide-slate-100 dark:divide-slate-800/80 overflow-hidden text-center">
+          <div className="surface-glass grid grid-cols-3 gap-0 rounded-2xl border divide-x divide-slate-200/70 dark:divide-white/[0.07] overflow-hidden text-center">
             <div className="p-3.5 space-y-1">
               <div className="text-[11px] font-bold uppercase text-[#757575] tracking-wider">
                 {lang === 'bn' ? 'মোট বকেয়া' : 'Total Dues'}
               </div>
-              <div className="text-base sm:text-lg font-black text-[#DC2626] tabular-nums font-mono">
+              <div className="text-base sm:text-lg font-black text-ledger-red tabular-nums font-mono">
                 +৳ {formatNumber(dailyTransactions.filter(tx => tx.type === 'due').reduce((sum, tx) => sum + tx.amount, 0), lang)}
               </div>
             </div>
@@ -1081,7 +1076,7 @@ updateSettings={updateSettings}
               <div className="text-[11px] font-bold uppercase text-[#757575] tracking-wider">
                 {lang === 'bn' ? 'মোট আদায়' : 'Total Got'}
               </div>
-              <div className="text-base sm:text-lg font-black text-[#059669] tabular-nums font-mono">
+              <div className="text-base sm:text-lg font-black text-ledger-green tabular-nums font-mono">
                 -৳ {formatNumber(dailyTransactions.filter(tx => tx.type === 'payment').reduce((sum, tx) => sum + tx.amount, 0), lang)}
               </div>
             </div>
@@ -1100,7 +1095,7 @@ updateSettings={updateSettings}
             <div className="flex justify-center shrink-0">
               <button
                 onClick={() => setSelectedDailyDate(new Date())}
-                className="py-2 px-4 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900/60 dark:hover:bg-slate-800 text-black dark:text-white border border-slate-200 dark:border-slate-800/80 text-xs font-bold rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                className="surface-glass-interactive py-2 px-4 text-black dark:text-white border border-slate-200/80 dark:border-white/10 text-xs font-bold rounded-xl cursor-pointer flex items-center justify-center gap-1.5"
               >
                 <Calendar className="w-3.5 h-3.5" />
                 <span>{lang === 'bn' ? 'আজকের দিনে ফিরে যান' : 'Back to Today'}</span>
@@ -1109,8 +1104,8 @@ updateSettings={updateSettings}
           )}
 
           {/* Ledger Entries List */}
-          <div className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 rounded-xl overflow-hidden">
-            <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
+          <div className="surface-glass border rounded-2xl overflow-hidden">
+            <div className="divide-y divide-slate-200/60 dark:divide-white/[0.06]">
               {dailyTransactions.length === 0 ? (
                 <div className="py-16 text-center text-[#757575]">
                   <div className="flex flex-col items-center gap-3">
@@ -1127,14 +1122,14 @@ updateSettings={updateSettings}
                   <div 
                     key={tx.id} 
                     onClick={() => navigateTo('customers', tx.customerId)}
-                    className="p-4 hover:bg-slate-50 dark:hover:bg-[#1F1F1F] transition-colors cursor-pointer flex items-center justify-between gap-4 animate-reveal"
+                    className="p-4 hover:bg-slate-900/[0.03] dark:hover:bg-white/[0.04] transition-colors cursor-pointer flex items-center justify-between gap-4 animate-reveal"
                   >
                     {/* Left side details */}
                     <div className="flex items-center gap-3.5 min-w-0 flex-1">
                       <div className={`p-2 rounded-lg shrink-0 ${
                         tx.type === 'due' 
-                          ? 'bg-[rgba(220, 38, 38, 0.08)] text-[#DC2626] dark:bg-[#DC2626]/20' 
-                          : 'bg-[rgba(5, 150, 105, 0.08)] text-[#059669] dark:bg-[#059669]/20'
+                          ? 'bg-ledger-red-subtle text-ledger-red' 
+                          : 'bg-ledger-green-subtle text-ledger-green'
                       }`}>
                         {tx.type === 'due' 
                           ? <ArrowUpRight className="w-4 h-4 stroke-[2.5]" /> 
@@ -1154,9 +1149,9 @@ updateSettings={updateSettings}
                     {/* Right side details */}
                     <div className="text-right shrink-0">
                       <div className={`font-black text-base sm:text-lg tabular-nums font-mono ${
-                        tx.type === 'due' ? 'text-[#DC2626]' : 'text-[#059669]'
+                        tx.type === 'due' ? 'text-ledger-red' : 'text-ledger-green'
                       }`}>
-                        {tx.type === 'due' ? '+' : '-'} ৳ {formatNumber(tx.amount, lang)}
+                        {tx.type === 'due' ? '+' : '-'} ৳{formatNumber(tx.amount, lang)}
                       </div>
                       <div className="text-xs text-[#757575] mt-0.5 font-medium tabular-nums flex items-center justify-end gap-1.5">
                         {tx.isEdited && (
@@ -1182,7 +1177,7 @@ updateSettings={updateSettings}
   {(currentTab === 'home' || (currentTab === 'customers' && !selectedCustomerIdForDetail)) && (
     <button
       onClick={openQuickEntry}
-      className="fixed w-13 h-13 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 rounded-2xl border-2 border-slate-900 dark:border-slate-100 flex items-center justify-center shadow-xl transition-all cursor-pointer z-40 bottom-20 right-5 sm:bottom-24 active:scale-95"
+      className="fixed w-13 h-13 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 rounded-2xl border-2 border-slate-900 dark:border-slate-100 flex items-center justify-center shadow-md transition-all cursor-pointer z-40 bottom-20 right-5 sm:bottom-24 active:scale-95"
       title={t.recordEntry}
       id="fab_entry_btn"
     >
@@ -1190,8 +1185,8 @@ updateSettings={updateSettings}
     </button>
   )}
 
-  {/* BOTTOM NAVIGATION TABS (Mobile Full-Width Dock) */}
-  <nav className="fixed bottom-0 inset-x-0 bg-white dark:bg-[#0D121D] border-t border-slate-200 dark:border-slate-800/80 py-2.5 px-4 z-40 md:hidden transition-colors">
+  {/* BOTTOM NAVIGATION TABS (Mobile Full-Width Frosted Dock) */}
+  <nav className="fixed bottom-0 inset-x-0 glass-chrome-bottom border-t border-slate-200/70 dark:border-white/[0.08] py-2.5 px-4 z-40 md:hidden transition-colors">
     <div className="max-w-md mx-auto flex items-center justify-between">
       
       <button
@@ -1354,14 +1349,14 @@ updateSettings={updateSettings}
       {/* Backdrop */}
       <div
         onClick={() => { if (appDialog.type === 'alert') setAppDialog(null); }}
-        className="absolute inset-0 bg-black/70 backdrop-blur-xs"
+        className="absolute inset-0 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
       />
       
       {/* Modal Dialog Body */}
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="bg-white dark:bg-[#0D121D] border border-slate-200 dark:border-slate-800/80 rounded-2xl p-6 w-full max-w-sm shadow-2xl relative z-10 text-center space-y-5"
+        className="glass-modal border rounded-2xl p-6 w-full max-w-sm relative z-10 text-center space-y-5"
       >
         <div className="space-y-2">
           <h3 className="text-xl font-bold text-slate-950 dark:text-white tracking-tight">
@@ -1380,7 +1375,7 @@ updateSettings={updateSettings}
                 if (appDialog.onCancel) appDialog.onCancel();
                 setAppDialog(null);
               }}
-              className="flex-1 py-3 bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 text-slate-900 dark:text-white font-bold rounded-xl text-xs transition-colors cursor-pointer border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white shadow-2xs"
+              className="flex-1 py-3 bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 text-slate-900 dark:text-white font-bold rounded-xl text-xs transition-colors cursor-pointer border-2 border-slate-300 dark:border-slate-700 shadow-2xs"
             >
               {lang === 'bn' ? 'বাতিল' : 'Cancel'}
             </button>

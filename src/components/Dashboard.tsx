@@ -184,15 +184,24 @@ export default function Dashboard({
   };
 
   // Formatted Today's Date for balanced Hero Header
-  const todayFormatted = useMemo(() => {
+  const { todayFormattedShort, todayFormattedFull } = useMemo(() => {
+    const locale = lang === 'bn' ? 'bn-BD' : 'en-US';
+    const now = new Date();
     try {
-      return new Date().toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', {
-        weekday: 'short',
-        day: 'numeric',
-        month: 'short'
-      });
+      return {
+        todayFormattedShort: now.toLocaleDateString(locale, {
+          weekday: 'short',
+          month: 'long',
+          day: 'numeric'
+        }),
+        todayFormattedFull: now.toLocaleDateString(locale, {
+          weekday: 'long',
+          month: 'long',
+          day: 'numeric'
+        })
+      };
     } catch {
-      return '';
+      return { todayFormattedShort: '', todayFormattedFull: '' };
     }
   }, [lang]);
 
@@ -217,9 +226,16 @@ export default function Dashboard({
           1. HERO BANNER: TOTAL OUTSTANDING BALANCE & ARCHITECTURAL SUMMARY
           (Animates on both Mobile and PC)
           ========================================================================= */}
-      <div className="dash-anim-fade bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 sm:p-7 shadow-xs relative overflow-hidden">
+      <div className="dash-anim-fade surface-hero-glass border rounded-2xl p-5 sm:p-7 relative overflow-hidden">
+        {/* Subtle atmospheric corner aura synced with active accent color */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -top-24 -right-20 w-60 h-60 rounded-full blur-3xl opacity-[0.14] dark:opacity-[0.18]"
+          style={{ backgroundColor: 'var(--accent-color)' }}
+        />
+
         {/* Top Kicker Row: Left Label & Right Live Date */}
-        <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800/70">
+        <div className="relative z-10 flex items-center justify-between gap-3 pb-3 border-b border-slate-200/60 dark:border-white/[0.07]">
           <div className="flex items-center gap-2">
             <ShieldCheck 
               className="w-4 h-4 shrink-0" 
@@ -230,14 +246,15 @@ export default function Dashboard({
             </span>
           </div>
 
-          <div className={`flex items-center gap-1.5 text-xs ${lang === 'bn' ? 'font-bold' : 'font-medium'} text-slate-500 dark:text-slate-400`}>
+          <div className={`flex items-center gap-1.5 text-[11px] sm:text-xs ${lang === 'bn' ? 'font-bold' : 'font-medium'} text-slate-500 dark:text-slate-400 shrink-0 whitespace-nowrap`}>
             <Calendar className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
-            <span>{todayFormatted}</span>
+            <span className="sm:hidden">{todayFormattedShort}</span>
+            <span className="hidden sm:inline">{todayFormattedFull}</span>
           </div>
         </div>
 
         {/* Center Main Stage: Commanding Balance & Symmetrical Action Controls */}
-        <div className="py-5 sm:py-6 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+        <div className="relative z-10 py-5 sm:py-6 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
           <div className="text-center sm:text-left space-y-1">
             <div className="text-3xl sm:text-4xl lg:text-5xl font-black text-slate-950 dark:text-white tabular-nums font-mono tracking-tight leading-none">
               <CountUpSpan value={stats.totalOutstanding} lang={lang} prefix="৳ " enabled={true} />
@@ -256,7 +273,7 @@ export default function Dashboard({
                 triggerHaptic('single');
                 onOpenQuickEntry();
               }}
-              className="px-4 py-3 sm:py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 font-bold text-xs sm:text-sm rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.98] shadow-xs"
+              className="px-4 py-3 sm:py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 font-bold text-xs sm:text-sm rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.98] shadow-sm"
               id="dash_quick_entry_btn"
             >
               <Zap className="w-3.5 h-3.5 fill-current shrink-0" />
@@ -268,7 +285,7 @@ export default function Dashboard({
                 triggerHaptic('single');
                 onViewDailyTxs();
               }}
-              className="px-4 py-3 sm:py-2.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900/70 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 font-semibold text-xs sm:text-sm rounded-xl flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200/90 dark:border-slate-800 transition-all active:scale-[0.98]"
+              className="px-4 py-3 sm:py-2.5 bg-white/65 hover:bg-white/95 dark:bg-white/[0.05] dark:hover:bg-white/[0.1] backdrop-blur-md text-slate-800 dark:text-slate-200 font-semibold text-xs sm:text-sm rounded-xl flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200/80 dark:border-white/10 transition-all active:scale-[0.98]"
               id="dash_daily_journal_btn"
             >
               <span className="truncate">{lang === 'bn' ? 'দৈনিক খাতা' : 'Daily Journal'}</span>
@@ -278,7 +295,7 @@ export default function Dashboard({
         </div>
 
         {/* Bottom Architectural 3-Column Ledger Distribution Strip (All 3 Center-Aligned) */}
-        <div className="pt-4 border-t border-slate-100 dark:border-slate-800/80 grid grid-cols-3 gap-2 divide-x divide-slate-100 dark:divide-slate-800/80">
+        <div className="relative z-10 pt-4 border-t border-slate-200/60 dark:border-white/[0.07] grid grid-cols-3 gap-2 divide-x divide-slate-200/60 dark:divide-white/[0.07]">
           {/* Column 1: Center-aligned */}
           <div className="px-1.5 text-center">
             <div className="text-[11px] sm:text-[13px] font-medium text-slate-500 dark:text-slate-400 truncate">
@@ -347,8 +364,8 @@ export default function Dashboard({
         style={{ animationDelay: '40ms' }}
       >
         {/* MOBILE ONLY (< sm): UNIFIED SYMMETRICAL TODAY'S SUMMARY CARD */}
-        <div className="sm:hidden bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl px-4 py-4 shadow-xs">
-          <div className="grid grid-cols-2 divide-x divide-slate-100 dark:divide-slate-800/80">
+        <div className="sm:hidden surface-glass border rounded-2xl px-4 py-4">
+          <div className="grid grid-cols-2 divide-x divide-slate-200/60 dark:divide-white/[0.07]">
             {/* Left Column: Payments Got Today */}
             <div className="pr-3 text-center space-y-1 min-w-0">
               <div className={`font-bold text-slate-600 dark:text-slate-300 truncate ${compactSubheaderTracking}`}>
@@ -388,7 +405,7 @@ export default function Dashboard({
         </div>
 
         {/* TABLET & DESKTOP ONLY (sm+): CARD 1 — TODAY'S COLLECTIONS */}
-        <div className="hidden sm:flex bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 shadow-xs flex-col justify-between space-y-3.5">
+        <div className="hidden sm:flex surface-glass border rounded-2xl p-5 flex-col justify-between space-y-3.5">
           <div className="flex items-center justify-between">
             <span 
               className={`font-bold ${subheaderTracking}`}
@@ -414,7 +431,7 @@ export default function Dashboard({
             >
               <CountUpSpan value={stats.paymentsToday} lang={lang} prefix="৳ " enabled={isDesktop} />
             </div>
-            <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-slate-100 dark:border-slate-800/70 text-xs text-slate-500 dark:text-slate-400 font-medium">
+            <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-slate-200/60 dark:border-white/[0.07] text-xs text-slate-500 dark:text-slate-400 font-medium">
               <span>{lang === 'bn' ? 'জমা রসিদ সংখ্যা' : 'Receipts logged'}</span>
               <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
                 <CountUpSpan value={stats.paymentsCountToday} lang={lang} enabled={isDesktop} />
@@ -424,21 +441,21 @@ export default function Dashboard({
         </div>
 
         {/* TABLET & DESKTOP ONLY (sm+): CARD 2 — TODAY'S DUES GIVEN */}
-        <div className="hidden sm:flex bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 shadow-xs flex-col justify-between space-y-3.5">
+        <div className="hidden sm:flex surface-glass border rounded-2xl p-5 flex-col justify-between space-y-3.5">
           <div className="flex items-center justify-between">
-            <span className={`font-bold text-rose-600 dark:text-rose-400 ${subheaderTracking}`}>
+            <span className={`font-bold text-ledger-red ${subheaderTracking}`}>
               {lang === 'bn' ? 'আজকের বাকি' : t.duesToday}
             </span>
-            <div className="p-1.5 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-lg">
+            <div className="p-1.5 bg-ledger-red-subtle text-ledger-red rounded-lg">
               <ArrowUpRight className="w-4 h-4 stroke-[2.5]" />
             </div>
           </div>
 
           <div>
-            <div className="text-2xl lg:text-3xl font-black text-rose-600 dark:text-rose-400 tabular-nums font-mono tracking-tight">
+            <div className="text-2xl lg:text-3xl font-black text-ledger-red tabular-nums font-mono tracking-tight">
               <CountUpSpan value={stats.duesToday} lang={lang} prefix="+৳ " enabled={isDesktop} />
             </div>
-            <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-slate-100 dark:border-slate-800/70 text-xs text-slate-500 dark:text-slate-400 font-medium">
+            <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-slate-200/60 dark:border-white/[0.07] text-xs text-slate-500 dark:text-slate-400 font-medium">
               <span>{lang === 'bn' ? 'বাকি চালান সংখ্যা' : 'Dues issued today'}</span>
               <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
                 <CountUpSpan value={stats.duesCountToday} lang={lang} enabled={isDesktop} />
@@ -448,7 +465,7 @@ export default function Dashboard({
         </div>
 
         {/* CARD 3: MODERN COLLECTION EFFICIENCY GAUGE */}
-        <div className="bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col justify-between space-y-3 sm:space-y-3.5">
+        <div className="surface-glass border rounded-2xl p-4 sm:p-5 flex flex-col justify-between space-y-3 sm:space-y-3.5">
           <div className="flex items-center justify-between gap-2">
             <div>
               <span className={`font-bold text-slate-600 dark:text-slate-300 block ${subheaderTracking}`}>
@@ -465,24 +482,28 @@ export default function Dashboard({
 
           <div className="space-y-2">
             {/* Precision Calibrated Progress Track with Quarter Markers */}
-            <div className="relative w-full bg-slate-100 dark:bg-slate-800/90 rounded-lg h-3 p-0.5 overflow-hidden border border-slate-200/70 dark:border-slate-800">
+            <div className="relative w-full bg-slate-200/70 dark:bg-white/[0.06] rounded-full h-3.5 p-[2px] overflow-hidden border border-slate-200/80 dark:border-white/10">
               {/* Subtle 25% / 50% / 75% calibration ticks */}
               <div className="absolute inset-0 grid grid-cols-4 pointer-events-none z-10">
-                <div className="border-r border-slate-300/50 dark:border-slate-700/50" />
-                <div className="border-r border-slate-300/50 dark:border-slate-700/50" />
-                <div className="border-r border-slate-300/50 dark:border-slate-700/50" />
+                <div className="border-r border-slate-300/60 dark:border-white/10" />
+                <div className="border-r border-slate-300/60 dark:border-white/10" />
+                <div className="border-r border-slate-300/60 dark:border-white/10" />
                 <div />
               </div>
 
               {/* GPU-composited scaleX Fill Bar */}
               <div 
-                className="dash-anim-bar-x h-full rounded-[5px] relative flex items-center justify-end overflow-hidden"
+                className="dash-anim-bar-x h-full rounded-full relative overflow-hidden"
                 style={{ 
-                  width: `${stats.duesToday > 0 || stats.paymentsToday > 0 ? Math.max(4, paymentRatio) : 0}%`,
-                  backgroundColor: 'var(--accent-color)'
+                  width: `${paymentRatio > 0 ? Math.max(4, paymentRatio) : 0}%`,
+                  minWidth: paymentRatio > 0 ? '8px' : '0px',
+                  backgroundColor: 'var(--accent-color)',
+                  boxShadow: paymentRatio > 0 ? '0 0 12px -2px var(--accent-glow)' : undefined
                 }}
               >
-                <span className="w-1 h-full bg-white/60 rounded-full mr-0.5 shrink-0" />
+                {paymentRatio > 0 && (
+                  <span className="absolute right-[2px] top-1/2 -translate-y-1/2 w-1 h-1 bg-white/95 rounded-full shadow-[0_0_4px_rgba(255,255,255,0.7)]" />
+                )}
               </div>
             </div>
 
@@ -533,9 +554,9 @@ export default function Dashboard({
             </span>
           </div>
 
-          {/* Theme-Surface-Consistent Segmented Control (Scroll-Safe Tap Activation) */}
+          {/* Theme-Surface-Consistent Frosted Segmented Control */}
           <div
-            className="grid grid-cols-3 sm:inline-flex items-center bg-slate-100 dark:bg-[#0D121D] p-1 rounded-xl border border-slate-200/80 dark:border-slate-800 select-none relative"
+            className="surface-subcard grid grid-cols-3 sm:inline-flex items-center p-1 rounded-xl border border-slate-200/80 dark:border-white/[0.08] select-none relative"
           >
             {/* Option 1: ALL */}
             <button
@@ -555,13 +576,13 @@ export default function Dashboard({
                 <motion.div
                   layoutId="quickBookFilterIndicator"
                   transition={{ type: 'spring', stiffness: 520, damping: 38 }}
-                  className="absolute inset-0 bg-white dark:bg-slate-800 rounded-lg shadow-2xs border border-slate-200/80 dark:border-slate-700 -z-10"
+                  className="absolute inset-0 bg-white/95 dark:bg-white/[0.12] backdrop-blur-md rounded-lg shadow-xs border border-slate-200/90 dark:border-white/15 -z-10"
                 />
               )}
               <span>{lang === 'bn' ? 'সব' : 'All'}</span>
               <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
                 journalFilter === 'all'
-                  ? 'bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200'
+                  ? 'bg-slate-100/90 dark:bg-black/30 text-slate-800 dark:text-slate-200'
                   : 'text-slate-400 dark:text-slate-500'
               }`}>
                 {formatNumber(stats.todayTxs.length, lang)}
@@ -578,7 +599,7 @@ export default function Dashboard({
               }}
               className={`relative z-10 px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
                 journalFilter === 'payment'
-                  ? 'text-emerald-600 dark:text-emerald-400'
+                  ? 'text-ledger-green'
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
             >
@@ -586,14 +607,14 @@ export default function Dashboard({
                 <motion.div
                   layoutId="quickBookFilterIndicator"
                   transition={{ type: 'spring', stiffness: 520, damping: 38 }}
-                  className="absolute inset-0 bg-white dark:bg-slate-800 rounded-lg shadow-2xs border border-emerald-200/80 dark:border-emerald-800/60 -z-10"
+                  className="absolute inset-0 bg-white/95 dark:bg-white/[0.12] backdrop-blur-md rounded-lg shadow-xs border border-ledger-green-subtle -z-10"
                 />
               )}
-              <ArrowDownLeft className="w-3 h-3 stroke-[2.5] text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <ArrowDownLeft className="w-3 h-3 stroke-[2.5] text-ledger-green shrink-0" />
               <span>{lang === 'bn' ? 'আদায়' : 'Got'}</span>
               <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
                 journalFilter === 'payment'
-                  ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                  ? 'bg-ledger-green-subtle text-ledger-green'
                   : 'text-slate-400 dark:text-slate-500'
               }`}>
                 {formatNumber(stats.paymentsCountToday, lang)}
@@ -610,7 +631,7 @@ export default function Dashboard({
               }}
               className={`relative z-10 px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
                 journalFilter === 'due'
-                  ? 'text-rose-600 dark:text-rose-400'
+                  ? 'text-ledger-red'
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
             >
@@ -618,14 +639,14 @@ export default function Dashboard({
                 <motion.div
                   layoutId="quickBookFilterIndicator"
                   transition={{ type: 'spring', stiffness: 520, damping: 38 }}
-                  className="absolute inset-0 bg-white dark:bg-slate-800 rounded-lg shadow-2xs border border-rose-200/80 dark:border-rose-800/60 -z-10"
+                  className="absolute inset-0 bg-white/95 dark:bg-white/[0.12] backdrop-blur-md rounded-lg shadow-xs border border-ledger-red-subtle -z-10"
                 />
               )}
-              <ArrowUpRight className="w-3 h-3 stroke-[2.5] text-rose-600 dark:text-rose-400 shrink-0" />
+              <ArrowUpRight className="w-3 h-3 stroke-[2.5] text-ledger-red shrink-0" />
               <span>{lang === 'bn' ? 'বাকি' : 'Given'}</span>
               <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
                 journalFilter === 'due'
-                  ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300'
+                  ? 'bg-ledger-red-subtle text-ledger-red'
                   : 'text-slate-400 dark:text-slate-500'
               }`}>
                 {formatNumber(stats.duesCountToday, lang)}
@@ -634,10 +655,10 @@ export default function Dashboard({
           </div>
         </div>
 
-        <div className="bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl overflow-hidden shadow-xs">
+        <div className="surface-glass border rounded-2xl overflow-hidden">
           {filteredTxs.length === 0 ? (
             <div className="p-8 sm:p-12 text-center text-slate-500 dark:text-slate-400 flex flex-col items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 border border-slate-200 dark:border-slate-700">
+              <div className="w-10 h-10 rounded-full surface-subcard flex items-center justify-center text-slate-400 border border-slate-200/80 dark:border-white/10">
                 <ClipboardList className="w-5 h-5 stroke-[1.8]" />
               </div>
               <div>
@@ -647,29 +668,29 @@ export default function Dashboard({
               <button
                 type="button"
                 onClick={onViewDailyTxs}
-                className="mt-2 px-3.5 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900/60 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer border border-slate-200 dark:border-slate-800"
+                className="mt-2 px-3.5 py-2 text-xs font-semibold text-slate-800 dark:text-slate-200 surface-subcard hover:bg-white dark:hover:bg-white/[0.08] rounded-xl transition-colors cursor-pointer border border-slate-200/80 dark:border-white/10"
               >
                 {lang === 'bn' ? 'পুরানো খাতা দেখতে চান?' : 'Browse past daily records'}
               </button>
             </div>
           ) : (
-            <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+            <div className="divide-y divide-slate-200/60 dark:divide-white/[0.06]">
               {filteredTxs.slice(0, 6).map((tx) => (
                 <div 
                   key={tx.id}
                   onClick={() => onSelectCustomer(tx.customerId)}
-                  className="p-3.5 sm:p-4 flex items-center justify-between hover:bg-slate-50/70 dark:hover:bg-slate-900/40 transition-colors cursor-pointer group"
+                  className="p-3.5 sm:p-4 flex items-center justify-between hover:bg-slate-900/[0.025] dark:hover:bg-white/[0.035] transition-colors cursor-pointer group"
                 >
                   <div className="flex items-center gap-3 min-w-0 pr-3">
-                    <div className={`p-2 rounded-xl shrink-0 ${
+                    <div className={`p-2 rounded-lg shrink-0 border ${
                       tx.type === 'due' 
-                        ? 'bg-rose-50 text-rose-600 dark:bg-rose-950/30 dark:text-rose-400 border border-rose-200/70 dark:border-rose-900/50' 
-                        : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400 border border-emerald-200/70 dark:border-emerald-900/50'
+                        ? 'bg-ledger-red-subtle text-ledger-red border-ledger-red-subtle' 
+                        : 'bg-ledger-green-subtle text-ledger-green border-ledger-green-subtle'
                     }`}>
                       {tx.type === 'due' ? <ArrowUpRight className="w-4 h-4 stroke-[2.5]" /> : <ArrowDownLeft className="w-4 h-4 stroke-[2.5]" />}
                     </div>
                     <div className="min-w-0">
-                      <div className="text-sm font-bold text-slate-950 dark:text-white truncate group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+                      <div className="text-sm font-bold text-slate-950 dark:text-white truncate group-hover:opacity-80 transition-opacity">
                         {tx.customerName}
                       </div>
                       <div className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5 font-normal">
@@ -680,9 +701,9 @@ export default function Dashboard({
 
                   <div className="text-right shrink-0">
                     <div className={`text-base font-bold tabular-nums font-mono ${
-                      tx.type === 'due' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
+                      tx.type === 'due' ? 'text-ledger-red' : 'text-ledger-green'
                     }`}>
-                      {tx.type === 'due' ? '+' : '-'} ৳ {formatNumber(tx.amount, lang)}
+                      {tx.type === 'due' ? '+' : '-'} ৳{formatNumber(tx.amount, lang)}
                     </div>
                     <div className="text-[11px] text-slate-400 dark:text-slate-500 font-mono mt-0.5 tabular-nums flex items-center justify-end gap-1.5">
                       {tx.isEdited && (
@@ -697,7 +718,7 @@ export default function Dashboard({
               ))}
               
               {filteredTxs.length > 0 && (
-                <div className="p-3 bg-slate-50/40 dark:bg-slate-900/30 flex justify-center border-t border-slate-100 dark:border-slate-800/60">
+                <div className="p-3 bg-slate-900/[0.02] dark:bg-white/[0.02] flex justify-center border-t border-slate-200/60 dark:border-white/[0.06]">
                   <button 
                     onClick={onViewDailyTxs}
                     className="text-xs font-semibold text-slate-800 hover:text-slate-950 dark:text-slate-200 dark:hover:text-white transition-colors flex items-center gap-1.5 cursor-pointer"
@@ -718,7 +739,7 @@ export default function Dashboard({
           ========================================================================= */}
       {stats.topDebtors.length > 0 && (
         <div
-          className={`${isDesktop ? 'dash-anim-fade' : ''} bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 sm:p-6 shadow-xs space-y-3`}
+          className={`${isDesktop ? 'dash-anim-fade' : ''} surface-glass border rounded-2xl p-5 sm:p-6 space-y-3`}
           style={isDesktop ? { animationDelay: '120ms' } : undefined}
         >
           <span className={`font-bold text-slate-600 dark:text-slate-300 block ${subheaderTracking}`}>
@@ -728,7 +749,7 @@ export default function Dashboard({
             {stats.topDebtors.map((debtor) => (
               <div 
                 key={debtor.id}
-                className="p-3.5 rounded-xl border border-slate-200/80 hover:border-slate-400 dark:border-slate-800 dark:hover:border-slate-700 bg-slate-50/60 dark:bg-slate-900/50 flex items-center justify-between gap-2.5 transition-all shadow-2xs"
+                className="p-3.5 rounded-xl border border-slate-200/80 dark:border-white/[0.08] surface-subcard flex items-center justify-between gap-2.5 transition-colors"
               >
                 <div 
                   onClick={() => onSelectCustomer(debtor.id)}
@@ -737,7 +758,7 @@ export default function Dashboard({
                   <div className="text-xs font-bold text-slate-950 dark:text-white truncate group-hover:underline">
                     {debtor.name}
                   </div>
-                  <div className="text-sm font-black font-mono text-rose-600 dark:text-rose-400 tabular-nums mt-0.5">
+                  <div className="text-sm font-black font-mono text-ledger-red tabular-nums mt-0.5">
                     <CountUpSpan value={debtor.outstandingDue} lang={lang} prefix="৳ " enabled={isDesktop} />
                   </div>
                 </div>
@@ -765,7 +786,7 @@ export default function Dashboard({
           (Animates ONLY on PC)
           ========================================================================= */}
       <div
-        className={`${isDesktop ? 'dash-anim-fade' : ''} pt-4 border-t border-slate-200/80 dark:border-slate-800/80`}
+        className={`${isDesktop ? 'dash-anim-fade' : ''} pt-4 border-t border-slate-200/70 dark:border-white/[0.07]`}
         style={isDesktop ? { animationDelay: '160ms' } : undefined}
       >
         <AnalyticsManager 

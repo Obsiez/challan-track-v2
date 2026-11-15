@@ -345,11 +345,13 @@ export default function QuickEntryModal({
         }
         
         try {
-          const parsedBillingDay = Math.min(31, Math.max(1, parseInt(newBillingDay, 10)));
+          const parsedBillingDay = newAccountType === 'credit_card'
+            ? Math.min(31, Math.max(1, parseInt(newBillingDay, 10) || 1))
+            : undefined;
           // Create customer first
           const newId = await createCustomer(customerNameInput, customerPhoneInput, {
             accountType: newAccountType,
-            billingDay: newAccountType === 'credit_card' ? parsedBillingDay : undefined
+            billingDay: parsedBillingDay
           });
           if (newId) {
             custId = newId;
@@ -421,10 +423,10 @@ export default function QuickEntryModal({
 
   return (
     <div
-      className="fixed inset-0 bg-slate-950/65 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-y-auto hide-scrollbar"
+      className="fixed inset-0 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-y-auto hide-scrollbar"
     >
       <div 
-        className="animate-slide-up bg-white dark:bg-[#0D121D] w-full sm:max-w-xl rounded-t-3xl sm:rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
+        className="animate-slide-up glass-modal w-full sm:max-w-xl rounded-t-3xl sm:rounded-2xl border overflow-hidden max-h-[92vh] flex flex-col"
       >
 
         {/* Header */}
@@ -438,7 +440,7 @@ export default function QuickEntryModal({
               triggerHaptic('medium');
               onClose();
             }}
-            className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-lg text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+            className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
             aria-label="Close"
             id="close_modal_btn"
           >
@@ -504,7 +506,7 @@ export default function QuickEntryModal({
                   <ArrowDownLeft className="w-5 h-5 stroke-[2.5]" />
                   <span className="text-sm sm:text-base font-extrabold">
                     {isCreditCardContext
-                      ? (lang === 'bn' ? 'বিল পরিশোধ জমা' : 'Pay Card Bill')
+                      ? (lang === 'bn' ? 'কার্ড বিল পরিশোধ' : 'Pay Card Bill')
                       : t.getPayment}
                   </span>
                   <span className={`text-[11px] text-center leading-tight ${
@@ -554,7 +556,7 @@ export default function QuickEntryModal({
                     placeholder={lang === 'bn' ? 'গ্রাহক পছন্দ করতে খুঁজুন...' : 'Search customer...'}
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-10 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white font-bold text-sm focus:border-slate-950 dark:focus:border-white focus:outline-none transition-colors"
+                    className="w-full pl-10 pr-12 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white font-bold text-sm focus:border-slate-950 dark:focus:border-white focus:outline-none transition-colors"
                   />
                   {searchQuery && (
                     <button
@@ -563,10 +565,11 @@ export default function QuickEntryModal({
                         triggerHaptic('tick');
                         setSearchQuery('');
                       }}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-slate-400 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer"
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-950 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-800/70 transition-colors cursor-pointer"
                       title={lang === 'bn' ? 'খালি করুন' : 'Clear search'}
+                      aria-label={lang === 'bn' ? 'খালি করুন' : 'Clear search'}
                     >
-                      <Delete className="w-4 h-4" />
+                      <Delete className="w-5 h-5" />
                     </button>
                   )}
                 </div>
@@ -582,7 +585,7 @@ export default function QuickEntryModal({
                         className={`p-2.5 text-left rounded-xl border-2 transition-all text-xs truncate flex items-center justify-between cursor-pointer ${
                           selectedCustomerId === c.id
                             ? 'bg-slate-950 text-white border-slate-950 font-bold dark:bg-white dark:text-slate-950 dark:border-white shadow-xs'
-                            : 'bg-slate-50 dark:bg-slate-900/60 hover:bg-slate-100 dark:hover:bg-slate-800 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-slate-200 text-slate-900 dark:text-white font-medium'
+                            : 'bg-slate-50 dark:bg-slate-900/60 hover:bg-slate-100 dark:hover:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-medium'
                         }`}
                       >
                         <span className="truncate flex items-center gap-1.5 min-w-0">
@@ -635,7 +638,7 @@ export default function QuickEntryModal({
                     }`}
                   >
                     <Users className="w-3.5 h-3.5" />
-                    <span>{lang === 'bn' ? 'সাধারণ খতিয়ান' : 'Standard'}</span>
+                    <span>{lang === 'bn' ? 'গ্রাহক খতিয়ান' : 'Customer Ledger'}</span>
                   </button>
                   <button
                     type="button"
@@ -697,7 +700,7 @@ export default function QuickEntryModal({
                     <button
                       type="button"
                       onClick={handlePickContact}
-                      className="px-3 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-slate-200 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors shrink-0 font-bold text-xs"
+                      className="px-3 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-700 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors shrink-0 font-bold text-xs"
                       title={lang === 'bn' ? 'কন্টাক্ট নির্বাচন করুন' : 'Pick Contact'}
                     >
                       <BookUser className="w-4 h-4" />
@@ -740,7 +743,9 @@ export default function QuickEntryModal({
               {t.amountLabel}
             </span>
             <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl font-black text-slate-400 dark:text-slate-500 select-none">৳</span>
+              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-2xl font-black text-slate-400 dark:text-slate-500 select-none pointer-events-none">
+                ৳
+              </span>
               <input
                 type="text"
                 inputMode="decimal"
@@ -782,7 +787,7 @@ export default function QuickEntryModal({
                     setAmountInput('');
                   }
                 }}
-                className="w-full flex items-center text-left gap-2.5 mt-2 p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-slate-200 cursor-pointer transition-colors select-none shadow-2xs"
+                className="w-full flex items-center text-left gap-2.5 mt-2 p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800/80 cursor-pointer transition-colors select-none shadow-2xs"
               >
                 <input
                   type="checkbox"
@@ -791,7 +796,9 @@ export default function QuickEntryModal({
                   readOnly
                 />
                 <span className="text-xs font-bold text-slate-900 dark:text-white select-none">
-                  {lang === 'bn' ? 'সম্পূর্ণ বকেয়া পরিশোধ করুন' : 'Settle complete due'} (৳{formatNumber((currentCustomer as any).outstandingDue, lang)})
+                  {(currentCustomer as any).accountType === 'credit_card'
+                    ? (lang === 'bn' ? 'সম্পূর্ণ কার্ড বিল পরিশোধ করুন' : 'Pay total card balance')
+                    : (lang === 'bn' ? 'সম্পূর্ণ বকেয়া পরিশোধ করুন' : 'Settle complete due')} (৳{formatNumber((currentCustomer as any).outstandingDue, lang)})
                 </span>
               </button>
             )}
@@ -803,7 +810,7 @@ export default function QuickEntryModal({
                   key={val}
                   type="button"
                   onClick={() => handleQuickAddAmount(val)}
-                  className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-900 dark:text-white font-bold rounded-lg border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-slate-200 transition-colors text-xs cursor-pointer tabular-nums font-mono shadow-2xs active:scale-95"
+                  className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-900 dark:text-white font-bold rounded-lg border-2 border-slate-300 dark:border-slate-700 transition-colors text-xs cursor-pointer tabular-nums font-mono shadow-2xs active:scale-95"
                 >
                   +{formatNumber(val, lang)}
                 </button>
@@ -872,12 +879,12 @@ export default function QuickEntryModal({
       </div>
   {/* Duplicate Entry Warning Modal */}
   {duplicateTxWarning && (
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/75 backdrop-blur-xs">
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md">
       <motion.div
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 30 }}
-        className="bg-white dark:bg-[#0D121D] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-2xl p-6 relative"
+        className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border p-6 relative"
       >
         <div className="text-center mb-5">
           <div className="w-12 h-12 bg-[#FFF8E6] dark:bg-amber-950/30 border border-[#FFC043]/40 rounded-xl flex items-center justify-center mx-auto mb-3">
@@ -937,7 +944,7 @@ export default function QuickEntryModal({
               setDuplicateTxWarning(null);
               await executeSave(true);
             }}
-            className="w-full py-3 bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white font-bold rounded-xl cursor-pointer text-xs transition-colors shadow-2xs"
+            className="w-full py-3 bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-700 font-bold rounded-xl cursor-pointer text-xs transition-colors shadow-2xs"
           >
             {t.addAnyway}
           </button>

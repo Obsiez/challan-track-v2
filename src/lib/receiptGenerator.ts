@@ -100,22 +100,22 @@ function drawCornerDownRight(
 }
 
 /**
- * Pre-warms Outfit, Hind Siliguri & Plus Jakarta Sans fonts before drawing on canvas.
+ * Pre-warms Lato, Noto Sans Bengali & Hind Siliguri fonts before drawing on canvas.
  */
 async function ensureReceiptFontsLoaded() {
   if (typeof document !== 'undefined' && document.fonts && typeof document.fonts.load === 'function') {
     try {
       await Promise.race([
         Promise.all([
-          document.fonts.load('16px "Outfit"'),
-          document.fonts.load('bold 16px "Outfit"'),
-          document.fonts.load('800 16px "Outfit"'),
-          document.fonts.load('14px "Hind Siliguri"'),
-          document.fonts.load('bold 14px "Hind Siliguri"'),
-          document.fonts.load('600 14px "Hind Siliguri"'),
-          document.fonts.load('14px "Plus Jakarta Sans"'),
-          document.fonts.load('bold 14px "Plus Jakarta Sans"'),
-          document.fonts.load('600 14px "Plus Jakarta Sans"')
+          document.fonts.load('16px "Lato"'),
+          document.fonts.load('bold 16px "Lato"'),
+          document.fonts.load('900 16px "Lato"'),
+          document.fonts.load('14px "Lato"'),
+          document.fonts.load('bold 14px "Lato"'),
+          document.fonts.load('14px "Noto Sans Bengali"'),
+          document.fonts.load('bold 14px "Noto Sans Bengali"'),
+          document.fonts.load('600 14px "Noto Sans Bengali"'),
+          document.fonts.load('14px "Hind Siliguri"')
         ]),
         new Promise((resolve) => setTimeout(resolve, 600))
       ]);
@@ -189,8 +189,8 @@ export interface ReceiptImageResult {
 }
 
 /**
- * Generates an ultra-sharp, high-DPI POS receipt PNG using Plus Jakarta Sans (English)
- * and Hind Siliguri (Bangla). Displays the last 5 transactions with transparent carry-forward
+ * Generates an ultra-sharp, high-DPI POS receipt PNG using Lato (English)
+ * and Noto Sans Bengali / Hind Siliguri (Bangla). Displays the last 5 transactions with transparent carry-forward
  * opening balance math so all numbers mathematically balance.
  */
 export async function generateReceiptPng(
@@ -264,7 +264,7 @@ export async function generateReceiptPng(
   const toothH = 4;
 
   const fontStack = (size: number, weight: 'normal' | '500' | '600' | 'bold' | '800' = 'normal') =>
-    `${weight} ${size}px "Outfit", "Plus Jakarta Sans", "Hind Siliguri", "Noto Sans Bengali", system-ui, -apple-system, sans-serif`;
+    `${weight} ${size}px "Lato", "Noto Sans Bengali", "Hind Siliguri", system-ui, -apple-system, sans-serif`;
 
   const getRowHeight = (tx: Transaction) => (tx?.description?.trim() ? 42 : 27);
   const rowsHeight = displayTxs.length > 0 
@@ -347,7 +347,7 @@ export async function generateReceiptPng(
   ctx.fillStyle = colors.textMuted;
   ctx.fillText(`${lang === 'bn' ? 'রসিদ নং' : 'SLIP NO'}: `, padX, curY + 11);
   ctx.fillStyle = colors.textValue;
-  ctx.font = `700 9px "JetBrains Mono", "Outfit", monospace`;
+  ctx.font = fontStack(9, 'bold');
   ctx.fillText(slipNo, padX + 48, curY + 11);
 
   ctx.textAlign = 'right';
@@ -574,7 +574,7 @@ export async function generateReceiptPng(
     barCurX += w + 1.2;
   });
 
-  ctx.font = `600 8px "JetBrains Mono", "Outfit", monospace`;
+  ctx.font = fontStack(8, '600');
   ctx.fillStyle = colors.textSubtle;
   ctx.textAlign = 'center';
   ctx.fillText(`* ${slipNo} *`, width / 2, barcodeY + barcodeH + 12);

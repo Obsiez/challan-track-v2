@@ -69,17 +69,20 @@ export default function BiometricLockScreen({
   return (
     <div
       id="biometric_auth_view"
-      className="min-h-screen bg-white dark:bg-[#090D14] text-slate-900 dark:text-slate-100 flex flex-col items-center justify-center p-4 sm:p-6 no-select transition-colors"
+      className="min-h-screen bg-[#f8f9fb] dark:bg-[#06090F] text-slate-900 dark:text-slate-100 flex flex-col items-center justify-center p-4 sm:p-6 no-select transition-colors relative overflow-hidden"
     >
+      <div className="app-ambient-backdrop" aria-hidden="true" />
+      <div className="app-ambient-grid" aria-hidden="true" />
+
       {/* Top Bar: Theme & Language Controls */}
-      <div className="w-full max-w-sm flex items-center justify-between mb-6">
+      <div className="relative z-10 w-full max-w-sm flex items-center justify-between mb-6">
         <button
           type="button"
           onClick={() => {
             triggerHaptic('single');
             onThemeChange(theme === 'dark' ? 'light' : 'dark');
           }}
-          className="px-3 py-1.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer flex items-center gap-2 text-xs font-semibold transition-colors"
+          className="px-3 py-1.5 surface-subcard border rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-white/[0.08] cursor-pointer flex items-center gap-2 text-xs font-semibold transition-colors"
         >
           {theme === 'dark' ? (
             <Sun className="w-3.5 h-3.5 text-white" />
@@ -101,7 +104,7 @@ export default function BiometricLockScreen({
             triggerHaptic('single');
             onLangChange(lang === 'bn' ? 'en' : 'bn');
           }}
-          className="px-3 py-1.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 rounded-lg font-bold text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5 cursor-pointer transition-colors"
+          className="px-3 py-1.5 surface-subcard border rounded-lg font-bold text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-white/[0.08] flex items-center gap-1.5 cursor-pointer transition-colors"
         >
           <Globe className="w-3.5 h-3.5" />
           {lang === 'bn' ? 'English' : 'বাংলা'}
@@ -109,9 +112,14 @@ export default function BiometricLockScreen({
       </div>
 
       {/* Main Biometric Security Card */}
-      <div className="w-full max-w-sm bg-white dark:bg-[#0D121D] border-2 border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xl text-center">
+      <div className="relative z-10 w-full max-w-sm surface-hero-glass border-2 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xl text-center overflow-hidden">
+        <div
+          className="pointer-events-none absolute -right-12 -top-12 w-36 h-36 rounded-full opacity-20 dark:opacity-25 blur-3xl"
+          style={{ background: 'var(--accent-color)' }}
+          aria-hidden="true"
+        />
         {/* Brand Header */}
-        <div className="flex flex-col items-center space-y-2">
+        <div className="flex flex-col items-center space-y-2 relative">
           <ChallanTrackLogo size="xl" variant="compact" />
           <div className={`inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-semibold pt-1 ${
             lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wide'
@@ -122,7 +130,7 @@ export default function BiometricLockScreen({
         </div>
 
         {/* Interactive Biometric Sensor Emblem */}
-        <div className="py-4 flex flex-col items-center justify-center">
+        <div className="py-4 flex flex-col items-center justify-center relative">
           <button
             type="button"
             onClick={handleAuthenticate}
@@ -133,7 +141,7 @@ export default function BiometricLockScreen({
                 ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 text-emerald-600 dark:text-emerald-400 shadow-lg shadow-emerald-500/15'
                 : verifying
                   ? 'bg-slate-100 dark:bg-slate-900 border-slate-900 dark:border-white text-slate-900 dark:text-white animate-pulse'
-                  : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-900/80 dark:hover:bg-slate-800/80 border-slate-300 dark:border-slate-700 hover:border-slate-950 dark:hover:border-white text-slate-900 dark:text-white shadow-sm'
+                  : 'surface-subcard hover:bg-slate-100/80 dark:hover:bg-white/[0.08] border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white shadow-sm'
             }`}
           >
             {verifiedSuccess ? (
@@ -165,7 +173,7 @@ export default function BiometricLockScreen({
         </div>
 
         {/* Logged-in Account Identity Box */}
-        <div className="bg-slate-50 dark:bg-slate-900/70 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 text-left flex items-center justify-between gap-3">
+        <div className="surface-subcard border rounded-xl p-3 text-left flex items-center justify-between gap-3 relative">
           <div className="min-w-0">
             <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 dark:text-slate-500 font-bold">
               {lang === 'bn' ? 'সক্রিয় অ্যাকাউন্ট' : 'Active Account'}

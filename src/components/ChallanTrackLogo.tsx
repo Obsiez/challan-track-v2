@@ -9,30 +9,32 @@ interface ChallanTrackLogoProps {
 }
 
 /**
- * Architectural Obsidian Slate icon mark with the signature BookOpen symbol.
- * Matches the updated favicon, PWA icon, and splash screen design.
+ * Architectural Private-Banking Folio Mark for Challan Track.
  */
 export const ChallanTrackMark: React.FC<{ size?: number; className?: string }> = ({
-  size = 34,
+  size = 38,
   className = ''
 }) => {
-  const iconSize = Math.max(15, Math.round(size * 0.52));
-  const radius = Math.max(7, Math.round(size * 0.24));
+  const iconSize = Math.max(16, Math.round(size * 0.48));
+  const radius = Math.max(10, Math.round(size * 0.28));
   return (
     <div
-      className={`inline-flex items-center justify-center shrink-0 bg-slate-950 dark:bg-white text-white dark:text-slate-950 font-bold select-none border border-slate-800 dark:border-slate-200 shadow-xs transition-colors duration-200 ${className}`}
-      style={{ width: size, height: size, borderRadius: `${radius}px` }}
+      className={`relative inline-flex items-center justify-center shrink-0 bg-slate-950 dark:bg-white text-white dark:text-slate-950 font-bold select-none shadow-sm transition-all duration-200 ${className}`}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: `${radius}px`,
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16), 0 4px 12px -4px rgba(15,23,42,0.28)'
+      }}
       aria-label="Challan Track"
     >
-      <BookOpen style={{ width: iconSize, height: iconSize }} className="stroke-[2.2] text-white dark:text-slate-950 transition-colors duration-200" />
+      <BookOpen style={{ width: iconSize, height: iconSize }} className="stroke-[2] transition-colors duration-200" />
     </div>
   );
 };
 
 /**
- * Pure, high-end typographic brand identity for Challan Track.
- * Sophisticated geometric typography inspired by Stripe and Linear:
- * High contrast, razor-sharp letter-spacing, and zero cheap gradients or colorful vomit.
+ * Refined geometric fintech brand typography for Challan Track.
  */
 export default function ChallanTrackLogo({
   size = 'md',
@@ -46,26 +48,48 @@ export default function ChallanTrackLogo({
     : size === 'sm'
     ? 'text-lg sm:text-xl'
     : size === 'md'
-    ? 'text-xl sm:text-2xl'
+    ? 'text-xl sm:text-[22px]'
     : size === 'lg'
     ? 'text-3xl sm:text-4xl'
     : 'text-4xl sm:text-5xl';
 
   if (variant === 'icon') {
-    return <ChallanTrackMark size={typeof size === 'number' ? size : 30} className={className} />;
+    return <ChallanTrackMark size={typeof size === 'number' ? size : 36} className={className} />;
+  }
+
+  if (variant === 'mark-and-text' || variant === 'full') {
+    return (
+      <div className={`inline-flex items-center gap-3 select-none ${className}`}>
+        <ChallanTrackMark size={variant === 'full' ? 42 : 36} />
+        <div className="flex flex-col leading-none">
+          <div className={`flex items-baseline font-display ${pixelTextSize}`}>
+            <span className="font-extrabold text-slate-950 dark:text-white tracking-[-0.03em]">
+              Challan
+            </span>
+            <span className="font-medium text-slate-500 dark:text-slate-400 tracking-[-0.015em] ml-1">
+              Track
+            </span>
+          </div>
+          {variant === 'full' && (
+            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 tracking-wide mt-1">
+              Client Credit &amp; Ledger
+            </span>
+          )}
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className={`inline-flex items-baseline gap-1.5 select-none ${className}`}>
-      <div className={`flex items-baseline tracking-tight ${pixelTextSize}`}>
-        <span className="font-extrabold text-slate-950 dark:text-white tracking-[-0.035em]">
+      <div className={`flex items-baseline font-display ${pixelTextSize}`}>
+        <span className="font-extrabold text-slate-950 dark:text-white tracking-[-0.03em]">
           Challan
         </span>
-        <span className="font-light text-slate-400 dark:text-slate-400 tracking-[-0.015em] ml-1">
+        <span className="font-medium text-slate-500 dark:text-slate-400 tracking-[-0.015em] ml-1">
           Track
         </span>
       </div>
     </div>
   );
 }
-

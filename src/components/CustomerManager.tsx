@@ -263,6 +263,7 @@ const parseFirestoreDate = (dateVal: any): Date => {
 interface CustomerManagerProps {
  customers: Customer[];
  transactions: Transaction[];
+ allTransactions?: Transaction[];
  createCustomer: (
    name: string,
    phone: string,
@@ -305,6 +306,7 @@ interface CustomerManagerProps {
 export default function CustomerManager({
  customers,
  transactions,
+ allTransactions,
  createCustomer,
  addTransaction,
  updateCustomerDetails,
@@ -694,7 +696,8 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     const amountVal = parseFloat(cleaned);
     if (isNaN(amountVal) || amountVal <= 0) return null;
 
-    let customerTxs = transactions.filter(t => t.customerId === selectedCustomerId);
+    const sourceTxs = allTransactions ?? transactions;
+    let customerTxs = sourceTxs.filter(t => t.customerId === selectedCustomerId);
     if (customerTxs.length === 0 && typeof localStorage !== 'undefined') {
       try {
         const userId = customers.find(c => c.id === selectedCustomerId)?.userId;
@@ -835,9 +838,15 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     return transactions.filter(t => t.customerId === selectedCustomerId);
   }, [transactions, selectedCustomerId]);
 
+ const selectedCustomerAllTransactions = useMemo(() => {
+    if (!selectedCustomerId) return [];
+    const source = allTransactions ?? transactions;
+    return source.filter(t => t.customerId === selectedCustomerId);
+  }, [allTransactions, transactions, selectedCustomerId]);
+
   const selectedCustomerMetrics = useMemo(() => {
     if (!selectedCustomer) return { totalBilled: 0, totalPaid: 0, lifetimeVolume: 0, txCount: 0 };
-    const txs = selectedCustomerTransactions;
+    const txs = selectedCustomerAllTransactions;
     const totalBilled = txs.filter(t => t.type === 'due').reduce((s, t) => s + t.amount, 0);
     const totalPaid = txs.filter(t => t.type === 'payment').reduce((s, t) => s + t.amount, 0);
     return {
@@ -846,7 +855,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       lifetimeVolume: totalBilled + totalPaid,
       txCount: txs.length
     };
-  }, [selectedCustomer, selectedCustomerTransactions]);
+  }, [selectedCustomer, selectedCustomerAllTransactions]);
 
   const handleAutoCreateAndOpenCustomer = async (customerName: string, phone: string) => {
     const trimmedName = customerName.trim() || phone;
@@ -997,7 +1006,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
         : 'light';
       const result = await generateReceiptPng(
         selectedCustomer,
-        selectedCustomerTransactions,
+        selectedCustomerAllTransactions,
         lang,
         currentTheme
       );
@@ -1016,7 +1025,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     }
   };
 
-  // Credit Card Billing Cycle Metrics: Unbilled (This Month) vs Billed (Last Month) with Unpaid Carry-Over
+  // Credit Card Billing Cycle Metrics: Unbilled (Current Cycle) vs Billed (Bills close only on Billing Day)
   const creditCardCycleData = useMemo(() => {
     if (!selectedCustomer || selectedCustomer.accountType !== 'credit_card') return null;
 
@@ -1028,13 +1037,15 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     };
 
     const now = new Date();
+    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
     const thisMonthCutoff = getCycleBoundary(now.getFullYear(), now.getMonth(), billingDay);
 
     let lastStatementDate: Date;
     let prevStatementDate: Date;
     let nextStatementDate: Date;
+    const isBillingDayToday = todayMidnight.getTime() === thisMonthCutoff.getTime();
 
-    if (now.getTime() >= thisMonthCutoff.getTime()) {
+    if (todayMidnight.getTime() >= thisMonthCutoff.getTime()) {
       lastStatementDate = thisMonthCutoff;
       prevStatementDate = getCycleBoundary(now.getFullYear(), now.getMonth() - 1, billingDay);
       nextStatementDate = getCycleBoundary(now.getFullYear(), now.getMonth() + 1, billingDay);
@@ -1049,13 +1060,17 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
     const unbilledTxs: Transaction[] = [];
     const billedTxs: Transaction[] = [];
+    const lastCycleOnlyTxs: Transaction[] = [];
 
-    selectedCustomerTransactions.forEach((tx) => {
+    selectedCustomerAllTransactions.forEach((tx) => {
       const txMs = parseFirestoreDate(tx.date).getTime();
       if (txMs >= lastCutoffMs) {
         unbilledTxs.push(tx);
-      } else if (txMs >= prevCutoffMs && txMs < lastCutoffMs) {
+      } else {
         billedTxs.push(tx);
+        if (txMs >= prevCutoffMs) {
+          lastCycleOnlyTxs.push(tx);
+        }
       }
     });
 
@@ -1066,18 +1081,18 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       .filter((t) => t.type === 'payment')
       .reduce((s, t) => s + t.amount, 0);
 
-    const lastMonthCycleSpend = billedTxs
+    const lastMonthCycleSpend = lastCycleOnlyTxs
       .filter((t) => t.type === 'due')
       .reduce((s, t) => s + t.amount, 0);
-    const lastMonthCyclePayments = billedTxs
+    const lastMonthCyclePayments = lastCycleOnlyTxs
       .filter((t) => t.type === 'payment')
       .reduce((s, t) => s + t.amount, 0);
 
-    // Exact statement balance at the moment the last statement closed (includes any older unpaid balance carried into it)
+    // Exact statement balance at the moment the last statement closed on billingDay (includes any older unpaid balance carried into it)
     const rawStatementAtCutoff = selectedCustomer.outstandingDue - thisMonthSpend + paymentsSinceCutoff;
     const billedStatementAmount = Math.max(0, rawStatementAtCutoff);
 
-    // Payments made since cutoff pay down the Billed (Last Month) statement first; any excess reduces Unbilled (This Month)
+    // Payments made since cutoff pay down the Billed statement first; any excess reduces Unbilled (Current Cycle)
     const paidTowardBilled = Math.min(billedStatementAmount, paymentsSinceCutoff);
     const unpaidCarryOver = Math.max(0, billedStatementAmount - paymentsSinceCutoff);
     const excessPaymentOnUnbilled = Math.max(0, paymentsSinceCutoff - billedStatementAmount);
@@ -1091,16 +1106,19 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       billedStatementAmount - lastMonthCycleSpend + lastMonthCyclePayments
     );
 
-    const daysUntilNextStatement = Math.max(
-      1,
-      Math.ceil((nextStatementDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-    );
+    const daysUntilNextStatement = isBillingDayToday
+      ? 0
+      : Math.max(
+          1,
+          Math.round((nextStatementDate.getTime() - todayMidnight.getTime()) / (1000 * 60 * 60 * 24))
+        );
 
     const lastMonthEndDisplay = new Date(lastStatementDate.getTime() - 24 * 60 * 60 * 1000);
     const thisMonthEndDisplay = new Date(nextStatementDate.getTime() - 24 * 60 * 60 * 1000);
 
     return {
       billingDay,
+      isBillingDayToday,
       lastStatementDate,
       prevStatementDate,
       nextStatementDate,
@@ -1120,7 +1138,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       totalPayableWithCarryOver,
       priorCarryIntoLastMonth
     };
-  }, [selectedCustomer, selectedCustomerTransactions]);
+  }, [selectedCustomer, selectedCustomerAllTransactions]);
 
   const groupedTransactions = useMemo(() => {
     const sourceTxs =
@@ -1320,7 +1338,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                   {t.customerAccounts}
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                  {lang === 'bn' ? `${formatNumber(customers.length, lang)} জন সংরক্ষিত গ্রাহক প্রোফাইল` : `${formatNumber(customers.length, lang)} customer profiles on ledger`}
+                  {lang === 'bn' ? `${formatNumber(customers.length, lang)}টি গ্রাহক প্রোফাইল খতিয়ানে` : `${formatNumber(customers.length, lang)} customer profiles on ledger`}
                 </p>
               </div>
             </div>
@@ -1330,10 +1348,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 triggerHaptic('single');
                 setShowAddForm(!showAddForm);
               }}
-              className="px-4 py-2 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 font-bold rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer text-xs sm:text-sm active:scale-[0.98] shadow-xs"
+              className="px-4 py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 font-bold rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer text-xs shrink-0 active:scale-[0.98] shadow-xs"
               id="add_customer_btn"
             >
-              <UserPlus className="w-3.5 h-3.5 stroke-[2.2]" />
+              <UserPlus className="w-4 h-4 stroke-[2.5]" />
               <span>{t.createAccount}</span>
             </button>
           </div>
@@ -1346,10 +1364,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
                 onSubmit={handleCreateCustomer}
-                className="bg-white dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 p-5 sm:p-6 rounded-xl shadow-xs space-y-4"
+                className="surface-glass border p-5 sm:p-6 rounded-2xl space-y-4"
               >
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-3">
-                  <div className="text-xs font-mono uppercase tracking-[0.14em] font-bold text-slate-500 dark:text-slate-400">
+                  <div className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-[0.14em]'}`}>
                     {t.newAccountDetails}
                   </div>
                   <button 
@@ -1358,47 +1376,32 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                       triggerHaptic('medium');
                       setShowAddForm(false);
                     }}
-                    className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-lg text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+                    className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
                   >
                     <X className="w-4 h-4" />
                   </button>
                 </div>
 
-                {/* Account Type Selector: Standard Ledger vs Credit Card / Bill Tracker */}
+                {/* Compact Side-by-Side Account Type Selector: Customer Ledger vs Credit Card */}
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 font-semibold block">
-                    {lang === 'bn' ? 'হিসাবের ধরন নির্বাচন করুন' : 'Account Perspective / Type'}
+                  <label className={`text-[11px] text-slate-500 dark:text-slate-400 font-semibold block ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'}`}>
+                    {lang === 'bn' ? 'হিসাবের ধরন' : 'Account Type'}
                   </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
                       onClick={() => {
                         triggerHaptic('single');
                         setNewAccountType('standard');
                       }}
-                      className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer flex items-start gap-3 ${
+                      className={`py-2.5 px-3 rounded-xl border-2 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
                         newAccountType === 'standard'
                           ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-xs'
                           : 'bg-slate-50 hover:bg-slate-100 dark:bg-[#0D121D] dark:hover:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200'
                       }`}
                     >
-                      <div className={`p-2 rounded-lg shrink-0 mt-0.5 ${
-                        newAccountType === 'standard'
-                          ? 'bg-white/15 dark:bg-slate-950/15'
-                          : 'bg-slate-200/70 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-                      }`}>
-                        <Users className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs sm:text-sm font-extrabold leading-tight">
-                          {lang === 'bn' ? 'সাধারণ গ্রাহক খতিয়ান' : 'Standard Customer Ledger'}
-                        </div>
-                        <p className={`text-[11px] mt-0.5 leading-snug ${
-                          newAccountType === 'standard' ? 'opacity-85 font-medium' : 'text-slate-500 dark:text-slate-400'
-                        }`}>
-                          {lang === 'bn' ? 'বাকি প্রদান ও পেমেন্ট আদায়' : 'Give Due & Got Payment'}
-                        </p>
-                      </div>
+                      <Users className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">{lang === 'bn' ? 'গ্রাহক খতিয়ান' : 'Customer Ledger'}</span>
                     </button>
 
                     <button
@@ -1407,36 +1410,21 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                         triggerHaptic('single');
                         setNewAccountType('credit_card');
                       }}
-                      className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer flex items-start gap-3 ${
+                      className={`py-2.5 px-3 rounded-xl border-2 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
                         newAccountType === 'credit_card'
                           ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-xs'
                           : 'bg-slate-50 hover:bg-slate-100 dark:bg-[#0D121D] dark:hover:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200'
                       }`}
                     >
-                      <div className={`p-2 rounded-lg shrink-0 mt-0.5 ${
-                        newAccountType === 'credit_card'
-                          ? 'bg-white/15 dark:bg-slate-950/15'
-                          : 'bg-slate-200/70 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-                      }`}>
-                        <CreditCard className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs sm:text-sm font-extrabold leading-tight">
-                          {lang === 'bn' ? 'ক্রেডিট কার্ড / বিল ট্র্যাকার' : 'Credit Card / Bill Tracker'}
-                        </div>
-                        <p className={`text-[11px] mt-0.5 leading-snug ${
-                          newAccountType === 'credit_card' ? 'opacity-85 font-medium' : 'text-slate-500 dark:text-slate-400'
-                        }`}>
-                          {lang === 'bn' ? 'কার্ড খরচ, বিলিং তারিখ ও মাসিক হিসাব' : 'Add Card Bills, Pay Bill & Monthly Cycle'}
-                        </p>
-                      </div>
+                      <CreditCard className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">{lang === 'bn' ? 'ক্রেডিট কার্ড' : 'Credit Card'}</span>
                     </button>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 font-semibold">
+                    <label className={`text-[11px] text-slate-500 dark:text-slate-400 font-semibold ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'}`}>
                       {newAccountType === 'credit_card'
                         ? (lang === 'bn' ? 'কার্ড / হিসাবের নাম' : 'Card / Account Name')
                         : t.customerName}
@@ -1451,7 +1439,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 font-semibold">{t.phoneNumber}</label>
+                    <label className={`text-[11px] text-slate-500 dark:text-slate-400 font-semibold ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'}`}>{t.phoneNumber}</label>
                     <div className="flex gap-2">
                       <input
                         type="tel"
@@ -1463,7 +1451,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                       <button
                         type="button"
                         onClick={() => handlePickContact(setNewPhone, (name) => { if (!newName.trim()) setNewName(name); }, true)}
-                        className="px-3 bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors shrink-0 font-bold text-xs"
+                        className="px-3 bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-700 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors shrink-0 font-bold text-xs"
                         title={lang === 'bn' ? 'কন্টাক্ট নির্বাচন করুন' : 'Pick Contact'}
                       >
                         <BookUser className="w-3.5 h-3.5 text-slate-700 dark:text-slate-300" />
@@ -1478,7 +1466,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                   <div className="p-3.5 rounded-xl bg-slate-50/80 dark:bg-slate-900/50 border-2 border-slate-200 dark:border-slate-800">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                       <div>
-                        <label className="text-[11px] font-mono uppercase tracking-wider text-slate-700 dark:text-slate-200 font-bold flex items-center gap-1.5">
+                        <label className={`text-[11px] text-slate-700 dark:text-slate-200 font-bold flex items-center gap-1.5 ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'}`}>
                           <Calendar className="w-3.5 h-3.5 text-slate-700 dark:text-slate-300" />
                           <span>{lang === 'bn' ? 'স্টেটমেন্ট বিলিং তারিখ (১-৩১)' : 'Statement Billing Day (1–31)'}</span>
                         </label>
@@ -1548,15 +1536,15 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             )}
           </AnimatePresence>
 
-          {/* Search bar with distinctive bold border */}
+          {/* Search bar with distinctive bold border & subtle glass translucency */}
           <div className="relative">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 z-10 pointer-events-none" />
             <input
               type="text"
               placeholder={t.searchPlaceholder}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-10 py-3 bg-white dark:bg-[#0D121D] border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white rounded-2xl text-slate-950 dark:text-white text-sm focus:outline-none font-medium placeholder:text-slate-400 transition-colors shadow-xs"
+              className="surface-glass w-full pl-10 pr-12 py-3 border-2 border-slate-300 dark:border-slate-700 rounded-2xl text-slate-950 dark:text-white text-sm focus:outline-none font-medium placeholder:text-slate-400 transition-colors"
             />
             {searchQuery && (
               <button
@@ -1565,16 +1553,17 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                   triggerHaptic('tick');
                   setSearchQuery('');
                 }}
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-slate-400 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70 transition-colors cursor-pointer active:scale-95"
                 title={lang === 'bn' ? 'খালি করুন' : 'Clear search'}
+                aria-label={lang === 'bn' ? 'খালি করুন' : 'Clear search'}
               >
-                <Delete className="w-3.5 h-3.5" />
+                <Delete className="w-5 h-5" />
               </button>
             )}
           </div>
 
           {/* Client Status Filter Chips (Left) & Sort Dropdown (Right) */}
-          <div className="flex items-center justify-between gap-2 relative select-none z-10 pt-1">
+          <div className="flex items-center justify-between gap-2 relative select-none pt-1">
             {/* Minimalist Oblong Pill Filter Indicators (Press & Slide or Tap) */}
             <div
               ref={filterPillsContainerRef}
@@ -1628,7 +1617,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                     className={`w-7 h-3.5 rounded-full border-2 transition-all cursor-pointer shrink-0 active:scale-95 ${
                       isActive
                         ? 'bg-slate-950 border-slate-950 dark:bg-white dark:border-white shadow-2xs'
-                        : 'bg-transparent hover:bg-slate-100 dark:hover:bg-slate-800/40 border-slate-300 dark:border-slate-700/80 hover:border-slate-900 dark:hover:border-slate-500'
+                        : 'bg-transparent hover:bg-slate-100 dark:hover:bg-slate-800/40 border-slate-300 dark:border-slate-700/80'
                     }`}
                   />
                 );
@@ -1643,7 +1632,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                   triggerHaptic('single');
                   setIsSortOpen(!isSortOpen);
                 }}
-                className="px-3 py-1.5 rounded-xl font-bold text-xs border-2 border-slate-300 dark:border-slate-700/80 hover:border-slate-900 dark:hover:border-white bg-white hover:bg-slate-50 dark:bg-[#161a22] dark:hover:bg-slate-800 text-slate-900 dark:text-white flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs active:scale-95"
+                className="surface-glass-interactive px-3 py-1.5 rounded-xl font-bold text-xs border-2 border-slate-300 dark:border-slate-700/80 text-slate-900 dark:text-white flex items-center gap-1.5 cursor-pointer active:scale-95"
               >
                 <ArrowUpDown className="w-3.5 h-3.5 stroke-[2.2]" />
                 <span>{lang === 'bn' ? 'সাজান' : 'Sort'}</span>
@@ -1656,13 +1645,13 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                     className="fixed inset-0 z-40" 
                     onClick={() => setIsSortOpen(false)} 
                   />
-                  <div className="absolute right-0 mt-1.5 w-48 bg-white dark:bg-[#0D121D] border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-50 p-1.5 space-y-0.5 animate-reveal">
+                  <div className="absolute right-0 mt-1.5 w-48 glass-dropdown border border-slate-200/80 dark:border-white/15 rounded-2xl z-50 p-1.5 space-y-0.5 animate-reveal">
                     {(['recent', 'high_balance', 'low_balance'] as const).map((option) => {
                        const label = option === 'recent'
                           ? (lang === 'bn' ? 'সাম্প্রতিক' : 'Recent')
                           : option === 'high_balance'
-                            ? (lang === 'bn' ? 'বেশি বাকি' : 'High Balance')
-                            : (lang === 'bn' ? 'কম বাকি' : 'Low Balance');
+                            ? (lang === 'bn' ? 'সর্বোচ্চ ব্যালেন্স' : 'High Balance')
+                            : (lang === 'bn' ? 'সর্বনিম্ন ব্যালেন্স' : 'Low Balance');
                        return (
                          <button
                            key={option}
@@ -1733,21 +1722,21 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                     onClick={() => {
                       setSelectedCustomerId(selectedCustomerId === c.id ? null : c.id);
                     }}
-                    className={`bg-white dark:bg-[#0D121D] hover:bg-slate-50/90 dark:hover:bg-slate-900/60 border-2 p-4 sm:p-5 pb-3 sm:pb-3.5 rounded-2xl transition-all cursor-pointer flex flex-col justify-between gap-3 group shadow-xs ${
+                    className={`surface-glass-interactive border-2 p-4 sm:p-5 pb-3 sm:pb-3.5 rounded-2xl cursor-pointer flex flex-col justify-between gap-3 group ${
                       selectedCustomerId === c.id 
                         ? 'border-slate-950 dark:border-white ring-2 ring-slate-950/20 dark:ring-white/20' 
-                        : 'border-slate-300 dark:border-slate-700 hover:border-slate-950 dark:hover:border-slate-200'
+                        : 'border-slate-300/90 dark:border-slate-700/90'
                     }`}
                   >
                     {/* Top Row: Avatar + Name & Phone + Balance */}
                     <div className="flex items-center justify-between gap-3">
                       {/* Left: Initials + Name */}
                       <div className="flex items-center gap-3 min-w-0 pr-2">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs shrink-0 border-2 ${
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-black text-xs shrink-0 border-2 ${
                           isDue 
-                            ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400 border-rose-300 dark:border-rose-900' 
+                            ? 'bg-ledger-red-subtle text-ledger-red border-ledger-red-subtle' 
                             : isOverpaid 
-                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-300 dark:border-emerald-900'
+                            ? 'bg-ledger-green-subtle text-ledger-green border-ledger-green-subtle'
                             : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
                         }`}>
                           {initials}
@@ -1761,7 +1750,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                               window.history.pushState({ ...window.history.state, modal: 'pinActionCustomer' }, '');
                               setPinActionCustomer(c);
                             }}
-                            className="text-sm sm:text-base font-extrabold text-slate-950 dark:text-white truncate flex items-center gap-1.5 cursor-pointer group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors"
+                            className="text-sm sm:text-base font-extrabold text-slate-950 dark:text-white truncate flex items-center gap-1.5 cursor-pointer group-hover:opacity-80 transition-opacity"
                           >
                             <span className="truncate">{c.name}</span>
                             {pinnedCustomerNames.includes(c.name) && (
@@ -1792,16 +1781,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                       <div className="text-right shrink-0">
                         <div className={`text-base sm:text-lg font-black font-mono tabular-nums truncate ${
                           isDue
-                            ? 'text-rose-600 dark:text-rose-400'
+                            ? 'text-ledger-red'
                             : isOverpaid
-                            ? 'text-emerald-600 dark:text-emerald-400'
+                            ? 'text-ledger-green'
                             : 'text-slate-400 dark:text-slate-500'
                         }`}>
-                          {c.outstandingDue === 0 ? (
-                            lang === 'bn' ? '৳ ০' : '৳ 0'
-                          ) : (
-                            `${c.outstandingDue < 0 ? '-' : ''}৳ ${formatNumber(Math.abs(c.outstandingDue), lang)}`
-                          )}
+                          {c.outstandingDue === 0
+                            ? `৳ ${lang === 'bn' ? '০' : '0'}`
+                            : `${c.outstandingDue < 0 ? '-' : ''}৳ ${formatNumber(Math.abs(c.outstandingDue), lang)}`}
                         </div>
                       </div>
                     </div>
@@ -1809,12 +1796,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                     {/* Bottom Row: Informative Status Strip + Card Tag + 1-Tap Quick Action Shortcuts */}
                     <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs h-[32px]">
                       <div className="flex items-center gap-1.5 min-w-0">
-                        {/* Status Badge with Bold Hairline */}
-                        <span className={`px-2 py-1 rounded-md text-[10px] font-mono uppercase tracking-wider font-bold border leading-none inline-flex items-center gap-1 shrink-0 ${
+                        {/* Status Badge with Subtle Balanced Hairline */}
+                        <span className={`px-2 py-1 rounded-md text-[10px] font-bold border leading-none inline-flex items-center gap-1 shrink-0 ${
+                          lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'
+                        } ${
                           isDue
-                            ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300 border-rose-300 dark:border-rose-800'
+                            ? 'bg-ledger-red-subtle text-ledger-red border-ledger-red-subtle'
                             : isOverpaid
-                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                            ? 'bg-ledger-green-subtle text-ledger-green border-ledger-green-subtle'
                             : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700'
                         }`}>
                           {c.accountType === 'credit_card' ? (
@@ -1826,17 +1815,19 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                               lang === 'bn' ? 'বিল পরিশোধিত' : 'Bill Settled'
                             )
                           ) : isDue ? (
-                            lang === 'bn' ? 'বকেয়া দেনাদার' : 'Due Balance'
+                            lang === 'bn' ? 'বকেয়া ব্যালেন্স' : 'Due Balance'
                           ) : isOverpaid ? (
-                            lang === 'bn' ? 'অগ্রিম জমা' : 'Advance Credit'
+                            lang === 'bn' ? 'অগ্রিম ক্রেডিট' : 'Advance Credit'
                           ) : (
-                            lang === 'bn' ? 'হিসাব সম্পন্ন' : 'Settled'
+                            lang === 'bn' ? 'পরিশোধিত' : 'Settled'
                           )}
                         </span>
 
                         {/* Card Tag matching border, font, and background of adjacent status tag */}
                         {c.accountType === 'credit_card' && (
-                          <span className="px-2 py-1 rounded-md text-[10px] font-mono uppercase tracking-wider font-bold border leading-none inline-flex items-center gap-1 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700 shrink-0">
+                          <span className={`px-2 py-1 rounded-md text-[10px] font-bold border leading-none inline-flex items-center gap-1 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700 shrink-0 ${
+                            lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'
+                          }`}>
                             <CreditCard className="w-2.5 h-2.5 shrink-0" />
                             <span>{lang === 'bn' ? 'কার্ড' : 'Card'}</span>
                           </span>
@@ -1866,7 +1857,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                                 e.stopPropagation();
                                 triggerHaptic('single');
                               }}
-                              className="p-1.5 rounded-lg border-2 border-slate-300 hover:border-slate-800 dark:border-slate-700 dark:hover:border-slate-300 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300 transition-colors shadow-2xs active:scale-95 flex items-center justify-center"
+                              className="p-1.5 rounded-lg border-2 border-slate-300 dark:border-slate-700 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 transition-colors shadow-2xs active:scale-95 flex items-center justify-center"
                               title={lang === 'bn' ? 'কল করুন' : 'Call'}
                             >
                               <Phone className="w-3.5 h-3.5" />
@@ -1895,7 +1886,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             })}
 
             {filteredCustomers.length === 0 && (
-              <div className="col-span-1 sm:col-span-2 p-10 text-center bg-white dark:bg-[#0F1623] rounded-xl border border-dashed border-slate-200 dark:border-slate-800 text-slate-500">
+              <div className="col-span-1 sm:col-span-2 p-10 text-center surface-glass rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 text-slate-500">
                 <Users className="w-8 h-8 mx-auto stroke-[1.5] mb-2 text-slate-400" />
                 <p className="font-bold text-sm text-slate-900 dark:text-white">{t.noCustomersFound}</p>
                 <p className="text-xs mt-1 text-slate-500 dark:text-slate-400">{t.createOneAbove}</p>
@@ -1915,7 +1906,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  setIsEditingCustomer(false);
   setLedgerLimit(5);
   }}
-  className="flex items-center gap-2 px-3.5 py-2 bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-900 font-bold text-slate-900 dark:text-slate-100 rounded-xl text-xs cursor-pointer transition-all border-2 border-slate-900/60 dark:border-slate-400 shadow-2xs active:scale-95"
+  className="surface-glass-interactive flex items-center gap-2 px-3.5 py-2 font-bold text-slate-900 dark:text-slate-100 rounded-xl text-xs cursor-pointer border-2 border-slate-900/60 dark:border-slate-400 active:scale-95"
  id="back_to_list_btn"
  >
  <ArrowLeft className="w-4 h-4 stroke-[2.5]" />
@@ -1923,7 +1914,13 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  </button>
 
  {/* Customer Profile card */}
- <div className="bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 sm:p-7 shadow-xs space-y-6 relative overflow-hidden">
+ <div className="surface-hero-glass border rounded-2xl p-4 sm:p-6 space-y-4 sm:space-y-5 relative overflow-hidden">
+  {/* Subtle atmospheric accent glow behind profile card */}
+  <div
+    aria-hidden="true"
+    className="pointer-events-none absolute -top-24 -right-24 w-56 h-56 rounded-full blur-3xl opacity-[0.11] dark:opacity-[0.15]"
+    style={{ backgroundColor: 'var(--accent-color)' }}
+  />
  
  {/* Edit and Pin Buttons on the Top Right Side of the Card */}
   {!isEditingCustomer && (
@@ -1934,7 +1931,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           triggerHaptic('single');
           togglePinCustomer(selectedCustomer.id);
         }}
-        className="p-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-xl transition-colors cursor-pointer flex items-center justify-center"
+        className="p-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border-2 border-slate-300 dark:border-slate-700 rounded-xl transition-colors cursor-pointer flex items-center justify-center"
         title={pinnedCustomerNames.includes(selectedCustomer.name) ? (lang === 'bn' ? 'আনপিন করুন' : 'Unpin Customer') : (lang === 'bn' ? 'পিন করুন' : 'Pin Customer')}
       >
         <Pin className={`w-4 h-4 ${pinnedCustomerNames.includes(selectedCustomer.name) ? 'text-amber-500 fill-amber-500 rotate-45' : 'text-slate-500 dark:text-slate-400'}`} />
@@ -1946,7 +1943,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           handleGenerateReceiptImage();
         }}
         disabled={isGeneratingReceipt}
-        className="p-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-xl transition-colors cursor-pointer flex items-center justify-center"
+        className="p-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border-2 border-slate-300 dark:border-slate-700 rounded-xl transition-colors cursor-pointer flex items-center justify-center"
         title={lang === 'bn' ? 'রসিদ ইমেজ তৈরি ও ডাউনলোড করুন' : 'Generate & Download Receipt Image'}
       >
         {isGeneratingReceipt ? (
@@ -1967,7 +1964,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           window.history.replaceState({ tab: 'customers', customerId: selectedCustomer.id, modal: 'editingCustomer', quickEntry: false }, '', `?tab=customers&c=${selectedCustomer.id}`);
           setIsEditingCustomer(true);
         }}
-        className="p-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-xl transition-colors cursor-pointer flex items-center justify-center"
+        className="p-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border-2 border-slate-300 dark:border-slate-700 rounded-xl transition-colors cursor-pointer flex items-center justify-center"
         title={lang === 'bn' ? 'তথ্য পরিবর্তন করুন' : 'Edit Customer Info'}
       >
         <Pencil className="w-4 h-4" />
@@ -1988,7 +1985,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  >
  {/* Account Type Selector in Edit Mode */}
  <div>
-   <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+   <label className={`block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
      {lang === 'bn' ? 'হিসাবের ধরন' : 'Account Type'}
    </label>
    <div className="grid grid-cols-2 gap-2">
@@ -2005,7 +2002,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
        }`}
      >
        <Users className="w-3.5 h-3.5" />
-       <span>{lang === 'bn' ? 'সাধারণ খতিয়ান' : 'Standard Ledger'}</span>
+       <span>{lang === 'bn' ? 'গ্রাহক খতিয়ান' : 'Customer Ledger'}</span>
      </button>
      <button
        type="button"
@@ -2026,7 +2023,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  </div>
 
  <div>
- <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+ <label className={`block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
  {editAccountType === 'credit_card' ? (lang === 'bn' ? 'কার্ড / হিসাবের নাম' : 'Card / Account Name') : (lang === 'bn' ? 'গ্রাহকের নাম' : 'Customer Name')}
  </label>
  <input
@@ -2039,7 +2036,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  />
  </div>
  <div>
- <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+ <label className={`block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
  {lang === 'bn' ? 'মোবাইল নম্বর' : 'Mobile Number'}
  </label>
  <div className="flex gap-2">
@@ -2089,7 +2086,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  {editAccountType === 'credit_card' && (
    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border-2 border-slate-300 dark:border-slate-700">
      <div className="flex items-center justify-between gap-2">
-       <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+       <label className={`text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1.5 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
          <Calendar className="w-3.5 h-3.5" />
          <span>{lang === 'bn' ? 'স্টেটমেন্ট বিলিং তারিখ (১-৩১)' : 'Statement Billing Day (1–31)'}</span>
        </label>
@@ -2161,7 +2158,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
    triggerHaptic('single');
    setIsEditingCustomer(false);
  }}
- className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white transition-colors cursor-pointer"
+ className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl border-2 border-slate-300 dark:border-slate-700 transition-colors cursor-pointer"
  >
  {lang === 'bn' ? 'বাতিল' : 'Cancel'}
  </button>
@@ -2175,7 +2172,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
    exit={{ opacity: 0, y: -4 }}
    transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
  >
- <h2 className="text-xl sm:text-2xl font-extrabold text-slate-950 dark:text-white pr-28">{selectedCustomer.name}</h2>
+ <h2 className="text-xl sm:text-2xl font-extrabold text-slate-950 dark:text-white pr-24">{selectedCustomer.name}</h2>
  {selectedCustomer.phone ? (
  <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-1.5 font-mono">
  <Phone className="w-4 h-4 text-emerald-500 shrink-0" />
@@ -2183,7 +2180,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  <a 
  href={`tel:${cleanBangladeshiPhone(selectedCustomer.phone)}`}
  onClick={() => triggerHaptic('single')}
- className="ml-1.5 text-xs font-sans font-bold bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-700 dark:text-slate-300 inline-block cursor-pointer transition-colors"
+ className="ml-1.5 text-xs font-sans font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 px-2.5 py-0.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 inline-block cursor-pointer transition-colors"
  >
  {lang === 'bn' ? 'কল করুন' : 'Call Now'}
  </a>
@@ -2213,19 +2210,15 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  {/* Single-line Billing Date underneath the Phone Number matching Phone Number styling */}
  {selectedCustomer.accountType === 'credit_card' && creditCardCycleData && (
    <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-1.5 font-mono whitespace-nowrap overflow-hidden text-ellipsis">
-     <Calendar className="w-4 h-4 text-emerald-500 shrink-0" />
+     <Calendar className="w-4 h-4 text-ledger-green shrink-0" />
      <span className="truncate text-[13px]">
-       {lang === 'bn'
-         ? `বিলিং তারিখ: ${creditCardCycleData.nextStatementDate.toLocaleDateString('bn-BD', { month: 'long', day: 'numeric' })} (${
-             creditCardCycleData.daysUntilNextStatement === 0
-               ? 'আজ'
-               : `${formatNumber(creditCardCycleData.daysUntilNextStatement, 'bn')} দিন পর`
-           })`
-         : `Billing Date: ${creditCardCycleData.nextStatementDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })} (${
-             creditCardCycleData.daysUntilNextStatement === 0
-               ? 'today'
-               : `in ${creditCardCycleData.daysUntilNextStatement}d`
-           })`}
+       {creditCardCycleData.isBillingDayToday
+         ? (lang === 'bn'
+             ? `আজ বিলিং দিন (${creditCardCycleData.lastStatementDate.toLocaleDateString('bn-BD', { month: 'short', day: 'numeric' })})`
+             : `Billing Day Today (${creditCardCycleData.lastStatementDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`)
+         : (lang === 'bn'
+             ? `বিলিং তারিখ: ${creditCardCycleData.nextStatementDate.toLocaleDateString('bn-BD', { month: 'long', day: 'numeric' })} (${formatNumber(creditCardCycleData.daysUntilNextStatement, 'bn')} দিন পর)`
+             : `Billing Date: ${creditCardCycleData.nextStatementDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })} (in ${creditCardCycleData.daysUntilNextStatement}d)`)}
      </span>
    </p>
  )}
@@ -2234,45 +2227,62 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  </AnimatePresence>
 
  </div>
- {/* CURRENT BALANCE CARD + ELLIPSIS TOGGLE FOR TOTAL BILLED & TOTAL PAID */}
+ {/* CURRENT BALANCE CARD + SUBTLE LEFT ELLIPSIS TOGGLE FOR TOTAL BILLED & TOTAL PAID */}
  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
-   {/* Primary Current Balance Box with Ellipsis button on the right */}
-   <div className={`p-3.5 sm:p-4 rounded-xl border flex items-center justify-between gap-3 ${
-     selectedCustomer.outstandingDue > 0
-       ? 'border-rose-300 dark:border-rose-900/80 bg-rose-50/40 dark:bg-rose-950/20'
-       : selectedCustomer.outstandingDue < 0
-       ? 'border-emerald-300 dark:border-emerald-900/80 bg-emerald-50/40 dark:bg-emerald-950/20'
-       : 'border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/40'
-   }`}>
-     <div className="space-y-1 min-w-0">
-       <span className="text-[10px] font-mono uppercase tracking-wider font-bold text-slate-500 dark:text-slate-400 block">
+   {/* Neutral Total Outstanding Box with Dark Background in Dark Mode & Right-Aligned Text */}
+   <div className="p-3.5 sm:p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-[#07090E] flex items-center justify-between gap-3">
+     {/* Subtle, non-distracting Circle-Ellipsis Button on the left */}
+     <button
+       type="button"
+       onClick={() => {
+         triggerHaptic('single');
+         setShowExtraBalanceCards(prev => !prev);
+       }}
+       className={`p-1.5 -ml-1 rounded-lg transition-colors cursor-pointer shrink-0 flex items-center justify-center active:scale-95 ${
+         showExtraBalanceCards
+           ? 'text-slate-900 dark:text-slate-100 bg-slate-200/70 dark:bg-slate-800/80'
+           : 'text-slate-400/80 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/50'
+       }`}
+       title={showExtraBalanceCards ? (lang === 'bn' ? 'মোট বিবরণ লুকান' : 'Hide totals') : (lang === 'bn' ? 'মোট বকেয়া ও আদায় দেখুন' : 'Show Total Billed & Total Paid')}
+       aria-expanded={showExtraBalanceCards}
+       aria-label={showExtraBalanceCards ? (lang === 'bn' ? 'মোট বিবরণ লুকান' : 'Hide totals') : (lang === 'bn' ? 'মোট বকেয়া ও আদায় দেখুন' : 'Show Total Billed & Total Paid')}
+     >
+       <CircleEllipsis className="w-4.5 h-4.5" />
+     </button>
+
+     <div className="space-y-1.5 min-w-0 flex-1 text-right">
+       <span className={`text-xs sm:text-[13px] font-bold text-slate-600 dark:text-slate-300 block ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'}`}>
          {selectedCustomer.accountType === 'credit_card'
-           ? (lang === 'bn' ? 'মোট অপরিশোধিত কার্ড বিল (চলতি + বকেয়া)' : 'Total Outstanding Card Balance')
-           : t.currentBalance}
+           ? (lang === 'bn' ? 'মোট বকেয়া কার্ড ব্যালেন্স' : 'Total Outstanding Card Balance')
+           : lang === 'bn'
+             ? (selectedCustomer.outstandingDue > 0
+                 ? 'বর্তমান ব্যালেন্স (বকেয়া)'
+                 : selectedCustomer.outstandingDue < 0
+                 ? 'বর্তমান ব্যালেন্স (অগ্রিম)'
+                 : t.currentBalance)
+             : t.currentBalance}
        </span>
-       <div className={`text-[22px] sm:text-[26px] font-black font-mono tabular-nums ${
+       <div className={`text-2xl sm:text-[28px] leading-tight font-black font-mono tabular-nums ${
          selectedCustomer.outstandingDue > 0
-           ? 'text-rose-600 dark:text-rose-400'
+           ? 'text-ledger-red'
            : selectedCustomer.outstandingDue < 0
-           ? 'text-emerald-600 dark:text-emerald-400'
+           ? 'text-ledger-green'
            : 'text-slate-500 dark:text-slate-400'
        }`}>
-         {selectedCustomer.outstandingDue === 0 ? (
-           lang === 'bn' ? '৳ ০ (পরিশোধিত)' : '৳ 0 (Settled)'
-         ) : (
-           `${selectedCustomer.outstandingDue < 0 ? '-' : ''}৳ ${formatNumber(Math.abs(selectedCustomer.outstandingDue), lang)}`
-         )}
+         {selectedCustomer.outstandingDue === 0
+           ? `৳ ${lang === 'bn' ? '০ (পরিশোধিত)' : '0 (Settled)'}`
+           : `${selectedCustomer.outstandingDue < 0 ? '-' : ''}৳ ${formatNumber(Math.abs(selectedCustomer.outstandingDue), lang)}`}
        </div>
-       <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+       <p className="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300 font-semibold">
          {selectedCustomer.accountType === 'credit_card' ? (
            selectedCustomer.outstandingDue > 0
              ? (creditCardCycleData && creditCardCycleData.unpaidCarryOver > 0
                  ? (lang === 'bn'
-                     ? `চলতি মাস ৳${formatNumber(creditCardCycleData.netUnbilledThisMonth, 'bn')} + গত মাসের বকেয়া ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'bn')}`
-                     : `Includes ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'en')} carried over from last month`)
-                 : (lang === 'bn' ? 'মোট পরিশোধযোগ্য কার্ড বিল' : 'Total payable card balance'))
+                     ? `পূর্ববর্তী সাইকেল থেকে বিলকৃত ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'bn')} অন্তর্ভুক্ত`
+                     : `Includes ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'en')} billed from previous cycle`)
+                 : (lang === 'bn' ? 'চলতি সাইকেলের আনবিল্ড খরচ (বিলিং দিনে বিল্ড হবে)' : 'Unbilled current cycle spend (bills on billing day)'))
              : selectedCustomer.outstandingDue < 0
-             ? (lang === 'bn' ? 'কার্ডে অতিরিক্ত পেমেন্ট জমা আছে' : 'Extra credit balance on card')
+             ? (lang === 'bn' ? 'কার্ডে অতিরিক্ত ক্রেডিট ব্যালেন্স আছে' : 'Extra credit balance on card')
              : (lang === 'bn' ? 'সব কার্ড বিল পরিশোধিত' : 'All card bills settled')
          ) : (
            selectedCustomer.outstandingDue > 0 
@@ -2283,68 +2293,53 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
          )}
        </p>
      </div>
-
-     {/* Circle-Ellipsis Button (without border) to reveal/hide Total Billed and Total Paid */}
-     <button
-       type="button"
-       onClick={() => {
-         triggerHaptic('single');
-         setShowExtraBalanceCards(prev => !prev);
-       }}
-       className={`p-1.5 rounded-full transition-colors cursor-pointer shrink-0 flex items-center justify-center active:scale-95 ${
-         showExtraBalanceCards
-           ? 'text-slate-950 dark:text-white'
-           : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-       }`}
-       title={showExtraBalanceCards ? (lang === 'bn' ? 'মোট বিবরণ লুকান' : 'Hide totals') : (lang === 'bn' ? 'মোট বকেয়া ও আদায় দেখুন' : 'Show Total Billed & Total Paid')}
-       aria-expanded={showExtraBalanceCards}
-     >
-       <CircleEllipsis className="w-5 h-5" />
-     </button>
    </div>
 
-   {/* Hidden by default: Total Billed & Total Paid cards (mimicking new account creation card animation) */}
+   {/* Hidden by default: Unified Total Billed & Total Paid single box (matching Dashboard today summary layout) */}
    <AnimatePresence>
      {showExtraBalanceCards && (
        <motion.div
          initial={{ opacity: 0, y: -8 }}
          animate={{ opacity: 1, y: 0 }}
          exit={{ opacity: 0, y: -8 }}
-         className="grid grid-cols-1 sm:grid-cols-2 gap-3"
+         className="p-3.5 sm:p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-[#07090E]"
        >
-         {/* 1. Total Billed */}
-         <div className="p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-slate-50/70 dark:bg-slate-900/40 space-y-1">
-           <span className="text-[10px] font-mono uppercase tracking-wider font-bold text-slate-500 dark:text-slate-400 block">
-             {selectedCustomer.accountType === 'credit_card'
-               ? (lang === 'bn' ? 'সর্বমোট কার্ড খরচ' : 'Total Card Spend (All-Time)')
-               : (lang === 'bn' ? 'মোট বিক্রয় বাকি' : 'Total Billed (Dues)')}
-           </span>
-           <div className="text-xl font-black font-mono text-rose-600 dark:text-rose-400 tabular-nums">
-             ৳ {formatNumber(selectedCustomerMetrics.totalBilled, lang)}
+         <div className="grid grid-cols-2 divide-x divide-slate-200/70 dark:divide-white/[0.08]">
+           {/* Left Column: Total Billed */}
+           <div className="pr-3 text-center space-y-1 min-w-0">
+             <span className={`text-[10px] font-bold text-slate-500 dark:text-slate-400 block truncate ${
+               lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'
+             }`}>
+               {selectedCustomer.accountType === 'credit_card'
+                 ? (lang === 'bn' ? 'মোট কার্ড খরচ' : 'Total Card Spend')
+                 : (lang === 'bn' ? 'মোট বিলকৃত (বকেয়া)' : 'Total Billed (Dues)')}
+             </span>
+             <div className="text-lg sm:text-xl font-black font-mono text-ledger-red tabular-nums tracking-tight truncate">
+               ৳ {formatNumber(selectedCustomerMetrics.totalBilled, lang)}
+             </div>
+             <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono truncate">
+               {formatNumber(selectedCustomerMetrics.txCount, lang)} {lang === 'bn' ? 'টি খতিয়ান এন্ট্রি' : 'ledger entries'}
+             </p>
            </div>
-           <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
-             {formatNumber(selectedCustomerMetrics.txCount, lang)} {lang === 'bn' ? 'টি মোট এন্ট্রি' : 'ledger entries'}
-           </p>
-         </div>
 
-         {/* 2. Total Paid */}
-         <div className="p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-slate-50/70 dark:bg-slate-900/40 space-y-1">
-           <span className="text-[10px] font-mono uppercase tracking-wider font-bold text-slate-500 dark:text-slate-400 block">
-             {selectedCustomer.accountType === 'credit_card'
-               ? (lang === 'bn' ? 'সর্বমোট বিল পরিশোধ' : 'Total Bill Payments')
-               : (lang === 'bn' ? 'মোট প্রাপ্ত নগদ' : 'Total Paid (Inflow)')}
-           </span>
-           <div 
-             className="text-xl font-black font-mono tabular-nums"
-             style={{ color: 'var(--accent-color)' }}
-           >
-             ৳ {formatNumber(selectedCustomerMetrics.totalPaid, lang)}
+           {/* Right Column: Total Paid */}
+           <div className="pl-3 text-center space-y-1 min-w-0">
+             <span className={`text-[10px] font-bold text-slate-500 dark:text-slate-400 block truncate ${
+               lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'
+             }`}>
+               {selectedCustomer.accountType === 'credit_card'
+                 ? (lang === 'bn' ? 'মোট বিল পরিশোধ' : 'Total Bill Payments')
+                 : (lang === 'bn' ? 'মোট পরিশোধিত (আদায়)' : 'Total Paid (Inflow)')}
+             </span>
+             <div className="text-lg sm:text-xl font-black font-mono text-ledger-green tabular-nums tracking-tight truncate">
+               ৳ {formatNumber(selectedCustomerMetrics.totalPaid, lang)}
+             </div>
+             <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono truncate">
+               {selectedCustomer.accountType === 'credit_card'
+                 ? (lang === 'bn' ? 'রেকর্ডকৃত বিল নিষ্পত্তি' : 'Recorded bill settlements')
+                 : (lang === 'bn' ? 'যাচাইকৃত আদায়' : 'Verified collections')}
+             </p>
            </div>
-           <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
-             {selectedCustomer.accountType === 'credit_card'
-               ? (lang === 'bn' ? 'পরিশোধিত কার্ড বিল' : 'Recorded bill settlements')
-               : (lang === 'bn' ? 'আদায়কৃত ক্যাশ/অনলাইন' : 'Verified collections')}
-           </p>
          </div>
        </motion.div>
      )}
@@ -2353,10 +2348,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
  {/* Quick message template picker card */}
  {selectedCustomer.phone && selectedCustomer.outstandingDue > 0 && (
-  <details className="bg-slate-50 dark:bg-slate-900/60 px-3.5 py-2.5 open:pb-3.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-800 dark:hover:border-slate-300 transition-colors relative z-10 group [&_summary::-webkit-details-marker]:hidden">
+  <details className="bg-slate-50 dark:bg-slate-900/60 px-3.5 py-2.5 open:pb-3.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 transition-colors relative z-10 group [&_summary::-webkit-details-marker]:hidden">
     <summary
       onClick={() => triggerHaptic('single')}
-      className="text-xs font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wider flex items-center justify-between cursor-pointer list-none select-none leading-none"
+      className={`text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center justify-between cursor-pointer list-none select-none leading-none ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}
     >
       <div className="flex items-center gap-2">
         <MessageSquare className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
@@ -2375,7 +2370,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           className={`p-2.5 text-left rounded-xl text-xs font-bold border-2 transition-all cursor-pointer ${
             selectedTemplate === 1
               ? 'bg-emerald-600 border-slate-950 dark:border-white text-white shadow-2xs'
-              : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-slate-900 dark:hover:border-white'
+              : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60'
           }`}
         >
           {t.templatePolite}
@@ -2389,7 +2384,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           className={`p-2.5 text-left rounded-xl text-xs font-bold border-2 transition-all cursor-pointer ${
             selectedTemplate === 2
               ? 'bg-emerald-600 border-slate-950 dark:border-white text-white shadow-2xs'
-              : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-slate-900 dark:hover:border-white'
+              : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60'
           }`}
         >
           {t.templateRespect}
@@ -2403,7 +2398,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           className={`p-2.5 text-left rounded-xl text-xs font-bold border-2 transition-all cursor-pointer ${
             selectedTemplate === 3
               ? 'bg-emerald-600 border-slate-950 dark:border-white text-white shadow-2xs'
-              : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-slate-900 dark:hover:border-white'
+              : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60'
           }`}
         >
           {t.templateFormal}
@@ -2427,19 +2422,19 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  target="_blank"
  rel="noreferrer"
  onClick={() => triggerHaptic('single')}
- className="w-full basis-full sm:w-auto sm:basis-auto sm:flex-1 sm:min-w-[160px] py-2.5 px-4 bg-[#25D366] hover:bg-[#20ba59] border-2 border-transparent hover:border-slate-950 dark:hover:border-white font-bold text-white rounded-xl shadow-xs flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm transition-all"
+ className="w-full basis-full sm:w-auto sm:basis-auto sm:flex-1 sm:min-w-[150px] py-2.5 px-3.5 bg-[#25D366] hover:bg-[#20ba59] border-2 border-transparent font-bold text-white rounded-xl shadow-xs flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm transition-all"
  >
- <MessageCircleMore className="w-4 h-4" />
- {t.remindWhatsApp}
+ <MessageCircleMore className="w-4 h-4 shrink-0" />
+ <span>{t.remindWhatsApp}</span>
  </a>
 
  <a
  href={getShareLink(selectedCustomer, 'sms')}
  onClick={() => triggerHaptic('single')}
- className="flex-1 min-w-[160px] py-2.5 px-4 bg-blue-600 hover:bg-blue-700 border-2 border-transparent hover:border-slate-950 dark:hover:border-white font-bold text-white rounded-xl shadow-xs flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm transition-all"
+ className="flex-1 min-w-[140px] py-2.5 px-3.5 bg-blue-600 hover:bg-blue-700 border-2 border-transparent font-bold text-white rounded-xl shadow-xs flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm transition-all"
  >
- <Send className="w-4 h-4" />
- {t.sendSmsReminder}
+ <Send className="w-4 h-4 shrink-0" />
+ <span>{t.sendSmsReminder}</span>
  </a>
  </>
  )}
@@ -2450,10 +2445,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
      triggerHaptic('double');
      handleDelete(selectedCustomer);
    }}
-   className="py-2.5 px-4 bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/30 dark:hover:bg-rose-900/40 dark:text-rose-400 border-2 border-rose-300 dark:border-rose-800/80 hover:border-rose-600 dark:hover:border-rose-400 rounded-xl flex items-center justify-center gap-2 cursor-pointer text-xs font-bold transition-all"
+   className="py-2.5 px-3.5 bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/30 dark:hover:bg-rose-900/40 dark:text-rose-400 border-2 border-rose-300 dark:border-rose-800/80 hover:border-rose-600 dark:hover:border-rose-400 rounded-xl flex items-center justify-center gap-2 cursor-pointer text-xs font-bold transition-all"
  >
- <Trash2 className="w-4 h-4" />
- {t.deleteAccount}
+ <Trash2 className="w-4 h-4 shrink-0" />
+ <span>{t.deleteAccount}</span>
  </button>
  </div>
  </div>
@@ -2465,7 +2460,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
    setActionTargetCycle(cardCycleTab);
    setOpenActionType('due');
  }}
- className={`py-4 px-4 rounded-2xl border-2 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-[0.98] shadow-xs ${
+ className={`py-3.5 px-3 rounded-2xl border-2 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-[0.98] shadow-xs ${
  openActionType === 'due' 
  ? 'bg-rose-600 border-rose-600 text-white font-black' 
  : 'bg-white hover:bg-rose-50/60 border-rose-300 hover:border-rose-600 dark:border-rose-900 dark:hover:border-rose-500 text-rose-600 dark:bg-[#0D121D] dark:hover:bg-rose-950/20 dark:text-rose-400 font-bold'
@@ -2476,7 +2471,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  ) : (
    <ArrowUpRight className="w-5 h-5 stroke-[3]" />
  )}
- <span className="font-extrabold text-sm sm:text-base">
+ <span className="font-extrabold text-xs sm:text-sm text-center leading-snug">
    + {selectedCustomer.accountType === 'credit_card'
        ? (lang === 'bn' ? 'কার্ড বিল যোগ' : 'Add Card Bill')
        : t.letThemBuy}
@@ -2485,16 +2480,16 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
  <button
  onClick={() => setOpenActionType('payment')}
- className={`py-4 px-4 rounded-2xl border-2 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-[0.98] shadow-xs ${
+ className={`py-3.5 px-3 rounded-2xl border-2 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-[0.98] shadow-xs ${
  openActionType === 'payment' 
  ? 'bg-emerald-600 border-emerald-600 text-white font-black' 
  : 'bg-white hover:bg-emerald-50/60 border-emerald-300 hover:border-emerald-600 dark:border-emerald-900 dark:hover:border-emerald-500 text-emerald-600 dark:bg-[#0D121D] dark:hover:bg-emerald-950/20 dark:text-emerald-400 font-bold'
  }`}
  >
  <ArrowDownLeft className="w-5 h-5 stroke-[3]" />
- <span className="font-extrabold text-sm sm:text-base">
+ <span className="font-extrabold text-xs sm:text-sm text-center leading-snug">
    + {selectedCustomer.accountType === 'credit_card'
-       ? (lang === 'bn' ? 'বিল পরিশোধ জমা' : 'Pay Card Bill')
+       ? (lang === 'bn' ? 'কার্ড বিল পরিশোধ' : 'Pay Card Bill')
        : t.gotCash}
  </span>
  </button>
@@ -2508,15 +2503,17 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  animate={{ opacity: 1, scale: 1, y: 0 }}
  exit={{ opacity: 0, scale: 0.96, y: 8 }}
  transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
- className="bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800/80 p-4 sm:p-5 rounded-2xl space-y-4 shadow-sm"
+ className="surface-glass border p-4 sm:p-5 rounded-2xl space-y-4"
  >
  <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-2.5">
  <h4 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white">
  {selectedCustomer.accountType === 'credit_card'
    ? (openActionType === 'due'
-       ? (lang === 'bn' ? `${selectedCustomer.name}-এ নতুন কার্ড বিল যোগ` : `Record Card Bill for ${selectedCustomer.name}`)
-       : (lang === 'bn' ? `${selectedCustomer.name}-এ কার্ড বিল পরিশোধ` : `Record Card Bill Payment for ${selectedCustomer.name}`))
-   : `${openActionType === 'due' ? (lang === 'bn' ? 'নতুন বাকি বিবরণ' : 'Record New Due') : (lang === 'bn' ? 'পেমেন্ট আদায়ের বিবরণ' : 'Record Received Payment')} ${lang === 'bn' ? 'যুক্ত হচ্ছে' : 'for'} ${selectedCustomer.name}`}
+       ? (lang === 'bn' ? `${selectedCustomer.name}-এর জন্য কার্ড বিল লিখুন` : `Record Card Bill for ${selectedCustomer.name}`)
+       : (lang === 'bn' ? `${selectedCustomer.name}-এর জন্য কার্ড বিল পরিশোধ লিখুন` : `Record Card Bill Payment for ${selectedCustomer.name}`))
+   : (openActionType === 'due'
+       ? (lang === 'bn' ? `${selectedCustomer.name}-এর জন্য নতুন বাকি লিখুন` : `Record New Due for ${selectedCustomer.name}`)
+       : (lang === 'bn' ? `${selectedCustomer.name}-এর জন্য আদায়কৃত পেমেন্ট লিখুন` : `Record Received Payment for ${selectedCustomer.name}`))}
  </h4>
  <button
    type="button"
@@ -2524,7 +2521,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
      triggerHaptic('medium');
      setOpenActionType(null);
    }}
-   className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-lg text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+   className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
  >
  <X className="w-4 h-4" />
  </button>
@@ -2543,7 +2540,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
          onClick={() => setActionTargetCycle('unbilled')}
          className={`px-2.5 py-1 rounded-lg text-xs font-bold border cursor-pointer transition-all ${
            actionTargetCycle === 'unbilled'
-             ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
+             ? 'bg-slate-950 text-white border-transparent dark:bg-white dark:text-slate-950'
              : 'bg-white dark:bg-[#0D121D] text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
          }`}
        >
@@ -2554,7 +2551,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
          onClick={() => setActionTargetCycle('billed')}
          className={`px-2.5 py-1 rounded-lg text-xs font-bold border cursor-pointer transition-all ${
            actionTargetCycle === 'billed'
-             ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
+             ? 'bg-slate-950 text-white border-transparent dark:bg-white dark:text-slate-950'
              : 'bg-white dark:bg-[#0D121D] text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
          }`}
        >
@@ -2566,7 +2563,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
  <div className="space-y-1">
- <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t.amount} (৳) *</label>
+ <label className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>{t.amount} (৳) *</label>
  <input
  type="text"
  inputMode="decimal"
@@ -2583,7 +2580,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  }
  setActionAmount(formatIndianNumberString(sanitized));
  }}
- className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl text-slate-950 dark:text-white text-base sm:text-lg font-mono font-bold focus:outline-none focus:border-slate-950 dark:focus:border-white transition-colors"
+ className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl text-slate-950 dark:text-white text-lg sm:text-xl font-mono font-bold focus:outline-none focus:border-slate-950 dark:focus:border-white transition-colors"
  required
  autoFocus
  />
@@ -2619,7 +2616,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                     readOnly
                   />
                   <span className="text-xs font-bold text-amber-900 dark:text-amber-200 select-none">
-                    {lang === 'bn' ? 'গত মাসের বকেয়া বিল পরিশোধ করুন' : 'Pay last month billed statement'} (৳{formatNumber(creditCardCycleData.unpaidCarryOver, lang)})
+                    {lang === 'bn' ? 'গত মাসের বিলকৃত স্টেটমেন্ট পরিশোধ করুন' : 'Pay last month billed statement'} (৳{formatNumber(creditCardCycleData.unpaidCarryOver, lang)})
                   </span>
                 </div>
               )}
@@ -2636,7 +2633,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                       setActionAmount('');
                     }
                   }}
-                  className="w-full flex items-center text-left gap-2.5 mt-2 p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer transition-colors select-none shadow-2xs"
+                  className="w-full flex items-center text-left gap-2.5 mt-2 p-2.5 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800/80 rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer transition-colors select-none shadow-2xs"
                 >
                   <input
                     type="checkbox"
@@ -2646,7 +2643,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                   />
                   <span className="text-xs font-bold text-slate-800 dark:text-slate-200 select-none">
                     {selectedCustomer.accountType === 'credit_card'
-                      ? (lang === 'bn' ? 'সম্পূর্ণ কার্ড বিল পরিশোধ করুন' : 'Pay total card balance')
+                      ? (lang === 'bn' ? 'মোট কার্ড ব্যালেন্স পরিশোধ করুন' : 'Pay total card balance')
                       : (lang === 'bn' ? 'সম্পূর্ণ বকেয়া পরিশোধ করুন' : 'Settle complete due')} (৳{formatNumber(selectedCustomer.outstandingDue, lang)})
                   </span>
                 </div>
@@ -2664,7 +2661,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  const newVal = (currentVal + preset).toString();
  setActionAmount(formatIndianNumberString(newVal));
  }}
- className="bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white px-2.5 py-1 rounded-lg text-xs font-mono font-bold text-slate-900 dark:text-slate-100 transition-colors cursor-pointer shadow-2xs active:scale-95"
+ className="bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 px-2.5 py-1 rounded-lg text-xs font-mono font-bold text-slate-900 dark:text-slate-100 transition-colors cursor-pointer shadow-2xs active:scale-95"
  >
  +৳{formatNumber(preset, lang)}
  </button>
@@ -2680,7 +2677,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  </div>
  </div>
  <div className="space-y-1">
- <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t.notes}</label>
+ <label className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>{t.notes}</label>
  <input
  type="text"
  placeholder={selectedCustomer.accountType === 'credit_card'
@@ -2699,14 +2696,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  <button
  type="button"
  onClick={() => setOpenActionType(null)}
- className="px-3.5 py-2 text-xs bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white font-bold rounded-xl cursor-pointer transition-colors"
+ className="px-3.5 py-2 text-xs bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border-2 border-slate-300 dark:border-slate-700 font-bold rounded-xl cursor-pointer transition-colors"
  >
  {t.cancel}
  </button>
  <button
  type="submit"
  disabled={txSubmitting}
- className={`px-4 py-2 text-xs text-white font-bold rounded-xl transition-all cursor-pointer border-2 border-transparent hover:border-slate-950 dark:hover:border-white shadow-xs ${
+ className={`px-4 py-2 text-xs text-white font-bold rounded-xl transition-all cursor-pointer border-2 border-transparent shadow-xs ${
  openActionType === 'due' 
  ? 'bg-rose-600 hover:bg-rose-700' 
  : 'bg-emerald-600 hover:bg-emerald-700'
@@ -2744,7 +2741,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border-2 transition-all cursor-pointer flex items-center gap-1.5 ${
               cardCycleTab === 'unbilled'
                 ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-2xs'
-                : 'bg-white dark:bg-[#0D121D] text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white'
+                : 'bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
             }`}
           >
             <span>{lang === 'bn' ? 'আনবিল্ড' : 'Unbilled'}</span>
@@ -2762,7 +2759,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border-2 transition-all cursor-pointer flex items-center gap-1.5 ${
               cardCycleTab === 'billed'
                 ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-2xs'
-                : 'bg-white dark:bg-[#0D121D] text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white'
+                : 'bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
             }`}
           >
             <span>{lang === 'bn' ? 'বিল্ড' : 'Billed'}</span>
@@ -2783,14 +2780,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             className={`px-2.5 py-1.5 rounded-xl text-xs font-extrabold border-2 transition-all cursor-pointer flex items-center justify-center ${
               showMonthlyCycle
                 ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-2xs'
-                : 'bg-white dark:bg-[#0D121D] text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white'
+                : 'bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
             }`}
           >
             <ListClockIcon className="w-4 h-4" />
           </button>
         </div>
       ) : (
-        <span className="text-xs font-extrabold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+        <span className={`text-xs font-extrabold text-zinc-400 dark:text-zinc-500 block ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
           {t.statements} ({formatNumber(activeCustomerTxCount, lang)})
         </span>
       )}
@@ -2818,15 +2815,15 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -8 }}
-          className="p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 space-y-3.5"
+          className="surface-subcard p-4 rounded-2xl border border-slate-200/80 dark:border-white/[0.08] space-y-3.5"
         >
             {/* Two-Card Comparison Grid: Unbilled (This Month) & Billed (Last Month) - History only (non-clickable) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {/* 1. UNBILLED (THIS MONTH) CARD */}
-              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0D121D] flex flex-col justify-between gap-2">
+              <div className="surface-glass p-3.5 rounded-xl border flex flex-col justify-between gap-2">
                 <div className="space-y-1">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] font-mono uppercase tracking-wider font-extrabold text-slate-900 dark:text-white px-2 py-0.5 rounded bg-slate-200/80 dark:bg-slate-800">
+                    <span className={`text-[10px] font-extrabold text-slate-900 dark:text-white px-2 py-0.5 rounded bg-slate-200/80 dark:bg-slate-800 ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'}`}>
                       {lang === 'bn' ? 'আনবিল্ড • চলতি মাস' : 'Unbilled • This Month'}
                     </span>
                     <span className="text-[10px] font-mono font-semibold text-slate-500 dark:text-slate-400">
@@ -2838,11 +2835,11 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
                   <div className="pt-1 flex items-baseline justify-between gap-2">
                     <div>
-                      <div className="text-xl sm:text-2xl font-black font-mono text-rose-600 dark:text-rose-400 tabular-nums">
+                      <div className="text-xl sm:text-2xl font-black font-mono text-ledger-red tabular-nums">
                         ৳ {formatNumber(creditCardCycleData.thisMonthSpend, lang)}
                       </div>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                        {lang === 'bn' ? 'চলতি সাইকেলে নতুন খরচ' : 'New card spend this cycle'}
+                        {lang === 'bn' ? 'চলতি সাইকেলে নতুন খরচ (বিলিং দিনে বিল্ড হবে)' : 'Current cycle spend (bills on billing day)'}
                       </p>
                     </div>
                     <div className="text-right">
@@ -2857,20 +2854,20 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 {creditCardCycleData.unpaidCarryOver > 0 ? (
                   <div className="mt-1 pt-2 border-t border-amber-200/80 dark:border-amber-900/50 space-y-1">
                     <div className="flex items-center justify-between text-[11px] font-bold text-amber-700 dark:text-amber-400">
-                      <span>{lang === 'bn' ? '+ গত মাসের অপরিশোধিত জের:' : '+ Carried over from last month:'}</span>
+                      <span>{lang === 'bn' ? '+ পূর্বের বিল্ড বকেয়া জের:' : '+ Carried over billed due:'}</span>
                       <span className="font-mono">৳ {formatNumber(creditCardCycleData.unpaidCarryOver, lang)}</span>
                     </div>
                     <div className="flex items-center justify-between text-xs font-extrabold text-slate-950 dark:text-white">
                       <span>{lang === 'bn' ? 'মোট পরিশোধযোগ্য:' : 'Total Payable Now:'}</span>
-                      <span className="font-mono text-rose-600 dark:text-rose-400">
+                      <span className="font-mono text-ledger-red">
                         ৳ {formatNumber(creditCardCycleData.totalPayableWithCarryOver, lang)}
                       </span>
                     </div>
                   </div>
                 ) : (
                   <div className="mt-1 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                    <span>{lang === 'bn' ? 'গত মাসের কোনো বকেয়া জের নেই' : 'No unpaid carry-over from last month'}</span>
-                    <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                    <span>{lang === 'bn' ? 'পূর্বের কোনো বকেয়া জের নেই' : 'No unpaid carry-over from billed statements'}</span>
+                    <Check className="w-3.5 h-3.5 text-ledger-green shrink-0" />
                   </div>
                 )}
               </div>
@@ -2879,7 +2876,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0D121D] flex flex-col justify-between gap-2">
                 <div className="space-y-1">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] font-mono uppercase tracking-wider font-extrabold text-slate-700 dark:text-slate-200 px-2 py-0.5 rounded bg-slate-200/80 dark:bg-slate-800">
+                    <span className={`text-[10px] font-extrabold text-slate-700 dark:text-slate-200 px-2 py-0.5 rounded bg-slate-200/80 dark:bg-slate-800 ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'}`}>
                       {lang === 'bn' ? 'বিল্ড • গত মাস' : 'Billed • Last Month'}
                     </span>
                     <span className="text-[10px] font-mono font-semibold text-slate-500 dark:text-slate-400">
@@ -2914,7 +2911,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                       <Check className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                     </div>
                   ) : creditCardCycleData.unpaidCarryOver === 0 ? (
-                    <div className="flex items-center justify-between text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-ledger-green">
                       <span>{lang === 'bn' ? 'গত মাসের স্টেটমেন্ট সম্পূর্ণ পরিশোধিত' : 'Last month statement paid in full'}</span>
                       <Check className="w-3.5 h-3.5 shrink-0 stroke-[2.5]" />
                     </div>
@@ -2931,36 +2928,45 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               </div>
             </div>
 
-            {/* Smart Spend Comparison & 1-Tap Statement Payment Bar */}
+            {/* Billing Cycle Rule Notice & Spend Comparison */}
             <div className="pt-1 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
               {/* Spend vs Last Month comparison insight */}
-              <div className="text-xs text-slate-600 dark:text-slate-300 font-medium flex items-center gap-1.5">
-                <Info className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                {creditCardCycleData.lastMonthCycleSpend === 0 ? (
-                  <span>
+              <div className="text-xs text-slate-600 dark:text-slate-300 font-medium flex items-start gap-1.5">
+                <Info className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <div>
+                    {creditCardCycleData.lastMonthCycleSpend === 0 ? (
+                      <span>
+                        {lang === 'bn'
+                          ? `চলতি সাইকেলে মোট খরচ ৳${formatNumber(creditCardCycleData.thisMonthSpend, 'bn')}`
+                          : `৳${formatNumber(creditCardCycleData.thisMonthSpend, 'en')} spent so far in this billing cycle`}
+                      </span>
+                    ) : creditCardCycleData.thisMonthSpend > creditCardCycleData.lastMonthCycleSpend ? (
+                      <span>
+                        {lang === 'bn'
+                          ? `গত মাসের তুলনায় এই মাসে ৳${formatNumber(creditCardCycleData.thisMonthSpend - creditCardCycleData.lastMonthCycleSpend, 'bn')} বেশি খরচ হয়েছে`
+                          : `৳${formatNumber(creditCardCycleData.thisMonthSpend - creditCardCycleData.lastMonthCycleSpend, 'en')} more spent this month vs last month`}
+                      </span>
+                    ) : creditCardCycleData.thisMonthSpend < creditCardCycleData.lastMonthCycleSpend ? (
+                      <span>
+                        {lang === 'bn'
+                          ? `গত মাসের তুলনায় এই মাসে ৳${formatNumber(creditCardCycleData.lastMonthCycleSpend - creditCardCycleData.thisMonthSpend, 'bn')} কম খরচ হয়েছে`
+                          : `৳${formatNumber(creditCardCycleData.lastMonthCycleSpend - creditCardCycleData.thisMonthSpend, 'en')} less spent this month vs last month`}
+                      </span>
+                    ) : (
+                      <span>
+                        {lang === 'bn'
+                          ? 'চলতি মাস এবং গত মাসের খরচের পরিমাণ সমান'
+                          : 'Spending this month matches last month exactly'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
                     {lang === 'bn'
-                      ? `চলতি সাইকেলে মোট খরচ ৳${formatNumber(creditCardCycleData.thisMonthSpend, 'bn')}`
-                      : `৳${formatNumber(creditCardCycleData.thisMonthSpend, 'en')} spent so far in this billing cycle`}
-                  </span>
-                ) : creditCardCycleData.thisMonthSpend > creditCardCycleData.lastMonthCycleSpend ? (
-                  <span>
-                    {lang === 'bn'
-                      ? `গত মাসের তুলনায় এই মাসে ৳${formatNumber(creditCardCycleData.thisMonthSpend - creditCardCycleData.lastMonthCycleSpend, 'bn')} বেশি খরচ হয়েছে`
-                      : `৳${formatNumber(creditCardCycleData.thisMonthSpend - creditCardCycleData.lastMonthCycleSpend, 'en')} more spent this month vs last month`}
-                  </span>
-                ) : creditCardCycleData.thisMonthSpend < creditCardCycleData.lastMonthCycleSpend ? (
-                  <span>
-                    {lang === 'bn'
-                      ? `গত মাসের তুলনায় এই মাসে ৳${formatNumber(creditCardCycleData.lastMonthCycleSpend - creditCardCycleData.thisMonthSpend, 'bn')} কম খরচ হয়েছে`
-                      : `৳${formatNumber(creditCardCycleData.lastMonthCycleSpend - creditCardCycleData.thisMonthSpend, 'en')} less spent this month vs last month`}
-                  </span>
-                ) : (
-                  <span>
-                    {lang === 'bn'
-                      ? 'চলতি মাস এবং গত মাসের খরচের পরিমাণ সমান'
-                      : 'Spending this month matches last month exactly'}
-                  </span>
-                )}
+                      ? `প্রতি মাসের ${formatNumber(creditCardCycleData.billingDay, 'bn')} তারিখে পূর্বের সাইকেলের আনবিল্ড খরচ বিল্ড হিসেবে গণ্য হয়।`
+                      : `Current cycle bills stay Unbilled and only convert to Billed on day ${creditCardCycleData.billingDay}.`}
+                  </div>
+                </div>
               </div>
 
               {/* 1-Tap Quick Settle Action Buttons */}
@@ -2977,7 +2983,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                     className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs cursor-pointer transition-all shadow-2xs active:scale-95"
                   >
                     {lang === 'bn'
-                      ? `গত মাসের বকেয়া পরিশোধ (৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'bn')})`
+                      ? `বিলকৃত বকেয়া পরিশোধ (৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'bn')})`
                       : `Pay Billed Due (৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'en')})`}
                   </button>
                 )}
@@ -2987,7 +2993,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       )}
     </AnimatePresence>
 
-    <div className="bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl overflow-hidden shadow-xs">
+    <div className="surface-glass border rounded-2xl overflow-hidden">
       {groupedTransactions.length === 0 ? (
         <div className="p-10 text-center text-slate-400 dark:text-slate-500 flex flex-col items-center gap-2">
           <ReceiptText className="w-10 h-10 stroke-[1.5]" />
@@ -3006,12 +3012,12 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
         </div>
       ) : (
         <>
-          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+          <div className="divide-y divide-slate-200/60 dark:divide-white/[0.06]">
             {groupedTransactions.map(group => (
               <div key={group.dateStr} className="flex flex-col">
                 {/* Date Header Indicator */}
-                <div className="px-4 py-2.5 bg-slate-50/80 dark:bg-slate-900/90 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                  <span className="text-[11px] font-mono font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
+                <div className="px-4 py-2 bg-slate-100/65 dark:bg-white/[0.04] backdrop-blur-md border-b border-slate-200/60 dark:border-white/[0.06] flex items-center justify-between">
+                  <span className={`text-[11px] font-mono font-bold text-slate-600 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
                     {group.dateObj.toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
                   </span>
                   <span className="text-[10px] font-mono font-bold text-slate-500 dark:text-slate-400">
@@ -3035,10 +3041,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3.5 min-w-0">
-                          <div className={`p-2 rounded-xl shrink-0 ${
+                          <div className={`p-2 rounded-lg shrink-0 ${
                             tx.type === 'due' 
-                              ? 'bg-rose-50 dark:bg-rose-950/20 text-rose-500' 
-                              : 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-500'
+                              ? 'bg-ledger-red-subtle text-ledger-red' 
+                              : 'bg-ledger-green-subtle text-ledger-green'
                           }`}>
                             {tx.type === 'due' ? <ArrowUpRight className="w-4.5 h-4.5 stroke-[2.5]" /> : <ArrowDownLeft className="w-4.5 h-4.5 stroke-[2.5]" />}
                           </div>
@@ -3046,7 +3052,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                             <div className="text-[15px] sm:text-base font-semibold text-slate-900 dark:text-slate-100 truncate">
                               {tx.description || (tx.type === 'due' ? t.dueTrigger : t.paymentTrigger)}
                             </div>
-                            <div className="text-xs text-slate-400 dark:text-slate-500 font-bold mt-0.5 uppercase flex items-center gap-2 flex-wrap">
+                            <div className={`text-xs text-slate-400 dark:text-slate-500 font-bold mt-0.5 flex items-center gap-2 flex-wrap ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>
                               <span>{new Date(tx.date).toLocaleTimeString(lang === 'bn' ? 'bn-BD' : 'en-US', { hour: '2-digit', minute: '2-digit' })}</span>
                               {(tx.isEdited || recentlyEditedTxId === tx.id || (tx.auditHistory && tx.auditHistory.length > 0)) && (
                                 <button
@@ -3069,9 +3075,9 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                         
                         <div className="flex flex-col items-end shrink-0">
                           <div className={`text-base sm:text-lg font-black font-mono tabular-nums ${
-                            tx.type === 'due' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
+                            tx.type === 'due' ? 'text-ledger-red' : 'text-ledger-green'
                           }`}>
-                            {tx.type === 'due' ? '+' : '-'} ৳ {formatNumber(tx.amount, lang)}
+                            {tx.type === 'due' ? '+' : '-'} ৳{formatNumber(tx.amount, lang)}
                           </div>
                           <div className="flex items-center gap-2 mt-1 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                             <button 
@@ -3080,7 +3086,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                                 triggerHaptic('single');
                                 openEditTxModal(tx);
                               }}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-ledger-green hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                               title={lang === 'bn' ? 'পরিবর্তন' : 'Edit'}
                             >
                               <Pencil className="w-4 h-4" />
@@ -3091,7 +3097,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                                 triggerHaptic('double');
                                 openDeleteTxModal(tx);
                               }}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-ledger-red hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                               title={lang === 'bn' ? 'মুছুন' : 'Delete'}
                             >
                               <Trash2 className="w-4 h-4" />
@@ -3107,12 +3113,12 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           </div>
 
           {(() => {
-            const showMoreVisible = hasMoreTxs;
-            const showLessVisible = customerTxLimit > 5;
+            const showMoreVisible = hasMoreTxs && selectedCustomer.accountType !== 'credit_card';
+            const showLessVisible = customerTxLimit > 5 && selectedCustomer.accountType !== 'credit_card';
             if (!showMoreVisible && !showLessVisible) return null;
 
             return (
-              <div className="p-4 text-center flex justify-center gap-3 border-t border-slate-100 dark:border-slate-800/80">
+              <div className="p-3.5 text-center flex justify-center gap-2.5 border-t border-slate-200/60 dark:border-white/[0.06] bg-slate-900/[0.015] dark:bg-white/[0.015]">
                 {showMoreVisible && (
                   <button 
                     type="button"
@@ -3120,10 +3126,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                       triggerHaptic('single');
                       loadMoreTransactions();
                     }}
-                    className="flex items-center gap-1 px-5 py-2 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-xs font-bold rounded-full transition-colors cursor-pointer"
+                    className="surface-glass-interactive flex items-center justify-center gap-1.5 px-4 py-2 border-2 border-slate-300/90 dark:border-slate-700/90 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-full shadow-2xs active:scale-95 transition-all cursor-pointer"
                   >
-                    {lang === 'bn' ? 'আরও দেখুন' : 'Show More'}
-                    <ChevronDown className="w-4 h-4" />
+                    <span>{lang === 'bn' ? 'আরও দেখুন' : 'Show More'}</span>
+                    <ChevronDown className="w-3.5 h-3.5 stroke-[2.5]" />
                   </button>
                 )}
                 {showLessVisible && (
@@ -3133,10 +3139,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                       triggerHaptic('single');
                       resetCustomerTxLimit();
                     }}
-                    className="flex items-center gap-1 px-5 py-2 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-xs font-bold rounded-full transition-colors cursor-pointer"
+                    className="surface-glass-interactive flex items-center justify-center gap-1.5 px-4 py-2 border-2 border-slate-300/90 dark:border-slate-700/90 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-full shadow-2xs active:scale-95 transition-all cursor-pointer"
                   >
-                    {lang === 'bn' ? 'কম দেখুন' : 'Show Less'}
-                    <ChevronUp className="w-4 h-4" />
+                    <span>{lang === 'bn' ? 'কম দেখুন' : 'Show Less'}</span>
+                    <ChevronUp className="w-3.5 h-3.5 stroke-[2.5]" />
                   </button>
                 )}
               </div>
@@ -3156,7 +3162,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       );
 
       return (
-        <div className="bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-4 sm:p-5 space-y-3 shadow-xs">
+        <div className="surface-glass border rounded-2xl p-4 sm:p-5 space-y-3">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700/60 flex items-center justify-center shrink-0">
@@ -3265,8 +3271,8 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                     <div
                       className={`font-mono font-bold text-xs shrink-0 ${
                         arch.type === 'due'
-                          ? 'text-rose-600 dark:text-rose-400'
-                          : 'text-emerald-600 dark:text-emerald-400'
+                          ? 'text-ledger-red'
+                          : 'text-ledger-green'
                       }`}
                     >
                       {arch.type === 'due' ? '+' : '-'} ৳{formatNumber(arch.amount || 0, lang)}
@@ -3294,26 +3300,26 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   {/* Edit Transaction Modal */}
   {editingTx && (
     <div 
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
       onClick={(e) => {
         if (e.target === e.currentTarget) closeTxModals();
       }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="animate-slide-up bg-white dark:bg-[#0D121D] w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border border-slate-200/80 dark:border-slate-800"
+        className="animate-slide-up glass-modal w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border"
       >
         <div className="flex items-center justify-between pb-3.5 mb-5 border-b border-slate-100 dark:border-slate-800/80">
           <h3 className="text-base font-extrabold text-slate-950 dark:text-white">
             {lang === 'bn' ? 'লেনদেন পরিবর্তন' : 'Edit Transaction'}
           </h3>
-          <button type="button" aria-label="Close" onClick={closeTxModals} className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-lg text-slate-600 dark:text-slate-300 cursor-pointer transition-colors">
+          <button type="button" aria-label="Close" onClick={closeTxModals} className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 cursor-pointer transition-colors">
             <X className="w-4 h-4" />
           </button>
         </div>
         <div className="space-y-4">
           <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t.amount} (৳)</label>
+            <label className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>{t.amount} (৳)</label>
             <input
               id="edit-tx-amount-input"
               type="text"
@@ -3328,7 +3334,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t.notes}</label>
+            <label className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>{t.notes}</label>
             <input
               id="edit-tx-desc-input"
               type="text"
@@ -3341,7 +3347,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             <button
               type="button"
               onClick={closeTxModals}
-              className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer transition-colors"
+              className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer transition-colors"
             >
               {lang === 'bn' ? 'বাতিল' : 'Cancel'}
             </button>
@@ -3364,7 +3370,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                   closeTxModals();
                 }
               }}
-              className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl border-2 border-transparent hover:border-slate-950 dark:hover:border-white cursor-pointer transition-colors"
+              className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl border-2 border-transparent cursor-pointer transition-colors"
             >
               {lang === 'bn' ? 'সংরক্ষণ করুন' : 'Save Changes'}
             </button>
@@ -3377,7 +3383,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  {/* Delete Transaction Modal */}
   {deletingTx && (
     <div 
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
       onClick={closeTxModals}
     >
       <motion.div
@@ -3385,7 +3391,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
         initial={{ opacity: 0, y: 50 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.15 }}
-        className="bg-white dark:bg-[#0D121D] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border border-slate-200/80 dark:border-slate-800"
+        className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border"
       >
         <div className="text-center mb-6">
           <div className="w-14 h-14 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3.5">
@@ -3399,34 +3405,34 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           </p>
           
           {/* Details Card showing what is being deleted */}
-          <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3.5 text-left space-y-2 mt-4">
+          <div className="surface-subcard border rounded-xl p-3.5 text-left space-y-2 mt-4">
             <div className="flex justify-between items-center">
-              <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'ধরন' : 'Type'}</span>
-              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md uppercase border ${
+              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{lang === 'bn' ? 'ধরন' : 'Type'}</span>
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${lang === 'bn' ? 'tracking-normal' : 'uppercase'} ${
                 deletingTx.type === 'due' 
-                  ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-800' 
-                  : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800'
+                  ? 'bg-ledger-red-subtle text-ledger-red border-ledger-red-subtle' 
+                  : 'bg-ledger-green-subtle text-ledger-green border-ledger-green-subtle'
               }`}>
                 {deletingTx.type === 'due' ? (lang === 'bn' ? 'বকেয়া (+)' : 'Due (+)') : (lang === 'bn' ? 'আদায় (-)' : 'Payment (-)')}
               </span>
             </div>
             <div className="flex justify-between items-baseline">
-              <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'পরিমাণ' : 'Amount'}</span>
+              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{lang === 'bn' ? 'পরিমাণ' : 'Amount'}</span>
               <span className={`text-sm font-black font-mono ${
-                deletingTx.type === 'due' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
+                deletingTx.type === 'due' ? 'text-ledger-red' : 'text-ledger-green'
               }`}>
                 ৳ {formatNumber(deletingTx.amount, lang)}
               </span>
             </div>
             <div className="flex justify-between items-baseline">
-              <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'তারিখ' : 'Date'}</span>
+              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{lang === 'bn' ? 'তারিখ' : 'Date'}</span>
               <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                 {new Date(deletingTx.date).toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { dateStyle: 'medium' })}
               </span>
             </div>
             {deletingTx.description && (
               <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800 flex justify-between items-start gap-4">
-                <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase shrink-0">{lang === 'bn' ? 'বিবরণ' : 'Notes'}</span>
+                <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 shrink-0 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{lang === 'bn' ? 'বিবরণ' : 'Notes'}</span>
                 <span className="text-xs font-bold text-slate-800 dark:text-slate-200 text-right truncate max-w-[200px]">{deletingTx.description}</span>
               </div>
             )}
@@ -3440,13 +3446,13 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 closeTxModals();
               }
             }}
-            className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent hover:border-slate-950 dark:hover:border-white cursor-pointer text-xs transition-colors"
+            className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent cursor-pointer text-xs transition-colors"
           >
             {lang === 'bn' ? 'হ্যাঁ, মুছুন' : 'Yes, Delete'}
           </button>
           <button
             onClick={closeTxModals}
-            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer text-xs transition-colors"
+            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer text-xs transition-colors"
           >
             {lang === 'bn' ? 'বাতিল' : 'Cancel'}
           </button>
@@ -3459,14 +3465,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   {/* Phone Warning Modal */}
   {phoneWarningCustomer && (
     <div 
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
       onClick={closePhoneWarningModal}
     >
       <motion.div
         onClick={(e) => e.stopPropagation()}
         initial={{ opacity: 0, y: 50 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-white dark:bg-[#0D121D] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border border-slate-200/80 dark:border-slate-800"
+        className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border"
       >
         <div className="text-center mb-6">
           <div className="w-14 h-14 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3.5">
@@ -3481,8 +3487,8 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               : 'Please add/link a phone number to this customer profile first to send WhatsApp reminders.'}
           </p>
           
-          <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3.5 text-left mt-4 flex justify-between items-baseline">
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'গ্রাহক' : 'Customer'}</span>
+          <div className="surface-subcard border rounded-xl p-3.5 text-left mt-4 flex justify-between items-baseline">
+            <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{lang === 'bn' ? 'গ্রাহক' : 'Customer'}</span>
             <span className="text-sm font-bold text-slate-900 dark:text-white truncate max-w-[200px]">{phoneWarningCustomer.name}</span>
           </div>
         </div>
@@ -3501,6 +3507,8 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               
               setEditName(targetCustomer.name);
               setEditPhone('');
+              setEditAccountType(targetCustomer.accountType || 'standard');
+              setEditBillingDay(targetCustomer.billingDay ? String(targetCustomer.billingDay) : '');
               setEditError('');
               setIsEditingCustomer(true);
               setTimeout(() => {
@@ -3519,7 +3527,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 window.history.back();
               }
             }}
-            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer text-xs transition-colors"
+            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer text-xs transition-colors"
           >
             {lang === 'bn' ? 'বাতিল' : 'Cancel'}
           </button>
@@ -3531,14 +3539,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   {/* Pin Action Modal */}
   {pinActionCustomer && (
     <div 
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md animate-in fade-in duration-200"
       onClick={closePinActionModal}
     >
       <motion.div
         onClick={(e) => e.stopPropagation()}
         initial={{ opacity: 0, y: 50 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-white dark:bg-[#0D121D] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border border-slate-200/80 dark:border-slate-800"
+        className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border"
       >
         <div className="text-center mb-6">
           <div className="w-14 h-14 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3.5">
@@ -3584,7 +3592,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 window.history.back();
               }
             }}
-            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer text-xs transition-colors"
+            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer text-xs transition-colors"
           >
             {lang === 'bn' ? 'বাতিল' : 'Cancel'}
           </button>
@@ -3596,14 +3604,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   {/* Delete Customer Account Modal */}
   {deletingCustomer && (
     <div 
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
       onClick={closeDeleteCustomerModal}
     >
       <motion.div
         onClick={(e) => e.stopPropagation()}
         initial={{ opacity: 0, y: 50 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-white dark:bg-[#0D121D] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border border-slate-200/80 dark:border-slate-800"
+        className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border"
       >
         <div className="text-center mb-6">
           <div className="w-14 h-14 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3.5">
@@ -3619,19 +3627,19 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           </p>
           
           {/* Details Card showing customer name, phone, and outstanding balance */}
-          <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3.5 text-left space-y-2 mt-4">
+          <div className="surface-subcard border rounded-xl p-3.5 text-left space-y-2 mt-4">
             <div className="flex justify-between items-baseline">
-              <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'নাম' : 'Name'}</span>
+              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{lang === 'bn' ? 'নাম' : 'Name'}</span>
               <span className="text-sm font-bold text-slate-900 dark:text-white truncate max-w-[200px]">{deletingCustomer.name}</span>
             </div>
             {deletingCustomer.phone && (
               <div className="flex justify-between items-baseline">
-                <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'মোবাইল' : 'Mobile'}</span>
+                <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{lang === 'bn' ? 'মোবাইল' : 'Mobile'}</span>
                 <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300">{deletingCustomer.phone}</span>
               </div>
             )}
             <div className="flex justify-between items-baseline">
-              <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'বর্তমান ব্যালেন্স' : 'Current Balance'}</span>
+              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{lang === 'bn' ? 'বর্তমান ব্যালেন্স' : 'Current Balance'}</span>
               <span className={`text-sm font-black font-mono ${
                 deletingCustomer.outstandingDue > 0
                   ? 'text-rose-600 dark:text-rose-400'
@@ -3639,7 +3647,9 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                   ? 'text-emerald-600 dark:text-emerald-400' 
                   : 'text-slate-500'
               }`}>
-                {deletingCustomer.outstandingDue === 0 ? (lang === 'bn' ? 'পরিশোধিত' : 'Settled') : `৳ ${formatNumber(deletingCustomer.outstandingDue, lang)}`}
+                {deletingCustomer.outstandingDue === 0
+                  ? (lang === 'bn' ? 'পরিশোধিত' : 'Settled')
+                  : `৳ ${formatNumber(deletingCustomer.outstandingDue, lang)}`}
               </span>
             </div>
           </div>
@@ -3657,7 +3667,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               setSelectedCustomerId(null);
               toast.info(lang === 'bn' ? 'গ্রাহক ট্র্যাশে স্থানান্তরিত হয়েছে' : 'Customer account moved to trash');
             }}
-            className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent hover:border-slate-950 dark:hover:border-white cursor-pointer text-xs transition-colors"
+            className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent cursor-pointer text-xs transition-colors"
           >
             {lang === 'bn' ? 'হ্যাঁ, ট্র্যাশে পাঠান' : 'Yes, Trash'}
           </button>
@@ -3668,7 +3678,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 window.history.back();
               }
             }}
-            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer text-xs transition-colors"
+            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer text-xs transition-colors"
           >
             {lang === 'bn' ? 'বাতিল' : 'Cancel'}
           </button>
@@ -3678,11 +3688,11 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   )}
   {/* Duplicate Entry Warning Modal */}
   {duplicateTxWarning && (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md">
       <motion.div
         initial={{ opacity: 0, y: 50 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-white dark:bg-[#0D121D] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border border-slate-200/80 dark:border-slate-800"
+        className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border"
       >
         <div className="text-center mb-6">
           <div className="w-14 h-14 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3.5">
@@ -3696,9 +3706,9 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           </p>
           
           {/* Details Card */}
-          <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3.5 text-left space-y-2 mt-4">
+          <div className="surface-subcard border rounded-xl p-3.5 text-left space-y-2 mt-4">
             <div className="flex justify-between items-baseline">
-              <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">{t.type}</span>
+              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{t.type}</span>
               <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${
                 duplicateTxWarning.type === 'due' 
                   ? 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400 border-rose-200 dark:border-rose-800' 
@@ -3708,7 +3718,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               </span>
             </div>
             <div className="flex justify-between items-baseline">
-              <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">{t.amount}</span>
+              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{t.amount}</span>
               <span className={`text-sm font-black font-mono ${
                 duplicateTxWarning.type === 'due' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
               }`}>
@@ -3737,7 +3747,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               setDuplicateTxWarning(null);
               await executeInlineTransaction(true);
             }}
-            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer text-xs transition-colors"
+            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer text-xs transition-colors"
           >
             {t.addAnyway}
           </button>
@@ -3746,7 +3756,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             onClick={() => {
               setDuplicateTxWarning(null);
             }}
-            className="w-full py-2.5 bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-600 dark:text-slate-400 font-bold rounded-xl text-xs cursor-pointer transition-colors"
+            className="w-full py-2.5 bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 font-bold rounded-xl text-xs cursor-pointer transition-colors"
           >
             {t.cancel}
           </button>
@@ -3758,17 +3768,17 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   {/* RECEIPT IMAGE PREVIEW MODAL */}
   {receiptResult && (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 dark:bg-black/80 backdrop-blur-md animate-in fade-in duration-150"
       onClick={closeReceiptModal}
     >
       <motion.div
         onClick={(e) => e.stopPropagation()}
         initial={{ opacity: 0, scale: 0.96, y: 16 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="bg-white dark:bg-[#0D121D] w-full max-w-sm sm:max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] border border-slate-200/80 dark:border-slate-800"
+        className="glass-modal w-full max-w-sm sm:max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] border"
       >
         {/* Modal Header */}
-        <div className="p-3.5 px-5 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between bg-slate-50/70 dark:bg-slate-900/50">
+        <div className="p-3.5 px-5 border-b border-slate-200/70 dark:border-white/[0.08] flex items-center justify-between bg-slate-50/50 dark:bg-white/[0.02]">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/80 shrink-0">
               <ReceiptText className="w-4 h-4" />
@@ -3785,7 +3795,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           <button
             type="button"
             onClick={closeReceiptModal}
-            className="p-1.5 rounded-lg border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-slate-500 dark:text-slate-400 transition-colors cursor-pointer shrink-0 ml-2"
+            className="p-1.5 rounded-lg border-2 border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 transition-colors cursor-pointer shrink-0 ml-2"
           >
             <X className="w-4 h-4" />
           </button>
@@ -3803,7 +3813,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
         </div>
 
         {/* Actions Footer */}
-        <div className="p-4 border-t border-slate-100 dark:border-slate-800/80 bg-white dark:bg-[#0D121D] space-y-2">
+        <div className="p-4 border-t border-slate-200/70 dark:border-white/[0.08] bg-white/60 dark:bg-white/[0.02] space-y-2">
           <div className="flex gap-2">
             <button
               type="button"
@@ -3816,7 +3826,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 });
                 toast.success(lang === 'bn' ? 'রসিদ ইমেজ ডাউনলোড সম্পন্ন হয়েছে' : 'Receipt downloaded successfully');
               }}
-              className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl border-2 border-transparent hover:border-slate-950 dark:hover:border-white text-xs flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer active:scale-[0.98]"
+              className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl border-2 border-transparent text-xs flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer active:scale-[0.98]"
             >
               <Download className="w-4 h-4" />
               <span>{lang === 'bn' ? 'ডাউনলোড PNG' : 'Download PNG'}</span>
@@ -3835,7 +3845,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                   toast.error(lang === 'bn' ? 'কপি সমর্থিত নয়, ডাউনলোড বাটন ব্যবহার করুন' : 'Copy not supported on this browser');
                 }
               }}
-              className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-[0.98]"
+              className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-[0.98]"
               title={lang === 'bn' ? 'ক্লিপবোর্ডে কপি করুন' : 'Copy Image'}
             >
               {isCopiedReceipt ? <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> : <Copy className="w-4 h-4" />}
@@ -3849,7 +3859,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                   triggerHaptic('single');
                   await shareReceiptImage(receiptResult.blob, receiptResult.fileName, selectedCustomer?.name || 'Customer');
                 }}
-                className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-[0.98]"
+                className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-[0.98]"
                 title={lang === 'bn' ? 'শেয়ার করুন' : 'Share'}
               >
                 <Share2 className="w-4 h-4" />
@@ -3881,16 +3891,16 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   {/* Client-Specific Statement Merge & Fresh Ledger Modal */}
   {isManageStatementsOpen && selectedCustomer && archiveCustomerExcessStatements && (
     <div 
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs no-select"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md no-select"
       onClick={() => { if (!isManualArchiving) setIsManageStatementsOpen(false); }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="animate-slide-up bg-white dark:bg-[#0D121D] w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden"
+        className="animate-slide-up glass-modal w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl border overflow-hidden"
       >
 
         {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+        <div className="p-4 sm:p-5 border-b border-slate-200/70 dark:border-white/[0.08] flex items-center justify-between">
           <div>
             <h3 className="text-base font-extrabold text-slate-950 dark:text-white">
               {lang === 'bn' ? 'খতিয়ান স্টেটমেন্ট ব্যবস্থাপনা' : 'Manage Client Ledger'}
@@ -3906,7 +3916,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               triggerHaptic('medium');
               setIsManageStatementsOpen(false);
             }}
-            className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-lg text-slate-600 dark:text-slate-300 cursor-pointer transition-colors"
+            className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 cursor-pointer transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -3914,9 +3924,9 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
         <div className="p-5 space-y-5 max-h-[80vh] overflow-y-auto hide-scrollbar">
           {/* Option 1: Keep Last N Entries (Manual Merge) */}
-          <div className="p-4 rounded-xl bg-slate-50/80 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-800 space-y-3.5">
+          <div className="p-4 rounded-xl surface-subcard border space-y-3.5">
             <div className="space-y-1">
-              <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-1.5">
+              <h4 className={`text-xs font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
                 <Archive className="w-3.5 h-3.5" />
                 <span>{lang === 'bn' ? 'নির্দিষ্ট সংখ্যক এন্ট্রি রেখে বাকিগুলো মার্জ করুন' : 'Merge & Keep Recent Entries'}</span>
               </h4>
@@ -4000,9 +4010,9 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           </div>
 
           {/* Option 2: Start Fresh Ledger after a settlement (download previous entries in background) */}
-          <div className="p-4 rounded-xl bg-slate-50/80 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-800 space-y-3">
+          <div className="p-4 rounded-xl surface-subcard border space-y-3">
             <div className="space-y-1">
-              <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-1.5">
+              <h4 className={`text-xs font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>{lang === 'bn' ? 'হিসাব নিষ্পত্তির পর নতুন খতিয়ান শুরু করুন' : 'Start Fresh Ledger (Post-Settlement)'}</span>
               </h4>
@@ -4056,7 +4066,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                   setIsManualArchiving(false);
                 }
               }}
-              className="w-full py-2.5 px-4 bg-white hover:bg-slate-100 dark:bg-[#0D121D] dark:hover:bg-slate-800 text-slate-900 dark:text-white font-bold text-xs rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white cursor-pointer transition-all flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50"
+              className="w-full py-2.5 px-4 bg-white hover:bg-slate-100 dark:bg-[#0D121D] dark:hover:bg-slate-800 text-slate-900 dark:text-white font-bold text-xs rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer transition-all flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50"
             >
               <Download className="w-3.5 h-3.5" />
               <span>{lang === 'bn' ? 'পূর্বের হিসাব ডাউনলোড করে নতুন খতিয়ান শুরু করুন' : 'Download History & Start Fresh Ledger'}</span>
@@ -4070,12 +4080,12 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   {/* Transaction Audit History Log Modal */}
   {auditLogTx && (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs no-select"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md no-select"
       onClick={() => setAuditLogTx(null)}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="animate-slide-up bg-white dark:bg-[#0D121D] w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden flex flex-col max-h-[85vh]"
+        className="animate-slide-up glass-modal w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl border overflow-hidden flex flex-col max-h-[85vh]"
       >
         <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -4094,7 +4104,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           <button
             type="button"
             onClick={() => setAuditLogTx(null)}
-            className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-lg text-slate-600 dark:text-slate-300 cursor-pointer transition-colors"
+            className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 cursor-pointer transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -4104,7 +4114,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           {/* Current Version */}
           <div className="p-3.5 rounded-xl border-2 border-emerald-500/50 bg-emerald-50/50 dark:bg-emerald-950/20 space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+              <span className={`text-[11px] font-extrabold text-emerald-700 dark:text-emerald-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
                 {lang === 'bn' ? 'বর্তমান সক্রিয় হিসাব' : 'Current Active Record'}
               </span>
               <span className="text-xs font-mono font-bold text-emerald-700 dark:text-emerald-400">
@@ -4125,7 +4135,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           {/* Past Audit History */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+              <h4 className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
                 {lang === 'bn' ? 'পূর্ববর্তী সংস্করণসমূহ' : 'Prior Revisions'}
               </h4>
               {auditLogTx.auditHistory && auditLogTx.auditHistory.length > 0 && (
@@ -4149,7 +4159,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             {auditLogTx.auditHistory && auditLogTx.auditHistory.length > 0 ? (
               <div className="space-y-2.5">
                 {auditLogTx.auditHistory.map((item, idx) => (
-                  <div key={idx} className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 space-y-1">
+                  <div key={idx} className="p-3 rounded-xl border surface-subcard space-y-1">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-bold text-slate-500">
                         {lang === 'bn' ? `সংস্করণ #${auditLogTx.auditHistory!.length - idx}` : `Revision #${auditLogTx.auditHistory!.length - idx}`}

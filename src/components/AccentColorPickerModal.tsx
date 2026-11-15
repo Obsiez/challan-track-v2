@@ -83,7 +83,7 @@ export default function AccentColorPickerModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-reveal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md animate-reveal">
       <div 
         onClick={() => {
           triggerHaptic('single');
@@ -92,7 +92,7 @@ export default function AccentColorPickerModal({
         className="fixed inset-0"
       />
       
-      <div className="relative w-full max-w-md bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800 rounded-2xl shadow-2xl p-5 sm:p-6 space-y-5 z-10 text-slate-900 dark:text-slate-100 max-h-[90vh] overflow-y-auto hide-scrollbar">
+      <div className="relative w-full max-w-md glass-modal border rounded-2xl p-5 sm:p-6 space-y-5 z-10 text-slate-900 dark:text-slate-100 max-h-[90vh] overflow-y-auto hide-scrollbar">
         
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-3.5">
@@ -113,7 +113,7 @@ export default function AccentColorPickerModal({
               triggerHaptic('single');
               onClose();
             }}
-            className="p-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white transition-colors cursor-pointer text-slate-600 dark:text-slate-300"
+            className="p-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 transition-colors cursor-pointer text-slate-600 dark:text-slate-300"
           >
             <X className="w-4 h-4" />
           </button>
@@ -135,7 +135,7 @@ export default function AccentColorPickerModal({
                   className={`p-2.5 rounded-xl border-2 flex flex-col gap-1.5 text-left transition-all cursor-pointer ${
                     isSelected
                       ? 'border-slate-950 dark:border-white bg-slate-50 dark:bg-slate-900 shadow-2xs font-bold'
-                      : 'border-slate-300 dark:border-slate-700 hover:border-slate-950 dark:hover:border-white bg-white dark:bg-[#0D121D]'
+                      : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-900/60'
                   }`}
                 >
                   <div className="flex items-center justify-between w-full">
@@ -198,7 +198,7 @@ export default function AccentColorPickerModal({
                   className={`p-2.5 rounded-xl border-2 flex items-center gap-2.5 text-left transition-all cursor-pointer ${
                     isSelected
                       ? 'border-slate-950 dark:border-white bg-slate-50 dark:bg-slate-900 shadow-2xs font-bold'
-                      : 'border-slate-300 dark:border-slate-700 hover:border-slate-950 dark:hover:border-white bg-white dark:bg-[#0D121D]'
+                      : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-900/60'
                   }`}
                 >
                   <span 
@@ -239,7 +239,7 @@ export default function AccentColorPickerModal({
               />
             </div>
 
-            <label className="relative p-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-xl cursor-pointer flex items-center justify-center shrink-0">
+            <label className="relative p-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 rounded-xl cursor-pointer flex items-center justify-center shrink-0 transition-colors">
               <input 
                 type="color"
                 value={currentColor}

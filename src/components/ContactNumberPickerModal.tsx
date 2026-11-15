@@ -71,7 +71,7 @@ export default function ContactNumberPickerModal({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+      <div className="fixed inset-0 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
         <div className="absolute inset-0" onClick={onClose} />
 
         <motion.div
@@ -79,7 +79,7 @@ export default function ContactNumberPickerModal({
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 20, scale: 0.98 }}
           transition={{ duration: 0.15, ease: 'easeOut' }}
-          className="bg-white dark:bg-[#0D121D] w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-slate-200 dark:border-slate-800/80 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col relative z-10"
+          className="glass-modal w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border shadow-2xl overflow-hidden max-h-[92vh] flex flex-col relative z-10"
         >
           {/* Mobile Top Indicator Bar */}
           <div className="flex justify-center pt-2.5 pb-1 sm:hidden">
@@ -87,7 +87,7 @@ export default function ContactNumberPickerModal({
           </div>
 
           {/* Modal Header */}
-          <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800/80 flex items-center justify-between">
+          <div className="p-4 sm:p-5 border-b border-slate-200/70 dark:border-white/[0.08] flex items-center justify-between">
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-10 h-10 rounded-xl bg-slate-950 dark:bg-white text-white dark:text-slate-950 font-black text-base flex items-center justify-center shrink-0">
                 {firstLetter}
@@ -116,7 +116,7 @@ export default function ContactNumberPickerModal({
 
             <button
               onClick={onClose}
-              className="p-2 bg-white hover:bg-slate-100 dark:bg-[#0D121D] dark:hover:bg-slate-800 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white rounded-xl transition-colors cursor-pointer shrink-0 shadow-2xs"
+              className="p-2 bg-white hover:bg-slate-100 dark:bg-[#0D121D] dark:hover:bg-slate-800 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-700 rounded-xl transition-colors cursor-pointer shrink-0 shadow-2xs"
               title={lang === 'bn' ? 'বন্ধ করুন' : 'Close'}
             >
               <X className="w-4 h-4" />
@@ -127,7 +127,7 @@ export default function ContactNumberPickerModal({
           <div className="p-4 sm:p-5 space-y-4 overflow-y-auto hide-scrollbar">
             {/* Optional Customer Name Edit Field when creating new account */}
             {isNewAccount && (
-              <div className="p-3.5 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800/80 rounded-xl space-y-1.5">
+              <div className="p-3.5 surface-subcard border rounded-xl space-y-1.5">
                 <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                   {lang === 'bn' ? 'গ্রাহকের নাম (প্রয়োজনে পরিবর্তন করতে পারেন)' : 'Customer Name (Edit if needed)'}
                 </label>
@@ -177,7 +177,7 @@ export default function ContactNumberPickerModal({
                     className={`p-3.5 rounded-xl border-2 transition-all cursor-pointer flex items-center justify-between gap-3 touch-manipulation select-none active:scale-[0.99] shadow-2xs ${
                       isSelected
                         ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
-                        : 'bg-white border-slate-300 dark:bg-[#0D121D] dark:border-slate-700 text-slate-900 dark:text-white hover:border-slate-900 dark:hover:border-white hover:bg-slate-50 dark:hover:bg-slate-900/60'
+                        : 'bg-white border-slate-300 dark:bg-[#0D121D] dark:border-slate-700 text-slate-900 dark:text-white hover:bg-slate-50 dark:hover:bg-slate-900/60'
                     }`}
                   >
                     {/* Left: Radio Indicator & Formatted Number */}
@@ -219,7 +219,7 @@ export default function ContactNumberPickerModal({
           </div>
 
           {/* Modal Footer Actions */}
-          <div className="p-4 sm:p-5 border-t border-slate-200 dark:border-slate-800/80 bg-white dark:bg-[#0D121D] space-y-2 shrink-0">
+          <div className="p-4 sm:p-5 border-t border-slate-200/70 dark:border-white/[0.08] bg-white/60 dark:bg-white/[0.02] space-y-2 shrink-0">
             <button
               type="button"
               onClick={handleConfirm}
@@ -249,7 +249,7 @@ export default function ContactNumberPickerModal({
             <button
               type="button"
               onClick={onClose}
-              className="w-full py-2.5 bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-700 hover:border-slate-900 dark:hover:border-white font-bold rounded-xl text-xs cursor-pointer transition-colors shadow-2xs"
+              className="w-full py-2.5 bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-700 font-bold rounded-xl text-xs cursor-pointer transition-colors shadow-2xs"
             >
               {lang === 'bn' ? 'বাতিল' : 'Cancel'}
             </button>
