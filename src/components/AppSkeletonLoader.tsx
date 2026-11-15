@@ -120,57 +120,57 @@ export function DashboardSkeleton() {
 
 export function AppShellSkeleton() {
   return (
-    <div className="relative min-h-screen app-canvas-bg flex flex-col lg:flex-row transition-colors">
+    <div className="relative min-h-screen app-canvas-bg flex flex-col md:flex-row transition-colors">
       <div aria-hidden="true" className="app-ambient-backdrop">
         <div className="app-ambient-grid" />
       </div>
 
       {/* Desktop Left Rail Skeleton */}
-      <aside className="hidden lg:flex w-64 shrink-0 sticky top-0 h-screen exec-sidebar px-4 py-6 flex-col justify-between z-30">
-        <div className="space-y-6">
+      <aside className="hidden md:flex w-60 lg:w-64 shrink-0 sticky top-0 h-screen exec-sidebar px-4 py-5 flex-col justify-between z-30 border-r">
+        <div className="space-y-4">
           <div className="flex items-center gap-3 px-2">
             <div className="w-9 h-9 rounded-xl skeleton-shimmer" />
             <div className="w-32 h-5 rounded-lg skeleton-shimmer" />
           </div>
-          <div className="w-full h-12 rounded-2xl skeleton-shimmer" />
+          <div className="w-full h-10 rounded-xl skeleton-shimmer" />
           <div className="space-y-2 pt-2">
-            {[0, 1, 2, 3, 4, 5].map((item) => (
-              <div key={item} className="w-full h-11 rounded-xl skeleton-shimmer" />
+            {[0, 1, 2, 3, 4].map((item) => (
+              <div key={item} className="w-full h-10 rounded-xl skeleton-shimmer" />
             ))}
           </div>
         </div>
         <div className="grid grid-cols-3 gap-2 pt-4 border-t border-slate-200/60 dark:border-white/[0.06]">
-          <div className="h-11 rounded-xl skeleton-shimmer" />
-          <div className="h-11 rounded-xl skeleton-shimmer" />
-          <div className="h-11 rounded-xl skeleton-shimmer" />
+          <div className="h-9 rounded-xl skeleton-shimmer" />
+          <div className="h-9 rounded-xl skeleton-shimmer" />
+          <div className="h-9 rounded-xl skeleton-shimmer" />
         </div>
       </aside>
 
-      <div className="flex-1 flex flex-col min-w-0 pb-24 lg:pb-10">
-        {/* Mobile & Tablet Header Placeholder */}
-        <header className="lg:hidden glass-chrome-header bg-white/75 dark:bg-[#121215]/75 backdrop-blur-xl border-b border-slate-200/70 dark:border-white/[0.08] py-3 px-4 sticky top-0 z-30">
+      <div className="flex-1 flex flex-col min-w-0 pb-24 md:pb-6">
+        {/* Mobile Header Placeholder */}
+        <header className="md:hidden glass-chrome-header bg-white/75 dark:bg-[#121215]/75 backdrop-blur-xl border-b border-slate-200/70 dark:border-white/[0.08] py-3 px-4 sticky top-0 z-30">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
               <div className="w-9 h-9 rounded-xl skeleton-shimmer" />
               <div className="w-28 h-5 rounded-lg skeleton-shimmer" />
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-11 h-11 rounded-xl skeleton-shimmer" />
-              <div className="w-11 h-11 rounded-xl skeleton-shimmer" />
-              <div className="w-11 h-11 rounded-xl skeleton-shimmer" />
-              <div className="w-11 h-11 rounded-xl skeleton-shimmer" />
+              <div className="w-9 h-9 rounded-xl skeleton-shimmer" />
+              <div className="w-9 h-9 rounded-xl skeleton-shimmer" />
+              <div className="w-9 h-9 rounded-xl skeleton-shimmer" />
+              <div className="w-9 h-9 rounded-xl skeleton-shimmer" />
             </div>
           </div>
         </header>
 
         {/* Main Content Skeleton */}
-        <main className="relative z-10 flex-1 max-w-5xl w-full mx-auto px-4 py-5 sm:px-8 sm:py-8">
+        <main className="relative z-10 flex-1 max-w-6xl w-full mx-auto px-4 py-5 sm:px-8 sm:py-8">
           <DashboardSkeleton />
         </main>
       </div>
 
       {/* Mobile Bottom Dock Placeholder */}
-      <nav className="fixed bottom-0 inset-x-0 glass-chrome-bottom bg-white/80 dark:bg-[#121215]/80 backdrop-blur-xl border-t border-slate-200/70 dark:border-white/[0.08] h-[72px] px-4 z-40 lg:hidden flex items-center">
+      <nav className="fixed bottom-0 inset-x-0 glass-chrome-bottom bg-white/80 dark:bg-[#121215]/80 backdrop-blur-xl border-t border-slate-200/70 dark:border-white/[0.08] h-[72px] px-4 z-40 md:hidden flex items-center">
         <div className="max-w-md w-full mx-auto flex items-center justify-between">
           {[0, 1, 2, 3].map((tab) => (
             <div key={tab} className="flex flex-col items-center gap-1.5 w-16">

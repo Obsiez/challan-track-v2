@@ -22,7 +22,7 @@ import CalculatorKeypad from './components/CalculatorKeypad';
 import { isBiometricEnabled, isBiometricSessionUnlocked, setBiometricSessionUnlocked } from './lib/biometrics';
 import { getSavedAccentColor, applyAccentColor, getSavedThemePalette, applyThemePalette } from './lib/accentTheme';
 import {
-  LayoutDashboard, Users, Bell, BellDot, Settings, BookOpen, Clock, Globe, Plus, Moon, Sun, ArrowUpRight, ArrowDownLeft, ChevronRight, BarChart3, ArrowLeft, ClipboardList, Lock, Loader2, Calendar, PiggyBank, Goal, Palette
+  LayoutDashboard, Users, Bell, BellDot, Settings, BookOpen, Clock, Globe, Plus, Moon, Sun, ArrowUpRight, ArrowDownLeft, ChevronRight, BarChart3, ArrowLeft, ClipboardList, Lock, Loader2, Calendar, PiggyBank, Goal, Palette, LogOut
 } from 'lucide-react';
 import { AppShellSkeleton, DashboardSkeleton } from './components/AppSkeletonLoader';
 import { showNotification } from './lib/notifications';
@@ -796,7 +796,7 @@ export default function App() {
 
   // --- 2. MAIN APP CONTAINER (LOGGED IN & TRANSLATED) ---
   return (
-    <div className="relative min-h-screen bg-white dark:bg-[#090D14] text-slate-900 dark:text-slate-100 flex flex-col no-select pb-24 transition-colors">
+    <div className="relative min-h-screen bg-white dark:bg-[#090D14] text-slate-900 dark:text-slate-100 flex flex-col md:flex-row no-select transition-colors">
       <div aria-hidden="true" className="app-ambient-backdrop">
         <div className="app-ambient-grid" />
       </div>
@@ -813,83 +813,277 @@ export default function App() {
           className: 'sonner-custom-toast'
         }}
       />
-      
-      {/* 1-Row, 3-Zone Frosted Glass Top Bar */}
-      <header className="glass-chrome-header bg-white/75 dark:bg-[#121215]/75 backdrop-blur-xl backdrop-saturate-150 border-b border-slate-200/70 dark:border-white/[0.08] py-3 px-4 sm:px-6 sticky top-0 z-30 transition-colors">
-        <div className="max-w-6xl mx-auto flex items-center justify-between gap-3 sm:gap-4">
-          
-          {/* Zone 1: Pure Typographic Logo with Squircle Mark */}
+
+      {/* DESKTOP ONLY: Left Sidebar (Executive Navigation Rail) */}
+      <aside className="hidden md:flex flex-col w-60 lg:w-64 shrink-0 sticky top-0 h-screen exec-sidebar z-30 transition-colors justify-between p-4 lg:p-5 select-none border-r">
+        {/* Top: Brand & Primary Navigation */}
+        <div className="space-y-4">
           <div 
             onClick={() => { triggerHaptic('single'); navigateTo('home'); }}
-            className="flex items-center gap-2.5 cursor-pointer group select-none active:scale-[0.98] transition-transform"
+            className="flex items-center gap-3 px-2 py-1.5 cursor-pointer group active:scale-[0.98] transition-transform rounded-xl hover:bg-slate-100/60 dark:hover:bg-white/[0.04]"
             role="button"
             tabIndex={0}
             title={lang === 'bn' ? 'ড্যাশবোর্ডে ফিরে যান' : 'Go to Dashboard'}
           >
-            <ChallanTrackLogo size="md" variant="compact" />
+            <ChallanTrackLogo size="md" variant="full" />
           </div>
 
-          {/* Zone 3: Quick Action Triggers & Utilities */}
-          <div className="flex items-center gap-2">
+          {/* Primary Quick Entry Button */}
+          <button
+            onClick={openQuickEntry}
+            className="w-full py-2.5 px-3.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 font-bold text-xs rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-[0.98] transition-all border-2 border-slate-950 dark:border-white"
+            id="sidebar_quick_entry_btn"
+          >
+            <Plus className="w-4 h-4 stroke-[3]" />
+            <span>{lang === 'bn' ? 'হিসাব লিখুন' : 'New Entry'}</span>
+          </button>
+
+          {/* Sidebar Navigation Items */}
+          <nav className="space-y-1.5 pt-2">
+            {/* Dashboard */}
             <button
-              onClick={openQuickEntry}
-              className="hidden sm:flex px-3.5 py-2 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 font-bold text-xs rounded-xl items-center gap-1.5 cursor-pointer shadow-sm active:scale-[0.98] transition-all border-2 border-slate-950 dark:border-white"
-              id="top_quick_entry_btn"
+              onClick={() => navigateTo('home')}
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-98 ${
+                (currentTab === 'home' || currentTab === 'daily_transactions')
+                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-950 hover:bg-slate-100/80 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60'
+              }`}
+              id="sidebar_nav_home"
             >
-              <Plus className="w-3.5 h-3.5 stroke-[3]" />
-              <span>{lang === 'bn' ? 'হিসাব লিখুন' : 'New Entry'}</span>
+              <LayoutDashboard className="w-4 h-4 stroke-[2.2] shrink-0" />
+              <span className="flex-1 text-left">{t.dashboard}</span>
+              {(currentTab === 'home' || currentTab === 'daily_transactions') && (
+                <span 
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: 'var(--accent-color)' }}
+                />
+              )}
             </button>
 
-            {/* Custom Accent & Theme Color Palette Trigger */}
+            {/* Customers / Clients */}
             <button
-              onClick={() => {
-                triggerHaptic('single');
-                setIsAccentModalOpen(true);
-              }}
-              className="p-2 rounded-xl bg-white/75 dark:bg-white/[0.04] hover:bg-white dark:hover:bg-white/[0.09] backdrop-blur-md border-2 border-slate-300/90 dark:border-slate-700/90 cursor-pointer transition-all shadow-2xs relative active:scale-95"
-              title={lang === 'bn' ? 'থিম ও অ্যাকসেন্ট কালার পরিবর্তন' : 'Theme & Accent Palette'}
-              id="header_accent_palette_btn"
+              onClick={() => navigateTo('customers')}
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-98 ${
+                currentTab === 'customers'
+                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-950 hover:bg-slate-100/80 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60'
+              }`}
+              id="sidebar_nav_customers"
             >
-              <Palette className="w-3.5 h-3.5 text-slate-900 dark:text-white" />
+              <Users className="w-4 h-4 stroke-[2.2] shrink-0" />
+              <span className="flex-1 text-left">{t.clients}</span>
+              {currentTab === 'customers' && (
+                <span 
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: 'var(--accent-color)' }}
+                />
+              )}
             </button>
 
-            {/* Reminders Header Action Button */}
+            {/* Goals */}
+            <button
+              onClick={() => navigateTo('goals')}
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-98 ${
+                currentTab === 'goals'
+                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-950 hover:bg-slate-100/80 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60'
+              }`}
+              id="sidebar_nav_goals"
+            >
+              <Goal className="w-4 h-4 stroke-[2.2] shrink-0" />
+              <span className="flex-1 text-left">{t.goals}</span>
+              {currentTab === 'goals' && (
+                <span 
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: 'var(--accent-color)' }}
+                />
+              )}
+            </button>
+
+            {/* Reminders */}
             <button
               onClick={() => { triggerHaptic('single'); navigateTo('reminders'); }}
-              className={`p-2 sm:px-3 sm:py-2 rounded-xl border-2 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs backdrop-blur-md ${
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-98 ${
                 currentTab === 'reminders'
-                  ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
-                  : 'bg-white/75 hover:bg-white dark:bg-white/[0.04] dark:hover:bg-white/[0.09] text-slate-800 dark:text-slate-200 border-slate-300/90 dark:border-slate-700/90'
+                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-950 hover:bg-slate-100/80 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60'
               }`}
-              title={t.reminders}
-              id="header_reminders_btn"
+              id="sidebar_nav_reminders"
             >
               {reminders.some(r => r.active) ? (
-                <BellDot className="w-3.5 h-3.5 stroke-[2]" />
+                <BellDot className="w-4 h-4 stroke-[2.2] shrink-0 text-amber-500" />
               ) : (
-                <Bell className="w-3.5 h-3.5 stroke-[2]" />
+                <Bell className="w-4 h-4 stroke-[2.2] shrink-0" />
               )}
-              <span className="hidden sm:inline">{t.reminders}</span>
+              <span className="flex-1 text-left">{t.reminders}</span>
+              {reminders.some(r => r.active) && (
+                <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                  {reminders.filter(r => r.active).length}
+                </span>
+              )}
             </button>
 
-            {/* Theme Toggle */}
+            {/* Settings */}
+            <button
+              onClick={() => navigateTo('settings')}
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-98 ${
+                currentTab === 'settings'
+                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-950 hover:bg-slate-100/80 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60'
+              }`}
+              id="sidebar_nav_settings"
+            >
+              <Settings className="w-4 h-4 stroke-[2.2] shrink-0" />
+              <span className="flex-1 text-left">{t.settings}</span>
+              {currentTab === 'settings' && (
+                <span 
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: 'var(--accent-color)' }}
+                />
+              )}
+            </button>
+          </nav>
+        </div>
+
+        {/* Bottom Utility Controls & Profile */}
+        <div className="pt-4 border-t border-slate-200/70 dark:border-white/[0.08] space-y-3">
+          {/* Quick Utility Row: Theme, Palette, Lang */}
+          <div className="grid grid-cols-3 gap-2">
             <button
               onClick={() => {
                 triggerHaptic('single');
                 handleThemeChange(theme === 'dark' ? 'light' : 'dark');
               }}
-              className="p-2 rounded-xl bg-white/75 hover:bg-white dark:bg-white/[0.04] dark:hover:bg-white/[0.09] backdrop-blur-md text-slate-900 dark:text-white border-2 border-slate-300/90 dark:border-slate-700/90 cursor-pointer transition-all shadow-2xs active:scale-95"
-              title="Toggle theme"
+              className="py-2 px-2.5 rounded-xl bg-slate-100/80 hover:bg-slate-200/80 dark:bg-white/[0.05] dark:hover:bg-white/[0.1] text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 flex items-center justify-center cursor-pointer transition-colors"
+              title={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
             >
               {theme === 'dark' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
             </button>
+
+            <button
+              onClick={() => {
+                triggerHaptic('single');
+                setIsAccentModalOpen(true);
+              }}
+              className="py-2 px-2.5 rounded-xl bg-slate-100/80 hover:bg-slate-200/80 dark:bg-white/[0.05] dark:hover:bg-white/[0.1] text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 flex items-center justify-center cursor-pointer transition-colors"
+              title={lang === 'bn' ? 'থিম ও কালার' : 'Theme & Palette'}
+            >
+              <Palette className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              onClick={() => {
+                triggerHaptic('single');
+                handleLangChange(lang === 'bn' ? 'en' : 'bn');
+              }}
+              className="py-2 px-2.5 rounded-xl bg-slate-100/80 hover:bg-slate-200/80 dark:bg-white/[0.05] dark:hover:bg-white/[0.1] text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 flex items-center justify-center cursor-pointer transition-colors text-xs font-bold"
+              title="Toggle language"
+            >
+              {lang === 'bn' ? 'EN' : 'বাং'}
+            </button>
           </div>
 
+          {/* User Account / Sign Out Row */}
+          {user && (
+            <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200/60 dark:border-white/[0.06]">
+              <div className="min-w-0 flex-1 pr-2">
+                <p className="text-[11px] font-bold text-slate-900 dark:text-white truncate">
+                  {user.displayName || user.email?.split('@')[0] || 'User'}
+                </p>
+                <p className="text-[10px] text-slate-400 truncate">
+                  {user.email || ''}
+                </p>
+              </div>
+              <button
+                onClick={handleSignOut}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
+                title={t.signOut}
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
-      </header>
+      </aside>
 
-      {/* Main Core Content Stage */}
-      <main className="relative flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 mb-16 sm:mb-24">
+      {/* Main Content Column */}
+      <div className="flex-1 flex flex-col min-w-0 pb-24 md:pb-6">
+        {/* Mobile-Only Frosted Glass Top Bar */}
+        <header className="md:hidden glass-chrome-header bg-white/75 dark:bg-[#121215]/75 backdrop-blur-xl backdrop-saturate-150 border-b border-slate-200/70 dark:border-white/[0.08] py-3 px-4 sm:px-6 sticky top-0 z-30 transition-colors">
+          <div className="max-w-6xl mx-auto flex items-center justify-between gap-3 sm:gap-4">
+            
+            {/* Zone 1: Pure Typographic Logo with Squircle Mark */}
+            <div 
+              onClick={() => { triggerHaptic('single'); navigateTo('home'); }}
+              className="flex items-center gap-2.5 cursor-pointer group select-none active:scale-[0.98] transition-transform"
+              role="button"
+              tabIndex={0}
+              title={lang === 'bn' ? 'ড্যাশবোর্ডে ফিরে যান' : 'Go to Dashboard'}
+            >
+              <ChallanTrackLogo size="md" variant="compact" />
+            </div>
+
+            {/* Zone 3: Quick Action Triggers & Utilities */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={openQuickEntry}
+                className="hidden sm:flex px-3.5 py-2 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 font-bold text-xs rounded-xl items-center gap-1.5 cursor-pointer shadow-sm active:scale-[0.98] transition-all border-2 border-slate-950 dark:border-white"
+                id="top_quick_entry_btn"
+              >
+                <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                <span>{lang === 'bn' ? 'হিসাব লিখুন' : 'New Entry'}</span>
+              </button>
+
+              {/* Custom Accent & Theme Color Palette Trigger */}
+              <button
+                onClick={() => {
+                  triggerHaptic('single');
+                  setIsAccentModalOpen(true);
+                }}
+                className="p-2 rounded-xl bg-white/75 dark:bg-white/[0.04] hover:bg-white dark:hover:bg-white/[0.09] backdrop-blur-md border-2 border-slate-300/90 dark:border-slate-700/90 cursor-pointer transition-all shadow-2xs relative active:scale-95"
+                title={lang === 'bn' ? 'থিম ও অ্যাকসেন্ট কালার পরিবর্তন' : 'Theme & Accent Palette'}
+                id="header_accent_palette_btn"
+              >
+                <Palette className="w-3.5 h-3.5 text-slate-900 dark:text-white" />
+              </button>
+
+              {/* Reminders Header Action Button */}
+              <button
+                onClick={() => { triggerHaptic('single'); navigateTo('reminders'); }}
+                className={`p-2 sm:px-3 sm:py-2 rounded-xl border-2 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs backdrop-blur-md ${
+                  currentTab === 'reminders'
+                    ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
+                    : 'bg-white/75 hover:bg-white dark:bg-white/[0.04] dark:hover:bg-white/[0.09] text-slate-800 dark:text-slate-200 border-slate-300/90 dark:border-slate-700/90'
+                }`}
+                title={t.reminders}
+                id="header_reminders_btn"
+              >
+                {reminders.some(r => r.active) ? (
+                  <BellDot className="w-3.5 h-3.5 stroke-[2]" />
+                ) : (
+                  <Bell className="w-3.5 h-3.5 stroke-[2]" />
+                )}
+                <span className="hidden sm:inline">{t.reminders}</span>
+              </button>
+
+              {/* Theme Toggle */}
+              <button
+                onClick={() => {
+                  triggerHaptic('single');
+                  handleThemeChange(theme === 'dark' ? 'light' : 'dark');
+                }}
+                className="p-2 rounded-xl bg-white/75 hover:bg-white dark:bg-white/[0.04] dark:hover:bg-white/[0.09] backdrop-blur-md text-slate-900 dark:text-white border-2 border-slate-300/90 dark:border-slate-700/90 cursor-pointer transition-all shadow-2xs active:scale-95"
+                title="Toggle theme"
+              >
+                {theme === 'dark' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+
+          </div>
+        </header>
+
+        {/* Main Core Content Stage */}
+        <main className="relative flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 mb-8">
  
  {/* Loading skeleton for ledger initialization */}
  {ledgerLoading && (
@@ -1172,12 +1366,13 @@ updateSettings={updateSettings}
     </div>
   )}
   </main>
+  </div>
 
-  {/* FLOATING QUICK ENTRY TRIGGER */}
+  {/* FLOATING QUICK ENTRY TRIGGER (Mobile Only) */}
   {(currentTab === 'home' || (currentTab === 'customers' && !selectedCustomerIdForDetail)) && (
     <button
       onClick={openQuickEntry}
-      className="fixed w-13 h-13 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 rounded-2xl border-2 border-slate-900 dark:border-slate-100 flex items-center justify-center shadow-md transition-all cursor-pointer z-40 bottom-20 right-5 sm:bottom-24 active:scale-95"
+      className="fixed w-13 h-13 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 rounded-2xl border-2 border-slate-900 dark:border-slate-100 flex items-center justify-center shadow-md transition-all cursor-pointer z-40 bottom-20 right-5 sm:bottom-24 active:scale-95 md:hidden"
       title={t.recordEntry}
       id="fab_entry_btn"
     >
@@ -1265,57 +1460,6 @@ updateSettings={updateSettings}
       </button>
 
     </div>
-  </nav>
-
-  {/* DESKTOP ONLY FLOATING BOTTOM NAVBAR */}
-  <nav className="hidden md:flex fixed bottom-5 left-1/2 -translate-x-1/2 z-40 items-center gap-1.5 p-1.5 rounded-2xl desktop-floating-nav bg-white/80 dark:bg-[#121215]/80 backdrop-blur-xl backdrop-saturate-150 border-2 shadow-2xl transition-all">
-    <button
-      onClick={() => navigateTo('home')}
-      className={`relative flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 ${
-        (currentTab === 'home' || currentTab === 'daily_transactions')
-          ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-xs'
-          : 'text-slate-600 hover:text-slate-950 hover:bg-slate-100/80 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60'
-      }`}
-    >
-      <LayoutDashboard className="w-4 h-4 stroke-[2.2]" />
-      <span>{t.dashboard}</span>
-    </button>
-
-    <button
-      onClick={() => navigateTo('customers')}
-      className={`relative flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 ${
-        currentTab === 'customers'
-          ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-xs'
-          : 'text-slate-600 hover:text-slate-950 hover:bg-slate-100/80 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60'
-      }`}
-    >
-      <Users className="w-4 h-4 stroke-[2.2]" />
-      <span>{t.clients}</span>
-    </button>
-
-    <button
-      onClick={() => navigateTo('goals')}
-      className={`relative flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 ${
-        currentTab === 'goals'
-          ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-xs'
-          : 'text-slate-600 hover:text-slate-950 hover:bg-slate-100/80 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60'
-      }`}
-    >
-      <Goal className="w-4 h-4 stroke-[2.2]" />
-      <span>{t.goals}</span>
-    </button>
-
-    <button
-      onClick={() => navigateTo('settings')}
-      className={`relative flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 ${
-        currentTab === 'settings'
-          ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-xs'
-          : 'text-slate-600 hover:text-slate-950 hover:bg-slate-100/80 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60'
-      }`}
-    >
-      <Settings className="w-4 h-4 stroke-[2.2]" />
-      <span>{t.settings}</span>
-    </button>
   </nav>
 
   {/* RENDER MASTER QUICK_ADD FORM MODAL */}

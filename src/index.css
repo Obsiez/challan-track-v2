@@ -161,6 +161,19 @@ html:not(.dark) .app-canvas-bg {
   background-image: radial-gradient(rgba(255, 255, 255, 0.085) 1px, transparent 1px);
 }
 
+/* Desktop Left Executive Sidebar */
+.exec-sidebar {
+  background-color: rgba(var(--theme-light-surface-rgb, 255, 255, 255), 0.78);
+  -webkit-backdrop-filter: blur(20px) saturate(165%);
+  backdrop-filter: blur(20px) saturate(165%);
+  border-color: rgba(148, 163, 184, 0.28);
+}
+
+.dark .exec-sidebar {
+  background-color: rgba(var(--theme-bg-surface-rgb, 18, 18, 21), 0.76);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
 /* Translucent Frosted Top Header & Bottom Dock */
 .glass-chrome-header {
   background-color: rgba(var(--theme-light-surface-rgb, 255, 255, 255), 0.76);
