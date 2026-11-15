@@ -148,7 +148,7 @@ export function AppShellSkeleton() {
 
       <div className="flex-1 flex flex-col min-w-0 pb-24 lg:pb-10">
         {/* Mobile & Tablet Header Placeholder */}
-        <header className="lg:hidden glass-chrome-header border-b border-slate-200/70 dark:border-white/[0.08] py-3 px-4 sticky top-0 z-30">
+        <header className="lg:hidden glass-chrome-header bg-white/75 dark:bg-[#121215]/75 backdrop-blur-xl border-b border-slate-200/70 dark:border-white/[0.08] py-3 px-4 sticky top-0 z-30">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
               <div className="w-9 h-9 rounded-xl skeleton-shimmer" />
@@ -170,7 +170,7 @@ export function AppShellSkeleton() {
       </div>
 
       {/* Mobile Bottom Dock Placeholder */}
-      <nav className="fixed bottom-0 inset-x-0 glass-chrome-bottom border-t border-slate-200/70 dark:border-white/[0.08] h-[72px] px-4 z-40 lg:hidden flex items-center">
+      <nav className="fixed bottom-0 inset-x-0 glass-chrome-bottom bg-white/80 dark:bg-[#121215]/80 backdrop-blur-xl border-t border-slate-200/70 dark:border-white/[0.08] h-[72px] px-4 z-40 lg:hidden flex items-center">
         <div className="max-w-md w-full mx-auto flex items-center justify-between">
           {[0, 1, 2, 3].map((tab) => (
             <div key={tab} className="flex flex-col items-center gap-1.5 w-16">

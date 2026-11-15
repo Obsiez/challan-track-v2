@@ -470,6 +470,15 @@ export function applyThemePalette(paletteId: string, intensityOverride?: number)
   root.style.setProperty('--theme-light-canvas', canvasLight);
   root.style.setProperty('--theme-light-surface', surfaceLight);
 
+  const surfaceDarkRgb = hexToRgb(surfaceDark);
+  if (surfaceDarkRgb) {
+    root.style.setProperty('--theme-bg-surface-rgb', `${surfaceDarkRgb.r}, ${surfaceDarkRgb.g}, ${surfaceDarkRgb.b}`);
+  }
+  const surfaceLightRgb = hexToRgb(surfaceLight);
+  if (surfaceLightRgb) {
+    root.style.setProperty('--theme-light-surface-rgb', `${surfaceLightRgb.r}, ${surfaceLightRgb.g}, ${surfaceLightRgb.b}`);
+  }
+
   // Dynamic Theme Palette Border Colors for Toasts and UI
   root.style.setProperty('--theme-border-light', adjustedScale[300]);
   root.style.setProperty('--theme-border-dark', adjustedScale[700]);

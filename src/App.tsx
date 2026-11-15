@@ -815,7 +815,7 @@ export default function App() {
       />
       
       {/* 1-Row, 3-Zone Frosted Glass Top Bar */}
-      <header className="glass-chrome-header border-b border-slate-200/70 dark:border-white/[0.08] py-3 px-4 sm:px-6 sticky top-0 z-30 transition-colors">
+      <header className="glass-chrome-header bg-white/75 dark:bg-[#121215]/75 backdrop-blur-xl backdrop-saturate-150 border-b border-slate-200/70 dark:border-white/[0.08] py-3 px-4 sm:px-6 sticky top-0 z-30 transition-colors">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-3 sm:gap-4">
           
           {/* Zone 1: Pure Typographic Logo with Squircle Mark */}
@@ -1186,7 +1186,7 @@ updateSettings={updateSettings}
   )}
 
   {/* BOTTOM NAVIGATION TABS (Mobile Full-Width Frosted Dock) */}
-  <nav className="fixed bottom-0 inset-x-0 glass-chrome-bottom border-t border-slate-200/70 dark:border-white/[0.08] py-2.5 px-4 z-40 md:hidden transition-colors">
+  <nav className="fixed bottom-0 inset-x-0 glass-chrome-bottom bg-white/80 dark:bg-[#121215]/80 backdrop-blur-xl backdrop-saturate-150 border-t border-slate-200/70 dark:border-white/[0.08] py-2.5 px-4 z-40 md:hidden transition-colors">
     <div className="max-w-md mx-auto flex items-center justify-between">
       
       <button
@@ -1268,7 +1268,7 @@ updateSettings={updateSettings}
   </nav>
 
   {/* DESKTOP ONLY FLOATING BOTTOM NAVBAR */}
-  <nav className="hidden md:flex fixed bottom-5 left-1/2 -translate-x-1/2 z-40 items-center gap-1.5 p-1.5 rounded-2xl desktop-floating-nav backdrop-blur-md border-2 shadow-2xl transition-all">
+  <nav className="hidden md:flex fixed bottom-5 left-1/2 -translate-x-1/2 z-40 items-center gap-1.5 p-1.5 rounded-2xl desktop-floating-nav bg-white/80 dark:bg-[#121215]/80 backdrop-blur-xl backdrop-saturate-150 border-2 shadow-2xl transition-all">
     <button
       onClick={() => navigateTo('home')}
       className={`relative flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 ${
