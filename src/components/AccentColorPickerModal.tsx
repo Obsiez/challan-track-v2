@@ -12,6 +12,7 @@ import {
 import { triggerHaptic } from '../lib/haptics';
 import { Language, formatNumber } from '../lib/translations';
 import ScrollSafeSlider from './ScrollSafeSlider';
+import ModalPortal from './ModalPortal';
 
 interface AccentColorPickerModalProps {
   isOpen: boolean;
@@ -36,14 +37,20 @@ export default function AccentColorPickerModal({
       setCustomHex(saved);
       setCurrentThemePalette(getSavedThemePalette());
       setSurfaceIntensity(getSavedThemeIntensity());
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
     }
-    return () => {
-      document.body.style.overflow = '';
-    };
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        triggerHaptic('single');
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -82,49 +89,67 @@ export default function AccentColorPickerModal({
     applyThemePalette('obsidian', 50);
   };
 
+  const labelClass = lang === 'bn'
+    ? 'text-[11px] font-bold tracking-normal text-slate-500 dark:text-slate-400 block'
+    : 'micro-mono-label text-slate-500 dark:text-slate-400 font-semibold block';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md animate-reveal">
-      <div 
+    <ModalPortal>
+      <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-hidden">
+      <div
         onClick={() => {
           triggerHaptic('single');
           onClose();
         }}
-        className="fixed inset-0"
+        className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
       />
-      
-      <div className="relative w-full max-w-md glass-modal border rounded-2xl p-5 sm:p-6 space-y-5 z-10 text-slate-900 dark:text-slate-100 max-h-[90vh] overflow-y-auto hide-scrollbar">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-3.5">
-          <div className="flex items-center gap-2.5">
-            <Palette className="w-5 h-5 text-slate-950 dark:text-white shrink-0" />
-            <div>
-              <h3 className="text-base font-bold tracking-tight text-slate-950 dark:text-white">
+
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="animate-slide-up relative z-10 w-full sm:max-w-md glass-modal border rounded-t-[2rem] sm:rounded-3xl text-slate-900 dark:text-slate-100 max-h-[90dvh] flex flex-col overflow-hidden shadow-2xl"
+      >
+        {/* Mobile drag handle */}
+        <div className="flex justify-center pt-3 pb-1 sm:hidden shrink-0">
+          <div className="w-10 h-1 rounded-full bg-slate-400/40 dark:bg-white/20 mx-auto" />
+        </div>
+
+        {/* Sticky Header */}
+        <div className="flex items-center justify-between border-b border-slate-900/[0.06] dark:border-white/[0.06] px-5 sm:px-6 pt-3 sm:pt-5 pb-3.5 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-full bg-slate-900/[0.05] dark:bg-white/[0.08] border border-slate-900/[0.08] dark:border-white/[0.1] flex items-center justify-center shrink-0">
+              <Palette className="w-4 h-4 stroke-[1.25] text-slate-950 dark:text-white" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="font-display text-base font-bold tracking-tight text-slate-950 dark:text-white truncate">
                 {lang === 'bn' ? 'থিম ও অ্যাকসেন্ট প্যালেট' : 'Theme & Accent Palette'}
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+              <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
                 {lang === 'bn' ? 'অ্যাপের থিম, শেড এবং হাইলাইট রঙ পছন্দমতো সাজান' : 'Personalize surface shade and highlight colors'}
               </p>
             </div>
           </div>
 
           <button
+            type="button"
             onClick={() => {
               triggerHaptic('single');
               onClose();
             }}
-            className="p-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 transition-colors cursor-pointer text-slate-600 dark:text-slate-300"
+            className="w-9 h-9 rounded-full bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.06] dark:hover:bg-white/[0.12] border border-slate-900/[0.08] dark:border-white/[0.08] flex items-center justify-center transition-colors cursor-pointer text-slate-700 dark:text-slate-200 shrink-0 touch-press"
+            aria-label={lang === 'bn' ? 'বন্ধ করুন' : 'Close'}
           >
-            <X className="w-4 h-4" />
+            <X className="w-4 h-4 stroke-[1.25]" />
           </button>
         </div>
 
+        {/* Scrollable Content */}
+        <div className="flex-1 min-h-0 overflow-y-auto hide-scrollbar p-5 sm:p-6 space-y-5">
         {/* 1. Theme Surface Palettes */}
         <div className="space-y-3">
-          <label className="text-[11px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 font-bold block">
+          <label className={labelClass}>
             {lang === 'bn' ? 'থিম কালার প্যালেট (ব্যাকগ্রাউন্ড ও সারফেস)' : 'Theme Surface Palette'}
           </label>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {THEME_PALETTES.map((palette) => {
               const isSelected = currentThemePalette === palette.id;
               return (
@@ -132,10 +157,10 @@ export default function AccentColorPickerModal({
                   key={palette.id}
                   type="button"
                   onClick={() => handleSelectThemePalette(palette.id)}
-                  className={`p-2.5 rounded-xl border-2 flex flex-col gap-1.5 text-left transition-all cursor-pointer ${
+                  className={`p-3 rounded-2xl flex flex-col gap-2 text-left transition-all cursor-pointer touch-press ${
                     isSelected
-                      ? 'border-slate-950 dark:border-white bg-slate-50 dark:bg-slate-900 shadow-2xs font-bold'
-                      : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-900/60'
+                      ? 'border-2 border-slate-950 dark:border-white bg-slate-950/[0.06] dark:bg-white/[0.12] shadow-sm font-bold'
+                      : 'border border-slate-900/[0.08] dark:border-white/[0.08] bg-white/40 dark:bg-white/[0.03] hover:bg-white/70 dark:hover:bg-white/[0.07]'
                   }`}
                 >
                   <div className="flex items-center justify-between w-full">
@@ -143,14 +168,14 @@ export default function AccentColorPickerModal({
                       {palette.previewSwatches.map((hex, idx) => (
                         <span
                           key={idx}
-                          className="w-4 h-4 rounded-full border border-white/40 dark:border-black/40"
+                          className="w-4 h-4 rounded-full border border-white/50 dark:border-black/40 shadow-2xs"
                           style={{ backgroundColor: hex }}
                         />
                       ))}
                     </div>
-                    {isSelected && <Check className="w-3.5 h-3.5 text-slate-950 dark:text-white stroke-[3]" />}
+                    {isSelected && <Check className="w-3.5 h-3.5 text-slate-950 dark:text-white stroke-[1.5]" />}
                   </div>
-                  <span className="text-xs font-bold truncate text-slate-900 dark:text-white">
+                  <span className="text-xs font-semibold truncate text-slate-900 dark:text-white">
                     {lang === 'bn' ? palette.nameBn : palette.name}
                   </span>
                 </button>
@@ -159,12 +184,14 @@ export default function AccentColorPickerModal({
           </div>
 
           {/* Minimal Surface Shade Slider */}
-          <div className="pt-1.5 space-y-1.5">
-            <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 dark:text-slate-400">
-              <span className="uppercase tracking-wider font-bold">
+          <div className="pt-2 space-y-2">
+            <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+              <span className={lang === 'bn' ? 'text-[11px] font-bold tracking-normal' : 'micro-mono-label font-semibold'}>
                 {lang === 'bn' ? 'শেড' : 'Shade'}
               </span>
-              <span>{formatNumber(surfaceIntensity, lang)}%</span>
+              <span className="font-mono text-[11px] font-semibold tabular-nums">
+                {formatNumber(surfaceIntensity, lang)}%
+              </span>
             </div>
             <ScrollSafeSlider
               min={0}
@@ -181,33 +208,33 @@ export default function AccentColorPickerModal({
         </div>
 
         {/* 2. Preset Accent Color Swatches */}
-        <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800/80">
-          <label className="text-[11px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 font-bold block">
+        <div className="space-y-2.5 pt-3 border-t border-slate-900/[0.06] dark:border-white/[0.06]">
+          <label className={labelClass}>
             {lang === 'bn' ? 'অ্যাকসেন্ট কালার প্যালেট' : 'Accent Color Swatches'}
           </label>
-          
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {PRESET_ACCENTS.map((preset) => {
-              const isSelected = currentColor.toLowerCase() === preset.lightHex.toLowerCase() || 
+              const isSelected = currentColor.toLowerCase() === preset.lightHex.toLowerCase() ||
                                  currentColor.toLowerCase() === preset.previewHex.toLowerCase();
               return (
                 <button
                   key={preset.id}
                   type="button"
                   onClick={() => handleSelectColor(preset.lightHex)}
-                  className={`p-2.5 rounded-xl border-2 flex items-center gap-2.5 text-left transition-all cursor-pointer ${
+                  className={`px-3 py-2.5 rounded-full flex items-center gap-2 text-left transition-all cursor-pointer touch-press ${
                     isSelected
-                      ? 'border-slate-950 dark:border-white bg-slate-50 dark:bg-slate-900 shadow-2xs font-bold'
-                      : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-900/60'
+                      ? 'border-2 border-slate-950 dark:border-white bg-slate-950/[0.06] dark:bg-white/[0.12] shadow-sm font-bold'
+                      : 'border border-slate-900/[0.08] dark:border-white/[0.08] bg-white/40 dark:bg-white/[0.03] hover:bg-white/70 dark:hover:bg-white/[0.07]'
                   }`}
                 >
-                  <span 
-                    className="w-5 h-5 rounded-full border border-slate-900/40 dark:border-white/40 shrink-0 flex items-center justify-center"
+                  <span
+                    className="w-4 h-4 rounded-full border border-black/15 dark:border-white/25 shrink-0 flex items-center justify-center"
                     style={{ backgroundColor: preset.previewHex }}
                   >
-                    {isSelected && <Check className="w-3 h-3 text-white stroke-[3]" />}
+                    {isSelected && <Check className="w-2.5 h-2.5 text-white stroke-[2.2]" />}
                   </span>
-                  <span className="text-xs truncate">
+                  <span className="text-xs truncate text-slate-900 dark:text-white">
                     {lang === 'bn' ? preset.nameBn : preset.name}
                   </span>
                 </button>
@@ -217,8 +244,8 @@ export default function AccentColorPickerModal({
         </div>
 
         {/* Custom Hex Color Picker */}
-        <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800/80">
-          <label className="text-[11px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 font-bold block">
+        <div className="space-y-2.5 pt-3 border-t border-slate-900/[0.06] dark:border-white/[0.06]">
+          <label className={labelClass}>
             {lang === 'bn' ? 'কাস্টম হেক্স কোড বা কালার পিকার' : 'Custom Hex or Spectrum'}
           </label>
 
@@ -231,34 +258,36 @@ export default function AccentColorPickerModal({
                 onChange={handleCustomHexChange}
                 placeholder="#059669"
                 maxLength={7}
-                className="w-full pl-3 pr-9 py-2 bg-slate-50 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl text-slate-950 dark:text-white font-mono text-sm focus:outline-none focus:border-slate-900 dark:focus:border-white font-bold"
+                className="w-full pl-4 pr-10 py-2.5 bg-white/50 dark:bg-white/[0.05] border border-slate-900/[0.08] dark:border-white/[0.1] rounded-full text-slate-950 dark:text-white font-mono text-sm focus:outline-none focus:border-slate-900/40 dark:focus:border-white/40 font-semibold"
               />
-              <span 
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border border-slate-400/50"
+              <span
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border border-black/15 dark:border-white/25"
                 style={{ backgroundColor: currentColor }}
               />
             </div>
 
-            <label className="relative p-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 rounded-xl cursor-pointer flex items-center justify-center shrink-0 transition-colors">
-              <input 
+            <label className="relative w-10 h-10 bg-white/60 hover:bg-white/80 dark:bg-white/[0.07] dark:hover:bg-white/[0.12] border border-slate-900/[0.08] dark:border-white/[0.1] rounded-full cursor-pointer flex items-center justify-center shrink-0 transition-colors touch-press">
+              <input
                 type="color"
                 value={currentColor}
                 onChange={(e) => handleSelectColor(e.target.value)}
                 className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
               />
-              <Pipette className="w-4 h-4 text-slate-900 dark:text-white" />
+              <Pipette className="w-4 h-4 stroke-[1.25] text-slate-900 dark:text-white" />
             </label>
           </div>
         </div>
 
-        {/* Footer Actions */}
-        <div className="pt-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-800/80">
+        </div>
+
+        {/* Sticky Footer Actions */}
+        <div className="px-5 sm:px-6 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:pb-4 flex items-center justify-between border-t border-slate-900/[0.06] dark:border-white/[0.06] bg-white/40 dark:bg-white/[0.02] backdrop-blur-md shrink-0">
           <button
             type="button"
             onClick={resetToDefault}
-            className="text-xs font-semibold text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white flex items-center gap-1.5 cursor-pointer"
+            className="text-xs font-semibold text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white flex items-center gap-1.5 cursor-pointer py-1.5 px-2 rounded-full transition-colors"
           >
-            <RefreshCcw className="w-3.5 h-3.5" />
+            <RefreshCcw className="w-3.5 h-3.5 stroke-[1.25]" />
             <span>{lang === 'bn' ? 'ডিফল্ট রিসেট' : 'Reset Default'}</span>
           </button>
 
@@ -268,13 +297,13 @@ export default function AccentColorPickerModal({
               triggerHaptic('single');
               onClose();
             }}
-            className="px-5 py-2 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 font-bold text-xs rounded-xl border-2 border-slate-950 dark:border-white cursor-pointer shadow-xs active:scale-[0.98] transition-all"
+            className="px-6 py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 font-semibold text-xs rounded-full cursor-pointer shadow-md active:scale-[0.97] transition-all"
           >
             {lang === 'bn' ? 'সম্পন্ন' : 'Done'}
           </button>
         </div>
-
       </div>
-    </div>
+      </div>
+    </ModalPortal>
   );
 }

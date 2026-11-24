@@ -128,6 +128,7 @@ export function useLedger(
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [archivedStatements, setArchivedStatements] = useState<Transaction[]>([]);
   const archivedTxIdsRef = useRef<Set<string>>(new Set());
+  const [tagIntelligenceTransactions, setTagIntelligenceTransactions] = useState<Transaction[]>([]);
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const settingsRef = useRef<UserSettings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -135,6 +136,87 @@ export function useLedger(
   const [transactionsSynced, setTransactionsSynced] = useState(false);
   const [isOfflineFallback, setIsOfflineFallback] = useState(false);
   const [customerTxLimit, setCustomerTxLimit] = useState(5);
+
+  const mergeTagIntelligenceList = (
+    prevList: Transaction[],
+    upserts: Transaction[],
+    removeIds: string[] = [],
+    replaceAll = false
+  ): Transaction[] => {
+    const map = new Map<string, Transaction>();
+    if (!replaceAll) {
+      for (const tx of prevList) {
+        if (tx?.id && typeof tx.tag === 'string' && tx.tag.trim()) {
+          map.set(tx.id, tx);
+        }
+      }
+    }
+    for (const rid of removeIds) {
+      map.delete(rid);
+    }
+    for (const tx of upserts) {
+      if (!tx?.id) continue;
+      const cleanTag = typeof tx.tag === 'string' ? tx.tag.trim() : '';
+      if (!cleanTag) {
+        map.delete(tx.id);
+        continue;
+      }
+      map.set(tx.id, {
+        id: tx.id,
+        userId: tx.userId || userId || '',
+        customerId: tx.customerId,
+        customerName: tx.customerName,
+        type: tx.type,
+        amount: tx.amount,
+        description: tx.description || '',
+        tag: cleanTag,
+        date: parseTxDate(tx.date),
+        createdAt: parseTxDate(tx.createdAt || tx.date),
+      } as Transaction);
+    }
+
+    const allEntries = Array.from(map.values());
+    if (allEntries.length === 0) return [];
+
+    // Anchor rolling 1-month window to latest recorded tagged entry (clamped to now)
+    // so chart never wipes out across midnight or idle gaps, while >1-month tags drop as new data arrives
+    const nowMs = Date.now();
+    let latestMs = 0;
+    for (const tx of allEntries) {
+      const tMs = parseTxDate(tx.date).getTime();
+      if (!isNaN(tMs)) {
+        const clamped = Math.min(nowMs, tMs);
+        if (clamped > latestMs) latestMs = clamped;
+      }
+    }
+
+    const cutoffDate = new Date(latestMs || nowMs);
+    cutoffDate.setMonth(cutoffDate.getMonth() - 1);
+    cutoffDate.setHours(0, 0, 0, 0);
+    const cutoffMs = cutoffDate.getTime();
+
+    return allEntries
+      .filter((tx) => parseTxDate(tx.date).getTime() >= cutoffMs)
+      .sort((a, b) => parseTxDate(b.date).getTime() - parseTxDate(a.date).getTime())
+      .slice(0, 2500);
+  };
+
+  const updateTagIntelligenceCache = (
+    upserts: Transaction[],
+    removeIds: string[] = [],
+    replaceAll = false
+  ) => {
+    if (!userId) return;
+    setTagIntelligenceTransactions((prev) => {
+      const next = mergeTagIntelligenceList(prev, upserts, removeIds, replaceAll);
+      try {
+        localStorage.setItem(`easy_due_tag_intelligence_${userId}`, JSON.stringify(next));
+      } catch (e) {
+        console.warn('Failed to persist tag intelligence cache:', e);
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     settingsRef.current = settings;
@@ -244,8 +326,9 @@ const lastSubmitRef = useRef<{
         setArchivedStatements([]);
       }
 
+      let parsedLocalTxs: Transaction[] = [];
       if (storedTxs) {
-        const parsedTxs = JSON.parse(storedTxs)
+        parsedLocalTxs = JSON.parse(storedTxs)
           .filter((t: any) => !archivedTxIdsRef.current.has(t.id))
           .map((t: any) => ({
             ...t,
@@ -253,10 +336,27 @@ const lastSubmitRef = useRef<{
             date: new Date(t.date),
             createdAt: new Date(t.createdAt)
           }));
-        setTransactions(parsedTxs);
+        setTransactions(parsedLocalTxs);
       } else {
         setTransactions([]);
       }
+
+      const storedTagIntel = localStorage.getItem(`easy_due_tag_intelligence_${userId}`);
+      let parsedTagIntel: Transaction[] = [];
+      if (storedTagIntel) {
+        try {
+          parsedTagIntel = JSON.parse(storedTagIntel).map((t: any) => ({
+            ...t,
+            date: parseTxDate(t.date),
+            createdAt: parseTxDate(t.createdAt || t.date)
+          }));
+        } catch {}
+      }
+      const seededTagIntel = mergeTagIntelligenceList(parsedTagIntel, parsedLocalTxs);
+      setTagIntelligenceTransactions(seededTagIntel);
+      try {
+        localStorage.setItem(`easy_due_tag_intelligence_${userId}`, JSON.stringify(seededTagIntel));
+      } catch {}
 
  if (storedSettings) {
         const parsed = JSON.parse(storedSettings);
@@ -332,6 +432,7 @@ const lastSubmitRef = useRef<{
     } else {
       setCustomers([]);
       setTransactions([]);
+      setTagIntelligenceTransactions([]);
       setReminders([]);
       setSettings(null);
       setCustomersSynced(true);
@@ -488,8 +589,9 @@ const lastSubmitRef = useRef<{
       });
 
       const currentSettings = settingsRef.current;
+      const rawKeep = Number(currentSettings?.statementKeepCount) || 15;
       const keepLimit = currentSettings?.autoMergeStatements
-        ? Math.max(1, Number(currentSettings.statementKeepCount) || 15)
+        ? Math.max(5, Math.min(500, Math.round(rawKeep / 5) * 5))
         : null;
 
       if (keepLimit !== null && list.length > keepLimit) {
@@ -508,6 +610,7 @@ const lastSubmitRef = useRef<{
 
       setAllCustomerTxs(list);
       setActiveCustomerTxCount(list.length);
+      updateTagIntelligenceCache(list);
 
       // Save to local cache for instant future loads
       try {
@@ -606,6 +709,7 @@ const lastSubmitRef = useRef<{
       });
 
       setArchiveTransactions(list);
+      updateTagIntelligenceCache(list);
 
       // Save to local cache for instant future loads
       try {
@@ -619,6 +723,55 @@ const lastSubmitRef = useRef<{
 
     return () => unsubscribe();
   }, [userId, selectedDailyDate, isOfflineFallback]);
+
+  // 3d. Sync Rolling 1-Month Tag Intelligence Window (never forgets previous tags, >1 month replaced by newer data)
+  useEffect(() => {
+    if (!userId || userId === 'local-guest-session' || isOfflineFallback) {
+      return;
+    }
+
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - 1);
+    cutoff.setHours(0, 0, 0, 0);
+
+    const txRef = collection(db, 'users', userId, 'transactions');
+    const q = query(
+      txRef,
+      orderBy('date', 'desc'),
+      where('date', '>=', cutoff)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const upserts: Transaction[] = [];
+      const removeIds: string[] = [];
+
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if ((data as any).isArchived) return;
+        upserts.push({
+          ...data,
+          id: docSnap.id,
+          description: normalizeTxDescription(data.description),
+          date: parseTxDate(data.date),
+          createdAt: parseTxDate(data.createdAt || data.date),
+        } as Transaction);
+      });
+
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'removed') {
+          removeIds.push(change.doc.id);
+        }
+      });
+
+      if (upserts.length > 0 || removeIds.length > 0) {
+        updateTagIntelligenceCache(upserts, removeIds);
+      }
+    }, (error) => {
+      console.warn("Firestore error syncing tag intelligence window:", error);
+    });
+
+    return () => unsubscribe();
+  }, [userId, isOfflineFallback]);
 
 // Compute daily transactions dynamically based on date context
   const dailyTransactions = useMemo(() => {
@@ -682,16 +835,31 @@ const lastSubmitRef = useRef<{
     const q = query(summariesRef, limit(12));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list: any[] = [];
+      const incomingList: any[] = [];
       snapshot.forEach((docSnap) => {
-        list.push({
+        incomingList.push({
           id: docSnap.id,
           ...docSnap.data()
         });
       });
-      list.sort((a, b) => b.id.localeCompare(a.id));
-      setMonthlySummaries(list);
-      localStorage.setItem(`easy_due_monthly_summaries_${userId}`, JSON.stringify(list));
+
+      // Bars data: Monthly bars data will get loaded once and will never be forgotten. Only get replaced by newer data.
+      setMonthlySummaries(prev => {
+        const mergedMap = new Map<string, any>();
+        // Keep all previously loaded bars data
+        (prev || []).forEach(item => {
+          if (item?.id) mergedMap.set(item.id, item);
+        });
+        // Replace with newer data from incoming snapshot
+        incomingList.forEach(item => {
+          if (item?.id) mergedMap.set(item.id, item);
+        });
+        const merged = Array.from(mergedMap.values()).sort((a, b) => b.id.localeCompare(a.id));
+        try {
+          localStorage.setItem(`easy_due_monthly_summaries_${userId}`, JSON.stringify(merged));
+        } catch {}
+        return merged;
+      });
     }, (error) => {
       console.warn("Firestore error syncing monthly summaries:", error);
     });
@@ -700,10 +868,14 @@ const lastSubmitRef = useRef<{
   }, [userId, isOfflineFallback]);
 
   const effectiveMonthlySummaries = useMemo(() => {
-    if (monthlySummaries && monthlySummaries.length > 0) {
-      return monthlySummaries;
+    // Preserve all loaded monthly summaries so data is never lost or forgotten
+    const summariesMap = new Map<string, any>();
+    if (Array.isArray(monthlySummaries)) {
+      monthlySummaries.forEach(s => {
+        if (s?.id) summariesMap.set(s.id, { ...s });
+      });
     }
-    const summaries: Record<string, any> = {};
+
     const allTxs = [...transactions, ...archiveTransactions];
     const seenIds = new Set<string>();
 
@@ -713,32 +885,37 @@ const lastSubmitRef = useRef<{
 
       const d = parseTxDate(tx.date);
       const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      if (!summaries[monthKey]) {
-        summaries[monthKey] = {
+      if (!summariesMap.has(monthKey)) {
+        summariesMap.set(monthKey, {
           id: monthKey,
           dues: 0,
           payments: 0,
           count: 0,
           customerPayments: {}
-        };
+        });
       }
-      const s = summaries[monthKey];
-      s.count++;
-      if (tx.type === 'due') {
-        s.dues += tx.amount;
-      } else {
-        s.payments += tx.amount;
-        if (!s.customerPayments[tx.customerId]) {
-          s.customerPayments[tx.customerId] = {
-            name: tx.customerName || 'Unknown',
-            total: 0
-          };
+      
+      // If the month is not yet populated from remote summaries, aggregate from local transactions
+      const existing = summariesMap.get(monthKey);
+      if (!monthlySummaries?.some(s => s.id === monthKey)) {
+        existing.count++;
+        if (tx.type === 'due') {
+          existing.dues += tx.amount;
+        } else {
+          existing.payments += tx.amount;
+          if (!existing.customerPayments) existing.customerPayments = {};
+          if (!existing.customerPayments[tx.customerId]) {
+            existing.customerPayments[tx.customerId] = {
+              name: tx.customerName || 'Unknown',
+              total: 0
+            };
+          }
+          existing.customerPayments[tx.customerId].total += tx.amount;
         }
-        s.customerPayments[tx.customerId].total += tx.amount;
       }
     });
 
-    return Object.values(summaries).sort((a: any, b: any) => b.id.localeCompare(a.id));
+    return Array.from(summariesMap.values()).sort((a: any, b: any) => b.id.localeCompare(a.id));
   }, [monthlySummaries, transactions, archiveTransactions]);
 
 // Sync Goals collection
@@ -1169,7 +1346,8 @@ const lastSubmitRef = useRef<{
     }) => void
   ): Promise<number> => {
     if (!userId) return 0;
-    const validKeep = Math.max(1, Math.min(500, Number(keepCount) || 15));
+    const rawKeep = Number(keepCount) || 15;
+    const validKeep = Math.max(5, Math.min(500, Math.round(rawKeep / 5) * 5));
 
     const updatedSettings: UserSettings = settings
       ? {
@@ -1536,7 +1714,8 @@ const lastSubmitRef = useRef<{
    amount: number, 
    description: string = '', 
    date: Date = new Date(),
-   fallbackCustomerInfo?: { name: string; phone: string; accountType?: 'standard' | 'credit_card'; billingDay?: number }
+   fallbackCustomerInfo?: { name: string; phone: string; accountType?: 'standard' | 'credit_card'; billingDay?: number },
+   tag?: string
  ) => {
    if (!userId) return;
 
@@ -1564,15 +1743,16 @@ const lastSubmitRef = useRef<{
  const diff = type === 'due' ? amount : -amount;
 
  const newTx: Transaction = {
- id: customTxId,
- userId,
- customerId,
- customerName: customerName,
- type,
- amount,
- description: description.trim(),
- date,
- createdAt: new Date()
+   id: customTxId,
+   userId,
+   customerId,
+   customerName: customerName,
+   type,
+   amount,
+   description: description.trim(),
+   ...(tag ? { tag } : {}),
+   date,
+   createdAt: new Date()
  };
 
  const updatedTxs = [newTx, ...transactions];
@@ -1622,6 +1802,9 @@ const lastSubmitRef = useRef<{
  }
 
  adjustLocalMonthlySummaries(null, newTx);
+ if (newTx.tag) {
+   updateTagIntelligenceCache([newTx]);
+ }
 
  if (settings) {
    const newSettings = {
@@ -2052,7 +2235,8 @@ const lastSubmitRef = useRef<{
     transactionId: string,
     newType: 'due' | 'payment',
     newAmount: number,
-    newDescription: string
+    newDescription: string,
+    newTag?: string | null
   ) => {
     if (!userId) return;
 
@@ -2097,11 +2281,13 @@ const lastSubmitRef = useRef<{
     const currentAuditHistory: TransactionAuditEntry[] = Array.isArray(tx.auditHistory) ? tx.auditHistory : [];
     const newAuditHistory: TransactionAuditEntry[] = [previousAuditEntry, ...currentAuditHistory].slice(0, 5);
 
+    const finalTag = newTag !== undefined ? (newTag || null) : (tx.tag || null);
     const updatedTx: Transaction = {
       ...tx,
       type: newType,
       amount: newAmount,
       description: newDescription.trim(),
+      tag: finalTag ?? undefined,
       isEdited: true,
       editedAt: editedTimestamp,
       auditHistory: newAuditHistory
@@ -2141,6 +2327,7 @@ const lastSubmitRef = useRef<{
     setTransactions(prev => prev.map(t => t.id === transactionId ? updatedTx : t));
 
     adjustLocalMonthlySummaries(tx, updatedTx);
+    updateTagIntelligenceCache([updatedTx]);
 
     if (userId === 'local-guest-session' || isOfflineFallback) return;
 
@@ -2149,6 +2336,7 @@ const lastSubmitRef = useRef<{
       type: newType,
       amount: newAmount,
       description: newDescription.trim(),
+      tag: finalTag,
       isEdited: true,
       editedAt: serverTimestamp(),
       auditHistory: newAuditHistory
@@ -2219,6 +2407,7 @@ const lastSubmitRef = useRef<{
     setTransactions(prev => prev.filter(t => t.id !== transactionId));
 
     adjustLocalMonthlySummaries(tx, null);
+    updateTagIntelligenceCache([], [transactionId]);
 
     setActiveCustomerTxCount(prev => Math.max(0, prev - 1));
     // Update settings count locally
@@ -3230,6 +3419,7 @@ const lastSubmitRef = useRef<{
     }
 
     setTransactions(newTransactions);
+    updateTagIntelligenceCache(newTransactions, [], choice === 'clear');
     setCustomerTransactions([]);
     setAllCustomerTxs([]);
     setArchiveTransactions([]);
@@ -3775,6 +3965,7 @@ const lastSubmitRef = useRef<{
     allCustomerTransactions: allCustomerTransactions.filter(t => customers.some(c => c.id === t.customerId)),
     dailyTransactions: dailyTransactions.filter(t => customers.some(c => c.id === t.customerId)),
     todayTransactions: todayTransactions.filter(t => customers.some(c => c.id === t.customerId)),
+    tagIntelligenceTransactions: tagIntelligenceTransactions.filter(t => customers.some(c => c.id === t.customerId)),
     reminders: reminders.filter(r => r.type === 'emi' || Boolean(r.goalId) || customers.some(c => c.id === r.customerId)),
     settings,
     loading,

@@ -79,7 +79,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   document.addEventListener('click', handleIosInteractiveGesture, { capture: true, passive: true });
 }
 
-export type HapticType = 'single' | 'double' | 'tick' | 'keypad' | 'soft' | 'medium' | 'punchy' | number | number[];
+export type HapticType = 'single' | 'double' | 'tick' | 'keypad' | 'soft' | 'medium' | 'punchy' | 'level3' | number | number[];
 
 let lastTickHapticTimestamp = 0;
 
@@ -99,7 +99,7 @@ export const triggerHaptic = (type: HapticType = 'single') => {
   }
 
   // 2. Standard Web Vibration API (Android Chrome, etc.)
-  const intensity = parseInt(localStorage.getItem('haptic_intensity') || '3', 10);
+  const intensity = type === 'level3' ? 3 : parseInt(localStorage.getItem('haptic_intensity') || '3', 10);
 
   // Scaled crisp native-like vibration durations (in ms):
   // Level 1: Soft tap (3ms — shifted from old level 2)

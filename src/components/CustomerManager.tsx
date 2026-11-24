@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { Customer, Transaction } from '../types';
 import { 
-	Search, UserPlus, Phone, ArrowUpRight, ArrowDownLeft, ReceiptText, ChevronDown, ChevronUp, ChevronRight, Pin, 
+	Search, UserPlus, Phone, ArrowUpRight, ArrowDownLeft, ReceiptText, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Pin, 
 	MessageSquare, MessageCircleMore, CircleEllipsis, Trash2, Pencil, RefreshCw, X, UserMinus, Plus, Minus, ShieldCheck, 
 	AlertTriangle, ArrowLeftRight, Check, Trash, Users, Send, ArrowLeft, ArrowUpDown, Delete,
 	BookUser, Download, Share2, Copy, MoreHorizontal, Archive, RotateCcw,
@@ -12,7 +12,12 @@ import {
   downloadReceiptImage, 
   copyReceiptImage, 
   shareReceiptImage, 
-  ReceiptImageResult
+  ReceiptImageResult,
+  generateCreditCardStatementPdf,
+  downloadReceiptPdf,
+  copyPlainTextReceipt,
+  shareReceiptPdf,
+  CreditCardStatementPdfResult
 } from '../lib/receiptGenerator';
 import { toast } from 'sonner';
 import { motion, AnimatePresence, useAnimation } from 'motion/react';
@@ -22,6 +27,9 @@ import { triggerHaptic } from '../lib/haptics';
 import { showNotification } from '../lib/notifications';
 import ContactNumberPickerModal from './ContactNumberPickerModal';
 import { cleanBangladeshiPhone } from '../lib/phoneUtils';
+import { StaggerReveal, SpotlightCard, ScrollParallaxStage, ClientCardStage } from './MotionPrimitives';
+import ModalPortal, { useModalScrollLock } from './ModalPortal';
+import { TagIcon, TagPickerBar, getTagDefaultDescription, getTagMeta, EXPENSE_TAGS, PAYMENT_TAGS, useHorizontalDragWheelScroll } from '../lib/tagSystem';
 
 const WhatsAppIcon = () => (
 	<svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" className="shrink-0">
@@ -35,7 +43,7 @@ const ListClockIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
 		viewBox="0 0 24 24"
 		fill="none"
 		stroke="currentColor"
-		strokeWidth="2"
+		strokeWidth="1.25"
 		strokeLinecap="round"
 		strokeLinejoin="round"
 		className={className}
@@ -56,40 +64,73 @@ interface SwipeableCustomerItemProps {
 	isSelected: boolean;
 	onWhatsApp: () => void;
 	onDelete: () => void;
+	onLongPress?: () => void;
 	swipeGesturesEnabled: boolean;
 	isDeleting: boolean;
 	children: React.ReactNode;
-	activeSwipingId: string | null;
-	setActiveSwipingId: (id: string | null) => void;
 }
 
-const SwipeableCustomerItem = ({
+const SwipeableCustomerItem = React.memo(({
 	customer,
 	lang,
 	onClick,
-	isSelected,
 	onWhatsApp,
 	onDelete,
+	onLongPress,
 	swipeGesturesEnabled,
 	isDeleting,
 	children,
-	activeSwipingId,
-	setActiveSwipingId
 }: SwipeableCustomerItemProps) => {
 	const cardRef = React.useRef<HTMLDivElement>(null);
-	const controls = useAnimation();
+	const innerRef = React.useRef<HTMLDivElement>(null);
+	const rightBgRef = React.useRef<HTMLDivElement>(null);
+	const leftBgRef = React.useRef<HTMLDivElement>(null);
+	const swipeDirRef = React.useRef<'left' | 'right' | null>(null);
+	const snapTimerRef = React.useRef<number | null>(null);
+
+	const setSwipeBgDir = React.useCallback((dir: 'left' | 'right' | null) => {
+		if (swipeDirRef.current === dir) return;
+		swipeDirRef.current = dir;
+		if (rightBgRef.current) {
+			rightBgRef.current.style.opacity = dir === 'right' ? '1' : '0';
+		}
+		if (leftBgRef.current) {
+			leftBgRef.current.style.opacity = dir === 'left' ? '1' : '0';
+		}
+	}, []);
+
+	const setTranslateX = React.useCallback((x: number, transitionCss?: string) => {
+		const el = innerRef.current;
+		if (!el) return;
+		el.style.willChange = x === 0 && !transitionCss ? '' : 'transform';
+		el.style.transition = transitionCss || 'none';
+		el.style.transform = x === 0 ? '' : `translate3d(${x}px, 0, 0)`;
+	}, []);
+
+	const longPressTimerRef = React.useRef<number | null>(null);
+	const longPressFiredRef = React.useRef(false);
+
+	const clearLongPressTimer = React.useCallback(() => {
+		if (longPressTimerRef.current !== null) {
+			window.clearTimeout(longPressTimerRef.current);
+			longPressTimerRef.current = null;
+		}
+	}, []);
+
 	React.useEffect(() => {
 		return () => {
+			if (snapTimerRef.current) window.clearTimeout(snapTimerRef.current);
+			clearLongPressTimer();
 			if ((window as any).activeSwipingId === customer.id) {
 				(window as any).activeSwipingId = null;
 			}
 		};
-	}, [customer.id]);
+	}, [customer.id, clearLongPressTimer]);
+
 	const startXRef = React.useRef(0);
 	const startYRef = React.useRef(0);
 	const isSwipingRef = React.useRef(false);
 	const hasVibratedRef = React.useRef(false);
-	const [swipeDir, setSwipeDir] = useState<'left' | 'right' | null>(null);
 	const isSnappingRef = React.useRef(false);
 	const prevIsDeletingRef = React.useRef(isDeleting);
 
@@ -97,95 +138,98 @@ const SwipeableCustomerItem = ({
 		if (isDeleting) {
 			prevIsDeletingRef.current = true;
 			const cardWidth = cardRef.current?.offsetWidth || 350;
-			setSwipeDir('left');
-			controls.start({
-				x: -cardWidth * 0.4,
-				transition: { type: 'spring', stiffness: 300, damping: 15, mass: 0.6 }
-			});
+			setSwipeBgDir('left');
+			setTranslateX(-cardWidth * 0.4, 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1)');
 		} else if (prevIsDeletingRef.current) {
 			prevIsDeletingRef.current = false;
-			controls.start({
-				x: 0,
-				transition: { type: 'spring', stiffness: 300, damping: 25 }
-			}).then(() => {
-				setSwipeDir(null);
+			setTranslateX(0, 'transform 240ms cubic-bezier(0.22, 1, 0.36, 1)');
+			if (snapTimerRef.current) window.clearTimeout(snapTimerRef.current);
+			snapTimerRef.current = window.setTimeout(() => {
+				setSwipeBgDir(null);
+				if (innerRef.current) innerRef.current.style.willChange = '';
 				isSwipingRef.current = false;
-				setActiveSwipingId(null);
 				(window as any).activeSwipingId = null;
-			});
+			}, 240);
 		}
-	}, [isDeleting, controls, setActiveSwipingId]);
+	}, [isDeleting, setSwipeBgDir, setTranslateX]);
 
 	const handleSnap = (targetX: number) => {
 		if (isSnappingRef.current) return;
 		isSnappingRef.current = true;
 
-		// Rapidly accelerate card to targetX (underdamped spring physics: overshoot and bounce back)
-		controls.start({
-			x: targetX,
-			transition: { type: 'spring', stiffness: 350, damping: 15, mass: 0.6 }
-		}).then(() => {
+		setTranslateX(targetX, 'transform 220ms cubic-bezier(0.34, 1.45, 0.64, 1)');
+		if (snapTimerRef.current) window.clearTimeout(snapTimerRef.current);
+		snapTimerRef.current = window.setTimeout(() => {
 			if (targetX > 0) {
-				// WhatsApp action: trigger and close immediately
 				onWhatsApp();
-				controls.start({
-					x: 0,
-					transition: { type: 'spring', stiffness: 200, damping: 25 }
-				}).then(() => {
-					setSwipeDir(null);
+				setTranslateX(0, 'transform 240ms cubic-bezier(0.22, 1, 0.36, 1)');
+				snapTimerRef.current = window.setTimeout(() => {
+					setSwipeBgDir(null);
+					if (innerRef.current) innerRef.current.style.willChange = '';
 					isSwipingRef.current = false;
 					isSnappingRef.current = false;
-					setActiveSwipingId(null);
-				});
+					(window as any).activeSwipingId = null;
+				}, 240);
 			} else {
-				// Delete action: trigger and let the isDeleting prop control the open state/closing
 				onDelete();
 				isSnappingRef.current = false;
-				setActiveSwipingId(null);
+				(window as any).activeSwipingId = null;
 			}
-		});
+		}, 210);
 	};
 
 	const handleTouchStart = (e: React.TouchEvent) => {
-		if (!swipeGesturesEnabled || isSnappingRef.current || isDeleting) return;
-		
+		longPressFiredRef.current = false;
+		clearLongPressTimer();
+		if (isSnappingRef.current || isDeleting) return;
+		if (e.touches.length !== 1) return;
+
 		startXRef.current = e.touches[0].clientX;
 		startYRef.current = e.touches[0].clientY;
 		isSwipingRef.current = false;
 		hasVibratedRef.current = false;
+
+		const targetEl = e.target as HTMLElement | null;
+		const isActionControl = Boolean(targetEl?.closest('a, button'));
+		if (onLongPress && !isActionControl) {
+			longPressTimerRef.current = window.setTimeout(() => {
+				longPressTimerRef.current = null;
+				if (isSwipingRef.current || isSnappingRef.current || isDeleting) return;
+				longPressFiredRef.current = true;
+				triggerHaptic('punchy');
+				onLongPress();
+			}, 480);
+		}
 	};
 
 	const handleTouchMove = (e: React.TouchEvent) => {
-		if (!swipeGesturesEnabled || isSnappingRef.current || isDeleting) return;
+		if (isSnappingRef.current || isDeleting) return;
 		const diffX = e.touches[0].clientX - startXRef.current;
 		const diffY = e.touches[0].clientY - startYRef.current;
 
+		if (Math.hypot(diffX, diffY) > 8) {
+			clearLongPressTimer();
+		}
+
+		if (!swipeGesturesEnabled) return;
+
 		if (!isSwipingRef.current) {
-			// Accidental diagonal scrolls check: require diffX to be greater than diffY, and at least 15px threshold to activate swipe.
 			if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 15) {
 				isSwipingRef.current = true;
-				setActiveSwipingId(customer.id);
 				(window as any).activeSwipingId = customer.id;
 			}
 		}
 
 		if (isSwipingRef.current) {
 			const cardWidth = cardRef.current?.offsetWidth || 350;
-			const thresholdX = cardWidth * 0.4; // 40% threshold of card width
-
-			// 1. Rubber Banding: Apply high non-linear resistance to active horizontal drag.
-			// Moves MUCH slower than actual finger distance.
+			const thresholdX = cardWidth * 0.4;
 			const resistanceX = Math.sign(diffX) * Math.pow(Math.abs(diffX), 0.7) * 0.85;
 
 			const dir = resistanceX > 0 ? 'right' : (resistanceX < 0 ? 'left' : null);
-			if (dir !== swipeDir) {
-				setSwipeDir(dir);
-			}
+			setSwipeBgDir(dir);
 
-			// Update motion transform position directly
-			controls.set({ x: resistanceX });
+			setTranslateX(resistanceX, 'none');
 
-			// Threshold punchy haptic when finger distance reaches the critical threshold (thresholdX)
 			if (Math.abs(diffX) >= thresholdX && !hasVibratedRef.current) {
 				triggerHaptic('punchy');
 				hasVibratedRef.current = true;
@@ -193,7 +237,6 @@ const SwipeableCustomerItem = ({
 				hasVibratedRef.current = false;
 			}
 
-			// 2. Threshold Override: instantly accelerate forward to 40% open state if finger crosses threshold
 			if (Math.abs(diffX) >= thresholdX) {
 				handleSnap(diffX > 0 ? thresholdX : -thresholdX);
 				return;
@@ -206,49 +249,64 @@ const SwipeableCustomerItem = ({
 	};
 
 	const handleTouchEnd = () => {
+		clearLongPressTimer();
 		if (!swipeGesturesEnabled || isSnappingRef.current || isDeleting) return;
 		if (isSwipingRef.current) {
-			// Cancel Phase: Snap back to 0% if released before the 40% threshold
-			controls.start({
-				x: 0,
-				transition: { type: 'spring', stiffness: 400, damping: 30 }
-			}).then(() => {
-				setSwipeDir(null);
+			setTranslateX(0, 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)');
+			if (snapTimerRef.current) window.clearTimeout(snapTimerRef.current);
+			snapTimerRef.current = window.setTimeout(() => {
+				setSwipeBgDir(null);
+				if (innerRef.current) innerRef.current.style.willChange = '';
 				isSwipingRef.current = false;
 				hasVibratedRef.current = false;
-				setActiveSwipingId(null);
-			});
+				(window as any).activeSwipingId = null;
+			}, 220);
+		}
+	};
+
+	const handleClickCapture = (e: React.MouseEvent) => {
+		if (longPressFiredRef.current) {
+			longPressFiredRef.current = false;
+			e.preventDefault();
+			e.stopPropagation();
 		}
 	};
 
 	return (
-		<div ref={cardRef} className="relative overflow-hidden rounded-2xl w-full">
-			{swipeDir === 'right' && (
-				<div className="absolute inset-0 bg-[#048848] flex items-center justify-start pl-6 text-white rounded-2xl font-bold text-xs gap-2">
-					<WhatsAppIcon />
-					<span className="font-bold text-xs">{lang === 'bn' ? 'হোয়াটসঅ্যাপ' : 'WhatsApp'}</span>
-				</div>
-			)}
-			{swipeDir === 'left' && (
-				<div className="absolute inset-0 bg-[#E11900] flex items-center justify-end pr-6 text-white rounded-2xl font-bold text-xs gap-2">
-					<span className="font-bold text-xs">{lang === 'bn' ? 'মুছুন' : 'Delete'}</span>
-					<Trash2 className="w-6 h-6 text-white" />
-				</div>
-			)}
-			<motion.div
-				animate={controls}
+		<div ref={cardRef} className="relative overflow-hidden rounded-[24px] w-full">
+			<div
+				ref={rightBgRef}
+				aria-hidden="true"
+				style={{ opacity: 0 }}
+				className="pointer-events-none absolute inset-0 z-0 bg-[#048848] flex items-center justify-start pl-6 text-white rounded-[24px] font-bold text-xs gap-2"
+			>
+				<WhatsAppIcon />
+				<span className="font-bold text-xs">{lang === 'bn' ? 'হোয়াটসঅ্যাপ' : 'WhatsApp'}</span>
+			</div>
+			<div
+				ref={leftBgRef}
+				aria-hidden="true"
+				style={{ opacity: 0 }}
+				className="pointer-events-none absolute inset-0 z-0 bg-[#E11900] flex items-center justify-end pr-6 text-white rounded-[24px] font-bold text-xs gap-2"
+			>
+				<span className="font-bold text-xs">{lang === 'bn' ? 'মুছুন' : 'Delete'}</span>
+				<Trash2 className="w-6 h-6 text-white stroke-[1.25]" />
+			</div>
+			<div
+				ref={innerRef}
 				onTouchStart={handleTouchStart}
 				onTouchMove={handleTouchMove}
 				onTouchEnd={handleTouchEnd}
 				onTouchCancel={handleTouchEnd}
+				onClickCapture={handleClickCapture}
 				onClick={onClick}
-				className="w-full relative touch-pan-y"
+				className="w-full relative z-10 rounded-[24px] touch-pan-y"
 			>
 				{children}
-			</motion.div>
+			</div>
 		</div>
 	);
-};
+});
 
 
 const parseFirestoreDate = (dateVal: any): Date => {
@@ -259,6 +317,233 @@ const parseFirestoreDate = (dateVal: any): Date => {
   const parsed = new Date(dateVal);
   return isNaN(parsed.getTime()) ? new Date() : parsed;
 };
+
+const LEDGER_DATE_FMT_EN = new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+const LEDGER_DATE_FMT_BN = new Intl.DateTimeFormat('bn-BD', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+const LEDGER_TIME_FMT_EN = new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit' });
+const LEDGER_TIME_FMT_BN = new Intl.DateTimeFormat('bn-BD', { hour: '2-digit', minute: '2-digit' });
+const LEDGER_SHORT_DATE_FMT_EN = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const LEDGER_SHORT_DATE_FMT_BN = new Intl.DateTimeFormat('bn-BD', { month: 'short', day: 'numeric', year: 'numeric' });
+const LEDGER_AUDIT_FMT_EN = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+const LEDGER_AUDIT_FMT_BN = new Intl.DateTimeFormat('bn-BD', { dateStyle: 'medium', timeStyle: 'short' });
+
+interface CustomerCardGridItemProps {
+  customer: Customer;
+  index: number;
+  lang: Language;
+  isSelected: boolean;
+  isPinned: boolean;
+  swipeGesturesEnabled: boolean;
+  isDeleting: boolean;
+  onSelectCustomer: (c: Customer) => void;
+  onOpenPinModal: (c: Customer) => void;
+  onWhatsAppCustomer: (c: Customer) => void;
+  onDeleteCustomer: (c: Customer) => void;
+}
+
+const CustomerCardGridItem = React.memo(({
+  customer: c,
+  index,
+  lang,
+  isSelected,
+  isPinned,
+  swipeGesturesEnabled,
+  isDeleting,
+  onSelectCustomer,
+  onOpenPinModal,
+  onWhatsAppCustomer,
+  onDeleteCustomer,
+}: CustomerCardGridItemProps) => {
+  const initials = c.name
+    .split(' ')
+    .map(n => n[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase() || 'C';
+
+  const isDue = c.outstandingDue > 0;
+  const isOverpaid = c.outstandingDue < 0;
+  const cleanedPhone = c.phone ? cleanBangladeshiPhone(c.phone) : '';
+  const waNumber = c.phone ? (c.phone.startsWith('01') ? '88' : '') + c.phone.replace(/[^0-9]/g, '') : '';
+
+  return (
+    <ClientCardStage index={index} className="customer-card-cv">
+      <SwipeableCustomerItem
+        customer={c}
+        lang={lang}
+        isSelected={isSelected}
+        swipeGesturesEnabled={swipeGesturesEnabled}
+        isDeleting={isDeleting}
+        onLongPress={() => onOpenPinModal(c)}
+        onWhatsApp={() => onWhatsAppCustomer(c)}
+        onDelete={() => onDeleteCustomer(c)}
+        onClick={() => {}}
+      >
+        <SpotlightCard
+          onTouchStart={() => {
+            (window as any).__lastCustomerCardTouchAt = Date.now();
+          }}
+          onClick={() => onSelectCustomer(c)}
+          className={`surface-card-glass border p-4 sm:p-5 pb-3.5 rounded-[24px] cursor-pointer flex flex-col justify-between gap-3 group ${
+            isSelected
+              ? 'ring-2 ring-slate-950/30 dark:ring-white/30'
+              : ''
+          }`}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0 pr-2">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center font-display font-bold text-xs shrink-0 ${
+                isDue
+                  ? 'bg-ledger-red-subtle text-ledger-red'
+                  : isOverpaid
+                  ? 'bg-ledger-green-subtle text-ledger-green'
+                  : 'bg-slate-900/[0.06] dark:bg-white/[0.08] text-slate-600 dark:text-slate-300'
+              }`}>
+                {initials}
+              </div>
+
+              <div className="min-w-0">
+                <div
+                  onClick={(e) => {
+                    const lastTouchAt = (window as any).__lastCustomerCardTouchAt || 0;
+                    const isMobileTouch =
+                      Date.now() - lastTouchAt < 800 ||
+                      (e.nativeEvent as any)?.pointerType === 'touch' ||
+                      (typeof window !== 'undefined' &&
+                        window.matchMedia('(pointer: coarse)').matches &&
+                        !window.matchMedia('(hover: hover) and (pointer: fine)').matches);
+                    if (isMobileTouch) {
+                      return;
+                    }
+                    e.stopPropagation();
+                    triggerHaptic('single');
+                    onOpenPinModal(c);
+                  }}
+                  className="text-sm sm:text-base font-bold text-slate-950 dark:text-white truncate flex items-center gap-1.5 cursor-pointer group-hover:opacity-80 transition-opacity"
+                >
+                  <span className="truncate">{c.name}</span>
+                  {isPinned && (
+                    <Pin className="w-3.5 h-3.5 text-amber-500 fill-amber-500 rotate-45 shrink-0 stroke-[1.25]" />
+                  )}
+                </div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1 truncate font-mono">
+                  {c.accountType === 'credit_card' ? (
+                    <>
+                      <Calendar className="w-3 h-3 shrink-0 opacity-70 stroke-[1.25]" />
+                      <span className="truncate">
+                        {lang === 'bn'
+                          ? `বিলিং: প্রতি মাসের ${formatNumber(c.billingDay || 15, 'bn')} তারিখ`
+                          : `Billing Day: ${c.billingDay || 15}`}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Phone className="w-3 h-3 shrink-0 opacity-70 stroke-[1.25]" />
+                      <span className="truncate">{c.phone ? cleanedPhone : (lang === 'bn' ? '(ফোন নম্বর নেই)' : '(No phone)')}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="text-right shrink-0">
+              <div className={`font-display text-base sm:text-lg font-bold font-mono tabular-nums truncate ${
+                isDue
+                  ? 'text-ledger-red'
+                  : isOverpaid
+                  ? 'text-ledger-green'
+                  : 'text-slate-400 dark:text-slate-500'
+              }`}>
+                {c.outstandingDue === 0
+                  ? `৳ ${lang === 'bn' ? '০' : '0'}`
+                  : `${c.outstandingDue < 0 ? '-' : ''}৳ ${formatNumber(Math.abs(c.outstandingDue), lang)}`}
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-2.5 border-t border-slate-900/[0.06] dark:border-white/[0.06] flex items-center justify-between text-xs min-h-[30px]">
+            <div className="flex items-center gap-1.5 min-w-0 text-[11px] font-semibold">
+              <span className={`truncate ${
+                isDue
+                  ? 'text-ledger-red'
+                  : isOverpaid
+                  ? 'text-ledger-green'
+                  : 'text-slate-500 dark:text-slate-400'
+              }`}>
+                {c.accountType === 'credit_card' ? (
+                  isDue ? (
+                    lang === 'bn' ? 'কার্ড বিল বকেয়া' : 'Card Bill Due'
+                  ) : isOverpaid ? (
+                    lang === 'bn' ? 'অতিরিক্ত জমা' : 'Extra Credit'
+                  ) : (
+                    lang === 'bn' ? 'বিল পরিশোধিত' : 'Bill Settled'
+                  )
+                ) : isDue ? (
+                  lang === 'bn' ? 'বকেয়া ব্যালেন্স' : 'Due Balance'
+                ) : isOverpaid ? (
+                  lang === 'bn' ? 'অগ্রিম ক্রেডিট' : 'Advance Credit'
+                ) : (
+                  lang === 'bn' ? 'পরিশোধিত' : 'Settled'
+                )}
+              </span>
+
+              {c.accountType === 'credit_card' && (
+                <span className="text-slate-400 dark:text-slate-500 inline-flex items-center gap-1 shrink-0 font-mono text-[10px]">
+                  · <CreditCard className="w-3 h-3 stroke-[1.25]" /> {lang === 'bn' ? 'কার্ড' : 'Card'}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              {c.phone && (
+                <>
+                  <a
+                    href={`https://wa.me/${waNumber}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      triggerHaptic('single');
+                    }}
+                    className="w-7 h-7 rounded-full bg-emerald-500/12 hover:bg-emerald-500/22 text-emerald-600 dark:text-emerald-400 transition-colors active:scale-95 flex items-center justify-center"
+                    title="WhatsApp"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 stroke-[1.25]" />
+                  </a>
+                  <a
+                    href={`tel:${c.phone}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      triggerHaptic('single');
+                    }}
+                    className="w-7 h-7 rounded-full bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-700 dark:text-slate-300 transition-colors active:scale-95 flex items-center justify-center"
+                    title={lang === 'bn' ? 'কল করুন' : 'Call'}
+                  >
+                    <Phone className="w-3.5 h-3.5 stroke-[1.25]" />
+                  </a>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  triggerHaptic('single');
+                  onSelectCustomer(c);
+                }}
+                className="w-7 h-7 rounded-full text-slate-400 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer flex items-center justify-center"
+                title={lang === 'bn' ? 'খাতা খুলুন' : 'Open Ledger'}
+                aria-label={lang === 'bn' ? 'খাতা খুলুন' : 'Open Ledger'}
+              >
+                <ChevronRight className="w-4 h-4 stroke-[1.25] group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            </div>
+          </div>
+        </SpotlightCard>
+      </SwipeableCustomerItem>
+    </ClientCardStage>
+  );
+});
 
 interface CustomerManagerProps {
  customers: Customer[];
@@ -275,7 +560,8 @@ interface CustomerManagerProps {
  amount: number, 
  description: string,
  date?: Date,
- fallbackCustomerInfo?: { name: string; phone: string; accountType?: 'standard' | 'credit_card'; billingDay?: number }
+ fallbackCustomerInfo?: { name: string; phone: string; accountType?: 'standard' | 'credit_card'; billingDay?: number },
+ tag?: string
  ) => Promise<void>;
  updateCustomerDetails: (
    customerId: string,
@@ -283,7 +569,7 @@ interface CustomerManagerProps {
    phone: string,
    options?: { accountType?: 'standard' | 'credit_card'; billingDay?: number }
  ) => Promise<void>;
- editTransaction?: (transactionId: string, newType: 'due' | 'payment', newAmount: number, newDescription: string) => Promise<void>;
+ editTransaction?: (transactionId: string, newType: 'due' | 'payment', newAmount: number, newDescription: string, newTag?: string | null) => Promise<void>;
  deleteTransaction?: (transactionId: string) => Promise<void>;
  deleteCustomer: (id: string) => Promise<void>;
  selectedCustomerId: string | null;
@@ -303,7 +589,7 @@ interface CustomerManagerProps {
   exportArchivedStatements?: (customerId?: string) => Promise<any[]> | any;
 }
 
-export default function CustomerManager({
+const CustomerManager = React.memo(function CustomerManager({
  customers,
  transactions,
  allTransactions,
@@ -336,6 +622,22 @@ export default function CustomerManager({
  const [isManageStatementsOpen, setIsManageStatementsOpen] = useState(false);
  const [manualKeepCountInput, setManualKeepCountInput] = useState('15');
  const [isManualArchiving, setIsManualArchiving] = useState(false);
+ const [listBatchExpanded, setListBatchExpanded] = useState(false);
+
+ React.useEffect(() => {
+   if (listBatchExpanded || selectedCustomerId) return;
+   let cancelled = false;
+   const rafId = window.requestAnimationFrame(() => {
+     if (cancelled) return;
+     React.startTransition(() => {
+       setListBatchExpanded(true);
+     });
+   });
+   return () => {
+     cancelled = true;
+     window.cancelAnimationFrame(rafId);
+   };
+ }, [listBatchExpanded, selectedCustomerId]);
 
  React.useEffect(() => {
    setShowExtraBalanceCards(false);
@@ -343,6 +645,7 @@ export default function CustomerManager({
    setIsManageStatementsOpen(false);
    setCardCycleTab('unbilled');
    setActionTargetCycle('unbilled');
+   setLedgerTagFilter(null);
  }, [selectedCustomerId]);
 
  const [searchQuery, setSearchQuery] = useState('');
@@ -384,6 +687,8 @@ export default function CustomerManager({
  const [openActionType, setOpenActionType] = useState<'due' | 'payment' | null>(null);
  const [actionAmount, setActionAmount] = useState('');
  const [actionDesc, setActionDesc] = useState('');
+ const [actionTag, setActionTag] = useState<string | null>(null);
+ const [ledgerTagFilter, setLedgerTagFilter] = useState<string | null>(null);
  const [actionTargetCycle, setActionTargetCycle] = useState<'unbilled' | 'billed'>('unbilled');
  const [txSubmitting, setTxSubmitting] = useState(false);
 
@@ -424,11 +729,11 @@ export default function CustomerManager({
    if (matchedId) {
      setFilterStatus((prev) => {
        if (prev !== matchedId) {
-         triggerHaptic(isInitialPress ? 'single' : 'tick');
+         triggerHaptic('level3');
          return matchedId!;
        }
        if (isInitialPress) {
-         triggerHaptic('single');
+         triggerHaptic('level3');
        }
        return prev;
      });
@@ -466,7 +771,7 @@ export default function CustomerManager({
  
   const [phoneWarningCustomer, setPhoneWarningCustomer] = useState<Customer | null>(null);
   const [pinActionCustomer, setPinActionCustomer] = useState<Customer | null>(null);
-  const [receiptResult, setReceiptResult] = useState<ReceiptImageResult | null>(null);
+  const [receiptResult, setReceiptResult] = useState<ReceiptImageResult | CreditCardStatementPdfResult | null>(null);
   const [isGeneratingReceipt, setIsGeneratingReceipt] = useState(false);
   const [isCopiedReceipt, setIsCopiedReceipt] = useState(false);
   const [sortBy, setSortBy] = useState<'recent' | 'high_balance' | 'low_balance' | 'custom'>('recent');
@@ -484,7 +789,6 @@ export default function CustomerManager({
     localStorage.setItem('customers_custom_order', JSON.stringify(newOrder));
   };
 
-  const [activeSwipingId, setActiveSwipingId] = useState<string | null>(null);
   const [isSortOpen, setIsSortOpen] = useState(false);
   const [pinnedCustomerNames, setPinnedCustomerNames] = useState<string[]>(() => {
     try {
@@ -509,22 +813,12 @@ export default function CustomerManager({
 const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const [editTxAmount, setEditTxAmount] = useState('');
   const [editTxDesc, setEditTxDesc] = useState('');
+  const [editTxTag, setEditTxTag] = useState<string | null>(null);
   const [deletingTx, setDeletingTx] = useState<Transaction | null>(null);
   const [deletingCustomer, setDeletingCustomer] = useState<Customer | null>(null);
   const [ledgerLimit, setLedgerLimit] = useState(5);
 
   const [auditLogTx, setAuditLogTx] = useState<Transaction | null>(null);
-
-  // Background scroll disabled while Audit Log popup is opened
-  React.useEffect(() => {
-    if (auditLogTx) {
-      const originalOverflow = document.body.style.overflow;
-      document.body.style.overflow = 'hidden';
-      return () => {
-        document.body.style.overflow = originalOverflow;
-      };
-    }
-  }, [auditLogTx]);
 
   // Sync pinned customer names on storage events (e.g., from backup import)
   React.useEffect(() => {
@@ -578,43 +872,84 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     }
   }, [customers]);
 
-  // Disable background scrolling when any modal popup is active
-  React.useEffect(() => {
-    if (
+  // Background scroll disabled while modals are opened
+  useModalScrollLock(
+    Boolean(
       deletingCustomer ||
       editingTx ||
       deletingTx ||
+      auditLogTx ||
       duplicateTxWarning ||
       phoneWarningCustomer ||
       pinActionCustomer ||
       receiptResult ||
       isManageStatementsOpen ||
       pendingContactChoice
-    ) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => {
-      document.body.style.overflow = '';
+    )
+  );
+
+  // Escape key dismissal prioritizing topmost open popup
+  React.useEffect(() => {
+    const anyModalOpen =
+      pendingContactChoice ||
+      duplicateTxWarning ||
+      deletingTx ||
+      editingTx ||
+      auditLogTx ||
+      receiptResult ||
+      pinActionCustomer ||
+      phoneWarningCustomer ||
+      deletingCustomer ||
+      isManageStatementsOpen;
+    if (!anyModalOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (pendingContactChoice) {
+        setPendingContactChoice(null);
+      } else if (duplicateTxWarning) {
+        setDuplicateTxWarning(null);
+      } else if (deletingTx || editingTx) {
+        closeTxModals();
+      } else if (auditLogTx) {
+        closeAuditLogModal();
+      } else if (receiptResult) {
+        closeReceiptModal();
+      } else if (pinActionCustomer) {
+        closePinActionModal();
+      } else if (phoneWarningCustomer) {
+        closePhoneWarningModal();
+      } else if (deletingCustomer) {
+        closeDeleteCustomerModal();
+      } else if (isManageStatementsOpen && !isManualArchiving) {
+        closeManageStatementsModal();
+      }
     };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
-    deletingCustomer,
-    editingTx,
-    deletingTx,
+    pendingContactChoice,
     duplicateTxWarning,
-    phoneWarningCustomer,
-    pinActionCustomer,
+    deletingTx,
+    editingTx,
+    auditLogTx,
     receiptResult,
+    pinActionCustomer,
+    phoneWarningCustomer,
+    deletingCustomer,
     isManageStatementsOpen,
-    pendingContactChoice
+    isManualArchiving
   ]);
 
    // Handle history for modals (mobile back gesture)
   React.useEffect(() => {
-    const handlePopState = () => {
+    const handlePopState = (e: PopStateEvent) => {
+      // Ignore popstate events restoring into another modal or quickEntry
+      if (e.state?.modal === 'accentPalette' || e.state?.quickEntry || e.state?.dialogOpen) {
+        return;
+      }
       // Close edit mode first (one back press = exit edit)
-      if (isEditingCustomer) {
+      if (isEditingCustomer && e.state?.modal !== 'editingCustomer') {
         // Capture scroll position before React re-render to prevent unwanted scroll
         const savedScrollY = window.scrollY;
         setIsEditingCustomer(false);
@@ -626,36 +961,51 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
         });
         return;
       }
-      if (isManageStatementsOpen) {
+      if (isManageStatementsOpen && e.state?.modal !== 'manageStatements') {
         setIsManageStatementsOpen(false);
         return;
       }
-      if (receiptResult && window.history.state?.modal !== 'receiptPreview') {
-        setReceiptResult(null);
+      if (auditLogTx && e.state?.modal !== 'auditLog') {
+        setAuditLogTx(null);
         return;
       }
-      if (editingTx && window.history.state?.modal !== 'editTx') {
+      if (receiptResult && e.state?.modal !== 'receiptPreview') {
+        setReceiptResult((prev) => {
+          if (prev?.kind === 'pdf') {
+            prev.previewPages.forEach((u) => {
+              if (u.startsWith('blob:')) {
+                try { URL.revokeObjectURL(u); } catch {}
+              }
+            });
+          } else if (prev?.dataUrl?.startsWith('blob:')) {
+            try { URL.revokeObjectURL(prev.dataUrl); } catch {}
+          }
+          return null;
+        });
+        return;
+      }
+      if (editingTx && e.state?.modal !== 'editTx') {
         setEditingTx(null);
       }
-      if (deletingTx && window.history.state?.modal !== 'deleteTx') {
+      if (deletingTx && e.state?.modal !== 'deleteTx') {
         setDeletingTx(null);
       }
-      if (deletingCustomer && window.history.state?.modal !== 'deleteCustomer') {
+      if (deletingCustomer && e.state?.modal !== 'deleteCustomer') {
         setDeletingCustomer(null);
       }
       if (duplicateTxWarning) {
         setDuplicateTxWarning(null);
       }
-      if (pinActionCustomer && window.history.state?.modal !== 'pinActionCustomer') {
+      if (pinActionCustomer && e.state?.modal !== 'pinActionCustomer') {
         setPinActionCustomer(null);
       }
-      if (phoneWarningCustomer && window.history.state?.modal !== 'phoneWarningCustomer') {
+      if (phoneWarningCustomer && e.state?.modal !== 'phoneWarningCustomer') {
         setPhoneWarningCustomer(null);
       }
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [isEditingCustomer, isManageStatementsOpen, editingTx, deletingTx, deletingCustomer, duplicateTxWarning, pinActionCustomer, phoneWarningCustomer, receiptResult]);
+  }, [isEditingCustomer, isManageStatementsOpen, auditLogTx, editingTx, deletingTx, deletingCustomer, duplicateTxWarning, pinActionCustomer, phoneWarningCustomer, receiptResult]);
 
   const [recentlyEditedTxId, setRecentlyEditedTxId] = useState<string | null>(null);
 
@@ -690,40 +1040,46 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     return isNaN(parsed.getTime()) ? new Date() : parsed;
   };
 
-  const getDuplicate = (actionType: 'due' | 'payment', amountStr: string) => {
-    if (!selectedCustomerId || !amountStr) return null;
+  const fallbackCustomerTxs = useMemo(() => {
+    if (!selectedCustomerId) return [];
+    const sourceTxs = allTransactions ?? transactions;
+    const inMem = sourceTxs.filter(t => t.customerId === selectedCustomerId);
+    if (inMem.length > 0 || typeof localStorage === 'undefined') return inMem;
+    try {
+      const userId = customers.find(c => c.id === selectedCustomerId)?.userId;
+      if (userId) {
+        const cached = localStorage.getItem(`easy_due_txs_${userId}_${selectedCustomerId}`);
+        if (cached) return JSON.parse(cached) as Transaction[];
+      }
+    } catch {}
+    return [];
+  }, [selectedCustomerId, allTransactions, transactions, customers]);
+
+  const getDuplicate = React.useCallback((actionType: 'due' | 'payment', amountStr: string) => {
+    if (!selectedCustomerId || !amountStr || fallbackCustomerTxs.length === 0) return null;
     const cleaned = amountStr.replace(/,/g, '');
     const amountVal = parseFloat(cleaned);
     if (isNaN(amountVal) || amountVal <= 0) return null;
 
-    const sourceTxs = allTransactions ?? transactions;
-    let customerTxs = sourceTxs.filter(t => t.customerId === selectedCustomerId);
-    if (customerTxs.length === 0 && typeof localStorage !== 'undefined') {
-      try {
-        const userId = customers.find(c => c.id === selectedCustomerId)?.userId;
-        if (userId) {
-          const cached = localStorage.getItem(`easy_due_txs_${userId}_${selectedCustomerId}`);
-          if (cached) {
-            customerTxs = JSON.parse(cached);
-          }
-        }
-      } catch (e) {}
-    }
-
     const now = Date.now();
     const twentyFourHoursMs = 24 * 60 * 60 * 1000;
-    return customerTxs.find(t => {
+    return fallbackCustomerTxs.find(t => {
+      if (t.type !== actionType || Math.abs(t.amount - amountVal) >= 0.01) return false;
       const tDate = parseTxDate(t.createdAt || t.date);
-      return t.type === actionType && 
-             Math.abs(t.amount - amountVal) < 0.01 && 
-             (now - tDate.getTime()) < twentyFourHoursMs;
+      return (now - tDate.getTime()) < twentyFourHoursMs;
     }) || null;
-  };
+  }, [selectedCustomerId, fallbackCustomerTxs]);
+
+  const activeRealtimeDuplicate = useMemo(() => {
+    if (!openActionType || txSubmitting || !actionAmount) return null;
+    return getDuplicate(openActionType, actionAmount);
+  }, [openActionType, txSubmitting, actionAmount, getDuplicate]);
 
  const openEditTxModal = (tx: Transaction) => {
    setEditingTx(tx);
    setEditTxAmount(tx.amount.toString());
    setEditTxDesc(tx.description || '');
+   setEditTxTag(tx.tag || null);
    window.history.pushState({ ...window.history.state, modal: 'editTx' }, '');
  };
 
@@ -735,6 +1091,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  const closeTxModals = () => {
     setEditingTx(null);
     setDeletingTx(null);
+    setEditTxTag(null);
     if (window.history.state?.modal === 'editTx' || window.history.state?.modal === 'deleteTx') {
       window.history.back(); // This triggers popstate, which sets states to null
     }
@@ -762,8 +1119,50 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   };
 
   const closeReceiptModal = () => {
-    setReceiptResult(null);
+    setReceiptResult((prev) => {
+      if (prev?.kind === 'pdf') {
+        prev.previewPages.forEach((u) => {
+          if (u.startsWith('blob:')) {
+            try { URL.revokeObjectURL(u); } catch {}
+          }
+        });
+      } else if (prev?.dataUrl?.startsWith('blob:')) {
+        try { URL.revokeObjectURL(prev.dataUrl); } catch {}
+      }
+      return null;
+    });
     if (window.history.state?.modal === 'receiptPreview') {
+      window.history.back();
+    }
+  };
+
+  const snapKeepCountToFive = (raw: number | string | undefined, fallback = 15) => {
+    const num = typeof raw === 'number' ? raw : parseInt(String(raw || ''), 10);
+    const base = !isNaN(num) && num > 0 ? num : fallback;
+    return Math.max(5, Math.min(500, Math.round(base / 5) * 5));
+  };
+
+  const openManageStatementsModal = () => {
+    setManualKeepCountInput((prev) => String(snapKeepCountToFive(prev, 15)));
+    setIsManageStatementsOpen(true);
+    window.history.pushState({ ...window.history.state, modal: 'manageStatements' }, '');
+  };
+
+  const closeManageStatementsModal = () => {
+    setIsManageStatementsOpen(false);
+    if (window.history.state?.modal === 'manageStatements') {
+      window.history.back();
+    }
+  };
+
+  const openAuditLogModal = (tx: Transaction) => {
+    setAuditLogTx(tx);
+    window.history.pushState({ ...window.history.state, modal: 'auditLog' }, '');
+  };
+
+  const closeAuditLogModal = () => {
+    setAuditLogTx(null);
+    if (window.history.state?.modal === 'auditLog') {
       window.history.back();
     }
   };
@@ -797,6 +1196,16 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
         ? new Map<string, number>(customOrder.map((id, idx) => [id, idx]))
         : null;
 
+    const recencyMap =
+      sortBy === 'recent'
+        ? new Map<string, number>(
+            filtered.map((c) => {
+              const d = c.updatedAt ?? c.createdAt;
+              return [c.id, d ? parseFirestoreDate(d).getTime() : 0];
+            })
+          )
+        : null;
+
     // 2. Sort customers
     filtered.sort((a, b) => {
       const aPinned = pinnedCustomerNameSet.has(a.name);
@@ -815,13 +1224,12 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       if (sortBy === 'low_balance') {
         return a.outstandingDue - b.outstandingDue;
       }
-      
+
       // Default: 'recent' — last activity (payment, due, profile edit)
-      const getRecency = (c: typeof a) => {
-        const d = c.updatedAt ?? c.createdAt;
-        return d ? parseFirestoreDate(d).getTime() : 0;
-      };
-      return getRecency(b) - getRecency(a);
+      if (recencyMap) {
+        return (recencyMap.get(b.id) ?? 0) - (recencyMap.get(a.id) ?? 0);
+      }
+      return 0;
     });
 
     return filtered;
@@ -1001,16 +1409,26 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     triggerHaptic('single');
 
     try {
-      const currentTheme = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
-        ? 'dark'
-        : 'light';
-      const result = await generateReceiptPng(
-        selectedCustomer,
-        selectedCustomerAllTransactions,
-        lang,
-        currentTheme
-      );
-      setReceiptResult(result);
+      if (selectedCustomer.accountType === 'credit_card') {
+        const result = await generateCreditCardStatementPdf(
+          selectedCustomer,
+          creditCardCycleData?.billedTxs || [],
+          creditCardCycleData,
+          lang
+        );
+        setReceiptResult(result);
+      } else {
+        const currentTheme = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+          ? 'dark'
+          : 'light';
+        const result = await generateReceiptPng(
+          selectedCustomer,
+          selectedCustomerAllTransactions,
+          lang,
+          currentTheme
+        );
+        setReceiptResult(result);
+      }
       try {
         window.history.pushState({ ...window.history.state, modal: 'receiptPreview' }, '');
       } catch {
@@ -1140,36 +1558,87 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     };
   }, [selectedCustomer, selectedCustomerAllTransactions]);
 
-  const groupedTransactions = useMemo(() => {
-    const sourceTxs =
-      selectedCustomer?.accountType === 'credit_card' && creditCardCycleData
-        ? cardCycleTab === 'unbilled'
-          ? creditCardCycleData.unbilledTxs
-          : creditCardCycleData.billedTxs
-        : selectedCustomerTransactions;
+  const activeCycleTransactions = useMemo(() => {
+    if (selectedCustomer?.accountType === 'credit_card' && creditCardCycleData) {
+      return cardCycleTab === 'unbilled'
+        ? creditCardCycleData.unbilledTxs
+        : creditCardCycleData.billedTxs;
+    }
+    return selectedCustomerTransactions;
+  }, [selectedCustomer?.accountType, creditCardCycleData, cardCycleTab, selectedCustomerTransactions]);
 
-    const groups: Record<string, Transaction[]> = {};
-    sourceTxs.forEach(tx => {
-      const d = parseFirestoreDate(tx.date);
-      const dateStr = d.toDateString(); // e.g. "Mon Jun 22 2026"
-      if (!groups[dateStr]) {
-        groups[dateStr] = [];
+  const availableLedgerTags = useMemo(() => {
+    const seen = new Set<string>();
+    const list: string[] = [];
+    for (let i = 0; i < activeCycleTransactions.length; i++) {
+      const tag = activeCycleTransactions[i].tag;
+      if (tag && !seen.has(tag)) {
+        seen.add(tag);
+        list.push(tag);
       }
-      groups[dateStr].push(tx);
-    });
+    }
+    return list;
+  }, [activeCycleTransactions]);
 
-    return Object.keys(groups)
-      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
-      .map(dateStr => ({
-        dateStr,
-        dateObj: new Date(dateStr),
-        items: groups[dateStr].sort((a: Transaction, b: Transaction) => {
-          const tA = parseFirestoreDate(a.date).getTime();
-          const tB = parseFirestoreDate(b.date).getTime();
-          return tB - tA;
-        })
+  const ledgerTagScrollRef = useRef<HTMLDivElement>(null);
+  const {
+    scrollEdges: ledgerTagEdges,
+    isDragging: isDraggingLedgerTags,
+    scrollByStep: scrollLedgerTagsByStep,
+    handlers: ledgerTagScrollHandlers,
+  } = useHorizontalDragWheelScroll(ledgerTagScrollRef, availableLedgerTags.length);
+
+  const groupedTransactions = useMemo(() => {
+    const sourceTxs = ledgerTagFilter
+      ? activeCycleTransactions.filter(tx => tx.tag === ledgerTagFilter)
+      : activeCycleTransactions;
+
+    const groups: Record<string, { dayMs: number; items: Array<{ tx: Transaction; txMs: number }> }> = {};
+    for (let i = 0; i < sourceTxs.length; i++) {
+      const tx = sourceTxs[i];
+      const d = parseFirestoreDate(tx.date);
+      const txMs = d.getTime();
+      const dayKey = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      if (!groups[dayKey]) {
+        groups[dayKey] = {
+          dayMs: new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(),
+          items: [],
+        };
+      }
+      groups[dayKey].items.push({ tx, txMs });
+    }
+
+    return Object.entries(groups)
+      .sort((a, b) => b[1].dayMs - a[1].dayMs)
+      .map(([dayKey, group]) => ({
+        dateStr: dayKey,
+        isTagGroup: false,
+        tagKey: '',
+        label: '',
+        dateObj: new Date(group.dayMs),
+        items: group.items.sort((a, b) => b.txMs - a.txMs).map(item => item.tx),
       }));
-  }, [selectedCustomer, selectedCustomerTransactions, creditCardCycleData, cardCycleTab]);
+  }, [activeCycleTransactions, ledgerTagFilter]);
+
+  const activeCustomerArchives = useMemo(() => {
+    if (!selectedCustomerId || archivedStatements.length === 0) return [];
+    return archivedStatements.filter((a: any) => a && a.customerId === selectedCustomerId);
+  }, [archivedStatements, selectedCustomerId]);
+
+  const handleCardSelect = React.useCallback((c: Customer) => {
+    setSelectedCustomerId(selectedCustomerId === c.id ? null : c.id);
+  }, [selectedCustomerId, setSelectedCustomerId]);
+
+  const handleCardOpenPin = React.useCallback((c: Customer) => {
+    window.history.pushState({ ...window.history.state, modal: 'pinActionCustomer' }, '');
+    setPinActionCustomer(c);
+  }, []);
+
+  const handleCardDelete = React.useCallback((c: Customer) => {
+    triggerHaptic('double');
+    window.history.pushState({ ...window.history.state, modal: 'deleteCustomer' }, '');
+    setDeletingCustomer(c);
+  }, []);
 
  const handleCreateCustomer = async (e: React.FormEvent) => {
  e.preventDefault();
@@ -1197,13 +1666,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
  setIsCreatingCustomer(true);
  try {
- const [newId] = await Promise.all([
- createCustomer(newName, newPhone, {
+ const newId = await createCustomer(newName, newPhone, {
    accountType: newAccountType,
    billingDay: newAccountType === 'credit_card' ? parsedBillingDay : undefined
- }),
- new Promise(resolve => setTimeout(resolve, 600))
- ]);
+ });
  if (newId) {
  setNewName('');
  setNewPhone('');
@@ -1254,21 +1720,19 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     let txDate = new Date();
     if (
       selectedCustomer?.accountType === 'credit_card' &&
-      openActionType === 'due' &&
       actionTargetCycle === 'billed' &&
       creditCardCycleData
     ) {
       txDate = new Date(creditCardCycleData.lastStatementDate.getTime() - 12 * 60 * 60 * 1000);
     }
 
+    const finalDesc = actionDesc.trim() || (actionTag ? getTagDefaultDescription(actionTag, lang) : '');
     setTxSubmitting(true);
     try {
-      await Promise.all([
-        addTransaction(selectedCustomerId, openActionType, amountVal, actionDesc, txDate),
-        new Promise(resolve => setTimeout(resolve, 600))
-      ]);
+      await addTransaction(selectedCustomerId, openActionType, amountVal, finalDesc, txDate, undefined, actionTag || undefined);
       setActionAmount('');
       setActionDesc('');
+      setActionTag(null);
       setActionTargetCycle('unbilled');
       setOpenActionType(null);
       setDuplicateTxWarning(null);
@@ -1307,17 +1771,28 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     }
   };
 
- // Generate customized shareable WhatsApp link
- const getShareLink = (c: Customer, format: 'whatsapp' | 'sms') => {
- const text = getMessageText(c, selectedTemplate);
- const encodedText = encodeURIComponent(text);
- if (format === 'whatsapp') {
- let phoneNum = c.phone ? c.phone.replace(/[^0-9]/g, '') : '';
- if (phoneNum.startsWith('01')) phoneNum = '88' + phoneNum;
- return `https://wa.me/${phoneNum}?text=${encodedText}`;
- }
- return `sms:${c.phone}?body=${encodedText}`;
- };
+  // Generate customized shareable WhatsApp link
+  const getShareLink = React.useCallback((c: Customer, format: 'whatsapp' | 'sms') => {
+  const text = getMessageText(c, selectedTemplate);
+  const encodedText = encodeURIComponent(text);
+  if (format === 'whatsapp') {
+  let phoneNum = c.phone ? c.phone.replace(/[^0-9]/g, '') : '';
+  if (phoneNum.startsWith('01')) phoneNum = '88' + phoneNum;
+  return `https://wa.me/${phoneNum}?text=${encodedText}`;
+  }
+  return `sms:${c.phone}?body=${encodedText}`;
+  }, [lang, selectedTemplate]);
+
+  const handleCardWhatsApp = React.useCallback((c: Customer) => {
+    if (!c.phone || !c.phone.trim()) {
+      triggerHaptic('double');
+      window.history.pushState({ ...window.history.state, modal: 'phoneWarningCustomer' }, '');
+      setPhoneWarningCustomer(c);
+    } else {
+      triggerHaptic('single');
+      window.open(getShareLink(c, 'whatsapp'), '_blank');
+    }
+  }, [getShareLink]);
 
 
 
@@ -1327,34 +1802,31 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  {/* 1. LIST VIEW OF ALL CUSTOMERS */}
       {!selectedCustomer ? (
         <div className="space-y-5">
-          {/* Section Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-slate-950 dark:bg-white text-white dark:text-slate-950 flex items-center justify-center font-bold text-xs shadow-xs">
-                <Users className="w-4 h-4" />
-              </div>
+          {/* Open Editorial Header with Scroll Parallax Shrink */}
+          <ScrollParallaxStage rangePx={160}>
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 pt-1 px-1">
               <div>
-                <h2 className="text-lg sm:text-xl font-black text-slate-950 dark:text-white tracking-tight">
+                <span className={lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1' : 'micro-mono-label text-slate-500 dark:text-slate-400 block mb-1'}>
+                  {lang === 'bn' ? `${formatNumber(customers.length, lang)}টি প্রোফাইল খতিয়ানে` : `${formatNumber(customers.length, lang)} Profiles on Ledger`}
+                </span>
+                <h2 className="font-display text-2xl sm:text-3xl font-bold text-slate-950 dark:text-white tracking-tight leading-tight">
                   {t.customerAccounts}
                 </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                  {lang === 'bn' ? `${formatNumber(customers.length, lang)}টি গ্রাহক প্রোফাইল খতিয়ানে` : `${formatNumber(customers.length, lang)} customer profiles on ledger`}
-                </p>
               </div>
-            </div>
 
-            <button
-              onClick={() => {
-                triggerHaptic('single');
-                setShowAddForm(!showAddForm);
-              }}
-              className="px-4 py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 font-bold rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer text-xs shrink-0 active:scale-[0.98] shadow-xs"
-              id="add_customer_btn"
-            >
-              <UserPlus className="w-4 h-4 stroke-[2.5]" />
-              <span>{t.createAccount}</span>
-            </button>
-          </div>
+              <button
+                onClick={() => {
+                  triggerHaptic('single');
+                  setShowAddForm(!showAddForm);
+                }}
+                className="px-5 py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-semibold rounded-full flex items-center justify-center gap-2 transition-all cursor-pointer text-xs shrink-0 touch-press shadow-md"
+                id="add_customer_btn"
+              >
+                <UserPlus className="w-4 h-4 stroke-[1.25]" />
+                <span>{t.createAccount}</span>
+              </button>
+            </div>
+          </ScrollParallaxStage>
 
           {/* Form to add new customer */}
           <AnimatePresence>
@@ -1364,10 +1836,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
                 onSubmit={handleCreateCustomer}
-                className="surface-glass border p-5 sm:p-6 rounded-2xl space-y-4"
+                className="surface-glass border p-5 sm:p-6 rounded-[28px] space-y-4 shadow-sm"
               >
-                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-3">
-                  <div className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-[0.14em]'}`}>
+                <div className="flex items-center justify-between border-b border-slate-900/[0.06] dark:border-white/[0.06] pb-3">
+                  <div className={lang === 'bn' ? 'text-xs font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-600 dark:text-slate-300 font-semibold'}>
                     {t.newAccountDetails}
                   </div>
                   <button 
@@ -1376,31 +1848,38 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                       triggerHaptic('medium');
                       setShowAddForm(false);
                     }}
-                    className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+                    className="w-8 h-8 rounded-full bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.06] dark:hover:bg-white/[0.12] border border-slate-900/[0.08] dark:border-white/[0.08] flex items-center justify-center text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
                   >
-                    <X className="w-4 h-4" />
+                    <X className="w-4 h-4 stroke-[1.25]" />
                   </button>
                 </div>
 
-                {/* Compact Side-by-Side Account Type Selector: Customer Ledger vs Credit Card */}
+                {/* Account Type Selector */}
                 <div className="space-y-1.5">
-                  <label className={`text-[11px] text-slate-500 dark:text-slate-400 font-semibold block ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'}`}>
+                  <label className={`block ${lang === 'bn' ? 'text-[11px] text-slate-500 dark:text-slate-400 font-semibold tracking-normal' : 'micro-mono-label text-slate-600 dark:text-slate-300 font-semibold'}`}>
                     {lang === 'bn' ? 'হিসাবের ধরন' : 'Account Type'}
                   </label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="relative grid grid-cols-2 p-1 rounded-full bg-slate-900/[0.045] dark:bg-white/[0.05] border border-slate-900/[0.08] dark:border-white/[0.09]">
+                    <div
+                      aria-hidden="true"
+                      className="pointer-events-none absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-slate-950 dark:bg-white shadow-sm will-change-transform transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+                      style={{
+                        transform: `translate3d(${newAccountType === 'credit_card' ? '100%' : '0%'}, 0, 0)`
+                      }}
+                    />
                     <button
                       type="button"
                       onClick={() => {
                         triggerHaptic('single');
                         setNewAccountType('standard');
                       }}
-                      className={`py-2.5 px-3 rounded-xl border-2 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                      className={`relative z-10 py-2.5 px-3 rounded-full text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors duration-200 touch-press ${
                         newAccountType === 'standard'
-                          ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-xs'
-                          : 'bg-slate-50 hover:bg-slate-100 dark:bg-[#0D121D] dark:hover:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200'
+                          ? 'text-white dark:text-slate-950'
+                          : 'text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
                       }`}
                     >
-                      <Users className="w-3.5 h-3.5 shrink-0" />
+                      <Users className="w-3.5 h-3.5 shrink-0 stroke-[1.25]" />
                       <span className="truncate">{lang === 'bn' ? 'গ্রাহক খতিয়ান' : 'Customer Ledger'}</span>
                     </button>
 
@@ -1410,13 +1889,13 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                         triggerHaptic('single');
                         setNewAccountType('credit_card');
                       }}
-                      className={`py-2.5 px-3 rounded-xl border-2 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                      className={`relative z-10 py-2.5 px-3 rounded-full text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors duration-200 touch-press ${
                         newAccountType === 'credit_card'
-                          ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-xs'
-                          : 'bg-slate-50 hover:bg-slate-100 dark:bg-[#0D121D] dark:hover:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200'
+                          ? 'text-white dark:text-slate-950'
+                          : 'text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
                       }`}
                     >
-                      <CreditCard className="w-3.5 h-3.5 shrink-0" />
+                      <CreditCard className="w-3.5 h-3.5 shrink-0 stroke-[1.25]" />
                       <span className="truncate">{lang === 'bn' ? 'ক্রেডিট কার্ড' : 'Credit Card'}</span>
                     </button>
                   </div>
@@ -1424,84 +1903,102 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className={`text-[11px] text-slate-500 dark:text-slate-400 font-semibold ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'}`}>
-                      {newAccountType === 'credit_card'
-                        ? (lang === 'bn' ? 'কার্ড / হিসাবের নাম' : 'Card / Account Name')
-                        : t.customerName}
+                    <label className={lang === 'bn' ? 'text-[11px] text-slate-500 dark:text-slate-400 font-semibold tracking-normal block overflow-hidden' : 'micro-mono-label text-slate-600 dark:text-slate-300 font-semibold block overflow-hidden'}>
+                      <AnimatePresence mode="wait" initial={false}>
+                        <motion.span
+                          key={newAccountType}
+                          initial={{ opacity: 0, y: 3 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -3 }}
+                          transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
+                          className="inline-block"
+                        >
+                          {newAccountType === 'credit_card'
+                            ? (lang === 'bn' ? 'কার্ড / হিসাবের নাম' : 'Card / Account Name')
+                            : t.customerName}
+                        </motion.span>
+                      </AnimatePresence>
                     </label>
                     <input
                       type="text"
                       placeholder={newAccountType === 'credit_card' ? (lang === 'bn' ? 'যেমন: সিটি ব্যাংক অ্যামেক্স' : 'e.g. City Bank Amex') : 'e.g. Wahid Zaman'}
                       value={newName}
                       onChange={(e) => setNewName(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-white dark:bg-[#0D121D] border-2 border-slate-300 dark:border-slate-700 rounded-xl text-slate-950 dark:text-white text-sm focus:outline-none focus:border-slate-950 dark:focus:border-white font-medium transition-colors"
+                      className="w-full px-4 py-2.5 bg-white/60 dark:bg-white/[0.05] border border-slate-900/[0.1] dark:border-white/[0.1] rounded-2xl text-slate-950 dark:text-white text-sm focus:outline-none focus:border-slate-950 dark:focus:border-white font-medium transition-colors"
                       required
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className={`text-[11px] text-slate-500 dark:text-slate-400 font-semibold ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'}`}>{t.phoneNumber}</label>
+                    <label className={lang === 'bn' ? 'text-[11px] text-slate-500 dark:text-slate-400 font-semibold tracking-normal' : 'micro-mono-label text-slate-600 dark:text-slate-300 font-semibold'}>{t.phoneNumber}</label>
                     <div className="flex gap-2">
                       <input
                         type="tel"
                         placeholder={t.phoneSmsNotice}
                         value={newPhone}
                         onChange={(e) => setNewPhone(cleanBangladeshiPhone(e.target.value))}
-                        className="flex-1 px-3.5 py-2.5 bg-white dark:bg-[#0D121D] border-2 border-slate-300 dark:border-slate-700 rounded-xl text-slate-950 dark:text-white text-sm focus:outline-none focus:border-slate-950 dark:focus:border-white font-mono transition-colors"
+                        className="flex-1 px-4 py-2.5 bg-white/60 dark:bg-white/[0.05] border border-slate-900/[0.1] dark:border-white/[0.1] rounded-2xl text-slate-950 dark:text-white text-sm focus:outline-none focus:border-slate-950 dark:focus:border-white font-mono transition-colors"
                       />
                       <button
                         type="button"
                         onClick={() => handlePickContact(setNewPhone, (name) => { if (!newName.trim()) setNewName(name); }, true)}
-                        className="px-3 bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-700 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors shrink-0 font-bold text-xs"
+                        className="px-3.5 bg-white/60 hover:bg-white/90 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-900 dark:text-white border border-slate-900/[0.08] dark:border-white/[0.08] rounded-2xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors shrink-0 font-semibold text-xs"
                         title={lang === 'bn' ? 'কন্টাক্ট নির্বাচন করুন' : 'Pick Contact'}
                       >
-                        <BookUser className="w-3.5 h-3.5 text-slate-700 dark:text-slate-300" />
+                        <BookUser className="w-3.5 h-3.5 text-slate-700 dark:text-slate-300 stroke-[1.25]" />
                         <span className="hidden sm:inline">{lang === 'bn' ? 'কন্টাক্ট' : 'Contacts'}</span>
                       </button>
                     </div>
                   </div>
                 </div>
 
-                {/* Billing Date Input for Credit Card Accounts (User-decided, no auto-picked presets) */}
-                {newAccountType === 'credit_card' && (
-                  <div className="p-3.5 rounded-xl bg-slate-50/80 dark:bg-slate-900/50 border-2 border-slate-200 dark:border-slate-800">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                      <div>
-                        <label className={`text-[11px] text-slate-700 dark:text-slate-200 font-bold flex items-center gap-1.5 ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'}`}>
-                          <Calendar className="w-3.5 h-3.5 text-slate-700 dark:text-slate-300" />
-                          <span>{lang === 'bn' ? 'স্টেটমেন্ট বিলিং তারিখ (১-৩১)' : 'Statement Billing Day (1–31)'}</span>
-                        </label>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                          {lang === 'bn'
-                            ? 'মাসের কোন তারিখে কার্ডের বিল তৈরি হয় তা লিখুন (যেমন: ১৫)'
-                            : 'Enter the day of the month your statement generates (1–31)'}
-                        </p>
+                <AnimatePresence>
+                  {newAccountType === 'credit_card' && (
+                    <motion.div
+                      key="create-billing-day"
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -8 }}
+                      className="p-3.5 rounded-2xl surface-subcard border"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                        <div>
+                          <label className={`flex items-center gap-1.5 ${lang === 'bn' ? 'text-[11px] text-slate-700 dark:text-slate-200 font-bold tracking-normal' : 'micro-mono-label text-slate-700 dark:text-slate-200 font-semibold'}`}>
+                            <Calendar className="w-3.5 h-3.5 text-slate-700 dark:text-slate-300 stroke-[1.25]" />
+                            <span>{lang === 'bn' ? 'স্টেটমেন্ট বিলিং তারিখ (১-৩১)' : 'Statement Billing Day (1–31)'}</span>
+                          </label>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            {lang === 'bn'
+                              ? 'মাসের কোন তারিখে কার্ডের বিল তৈরি হয় তা লিখুন (যেমন: ১৫)'
+                              : 'Enter the day of the month your statement generates (1–31)'}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            data-numpad="true"
+                            placeholder={lang === 'bn' ? '১-৩১' : '1–31'}
+                            value={newBillingDay}
+                            onChange={(e) => {
+                              const clean = e.target.value.replace(/[^0-9]/g, '');
+                              if (!clean) {
+                                setNewBillingDay('');
+                                return;
+                              }
+                              const num = Math.min(31, Math.max(1, parseInt(clean, 10)));
+                              setNewBillingDay(String(num));
+                            }}
+                            className="w-20 px-3 py-2 text-center bg-white/65 dark:bg-white/[0.06] border border-slate-900/[0.1] dark:border-white/[0.1] rounded-full text-slate-950 dark:text-white font-mono font-bold text-sm focus:outline-none focus:border-slate-950 dark:focus:border-white placeholder:text-slate-400 placeholder:font-normal"
+                          />
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          data-numpad="true"
-                          placeholder={lang === 'bn' ? '১-৩১' : '1–31'}
-                          value={newBillingDay}
-                          onChange={(e) => {
-                            const clean = e.target.value.replace(/[^0-9]/g, '');
-                            if (!clean) {
-                              setNewBillingDay('');
-                              return;
-                            }
-                            const num = Math.min(31, Math.max(1, parseInt(clean, 10)));
-                            setNewBillingDay(String(num));
-                          }}
-                          className="w-20 px-3 py-2 text-center bg-white dark:bg-[#0D121D] border-2 border-slate-300 dark:border-slate-700 rounded-xl text-slate-950 dark:text-white font-mono font-black text-sm focus:outline-none focus:border-slate-950 dark:focus:border-white placeholder:text-slate-400 placeholder:font-normal"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 {formError && (
-                  <div className="text-rose-600 dark:text-rose-400 text-xs font-medium flex items-center gap-1.5 bg-rose-50 dark:bg-rose-950/30 p-2.5 rounded-lg border border-rose-200/40 dark:border-rose-900/40">
-                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <div className="text-rose-600 dark:text-rose-400 text-xs font-medium flex items-center gap-1.5 bg-rose-500/10 p-3 rounded-2xl border border-rose-500/20">
+                    <AlertTriangle className="w-4 h-4 shrink-0 stroke-[1.25]" />
                     <span>{formError}</span>
                   </div>
                 )}
@@ -1510,14 +2007,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                   <button
                     type="button"
                     onClick={() => setShowAddForm(false)}
-                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-lg text-xs cursor-pointer transition-colors"
+                    className="px-4 py-2 bg-white/55 hover:bg-white/85 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-700 dark:text-slate-200 border border-slate-900/[0.08] dark:border-white/[0.08] font-semibold rounded-full text-xs cursor-pointer transition-colors"
                   >
                     {t.cancel}
                   </button>
                   <button
                     type="submit"
                     disabled={isCreatingCustomer}
-                    className="px-5 py-2 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 font-bold rounded-lg text-xs disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                    className="px-5 py-2 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-semibold rounded-full text-xs disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
                   >
                     {isCreatingCustomer ? (
                       <span className="flex items-center gap-2">
@@ -1536,35 +2033,34 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             )}
           </AnimatePresence>
 
-          {/* Search bar with distinctive bold border & subtle glass translucency */}
+          {/* Frosted Pill Search Bar */}
           <div className="relative">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 z-10 pointer-events-none" />
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 z-10 pointer-events-none stroke-[1.25]" />
             <input
               type="text"
               placeholder={t.searchPlaceholder}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="surface-glass w-full pl-10 pr-12 py-3 border-2 border-slate-300 dark:border-slate-700 rounded-2xl text-slate-950 dark:text-white text-sm focus:outline-none font-medium placeholder:text-slate-400 transition-colors"
+              className="surface-glass w-full pl-11 pr-12 py-3 border rounded-full text-slate-950 dark:text-white text-sm focus:outline-none font-medium placeholder:text-slate-400 transition-colors"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => {
-                  triggerHaptic('tick');
+                  triggerHaptic('level3');
                   setSearchQuery('');
                 }}
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70 transition-colors cursor-pointer active:scale-95"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-950 dark:hover:text-white hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.08] transition-colors cursor-pointer active:scale-95"
                 title={lang === 'bn' ? 'খালি করুন' : 'Clear search'}
                 aria-label={lang === 'bn' ? 'খালি করুন' : 'Clear search'}
               >
-                <Delete className="w-5 h-5" />
+                <Delete className="w-4.5 h-4.5 stroke-[1.25]" />
               </button>
             )}
           </div>
 
-          {/* Client Status Filter Chips (Left) & Sort Dropdown (Right) */}
-          <div className="flex items-center justify-between gap-2 relative select-none pt-1">
-            {/* Minimalist Oblong Pill Filter Indicators (Press & Slide or Tap) */}
+          {/* Client Status Filter Pills & Sort Dropdown */}
+          <div className="flex items-center justify-between gap-2 relative select-none px-0.5">
             <div
               ref={filterPillsContainerRef}
               onPointerDown={(e) => {
@@ -1601,6 +2097,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 { id: 'overpaid', title: lang === 'bn' ? 'অগ্রিম জমা' : 'Advance / Overpaid' },
               ] as const).map((tab) => {
                 const isActive = filterStatus === tab.id;
+                const activeBorderClass =
+                  tab.id === 'due'
+                    ? 'bg-white/95 dark:bg-white/[0.16] border-2 border-rose-500/80 dark:border-rose-400/80 shadow-xs'
+                    : tab.id === 'settled'
+                    ? 'bg-white/95 dark:bg-white/[0.16] border-2 border-emerald-500/80 dark:border-emerald-400/80 shadow-xs'
+                    : tab.id === 'overpaid'
+                    ? 'bg-white/95 dark:bg-white/[0.16] border-2 border-[var(--accent-color)] shadow-xs'
+                    : 'bg-white/95 dark:bg-white/[0.16] border-2 border-slate-950/45 dark:border-white/55 shadow-xs';
                 return (
                   <button
                     key={tab.id}
@@ -1610,21 +2114,21 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                     aria-label={tab.title}
                     onClick={() => {
                       if (filterStatus !== tab.id) {
-                        triggerHaptic('single');
+                        triggerHaptic('level3');
                         setFilterStatus(tab.id);
                       }
                     }}
-                    className={`w-7 h-3.5 rounded-full border-2 transition-all cursor-pointer shrink-0 active:scale-95 ${
+                    className={`w-7 h-3 rounded-full transition-all cursor-pointer shrink-0 active:scale-95 ${
                       isActive
-                        ? 'bg-slate-950 border-slate-950 dark:bg-white dark:border-white shadow-2xs'
-                        : 'bg-transparent hover:bg-slate-100 dark:hover:bg-slate-800/40 border-slate-300 dark:border-slate-700/80'
+                        ? activeBorderClass
+                        : 'border-2 bg-white/45 dark:bg-white/[0.04] hover:bg-white/80 dark:hover:bg-white/[0.1] border-slate-900/[0.14] dark:border-white/[0.14] hover:border-slate-900/25 dark:hover:border-white/25'
                     }`}
                   />
                 );
               })}
             </div>
 
-            {/* Sort Button on Right (Less border-radius rounded-xl, slightly smaller px-3 py-1.5, same text) */}
+            {/* Sort Button */}
             <div className="relative shrink-0">
               <button
                 type="button"
@@ -1632,20 +2136,23 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                   triggerHaptic('single');
                   setIsSortOpen(!isSortOpen);
                 }}
-                className="surface-glass-interactive px-3 py-1.5 rounded-xl font-bold text-xs border-2 border-slate-300 dark:border-slate-700/80 text-slate-900 dark:text-white flex items-center gap-1.5 cursor-pointer active:scale-95"
+                className={`surface-glass-interactive px-3.5 py-1.5 rounded-full font-semibold text-xs border-2 text-slate-900 dark:text-white flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                  isSortOpen
+                    ? 'border-slate-950/40 dark:border-white/45 bg-white/90 dark:bg-white/[0.14]'
+                    : 'border-slate-900/[0.14] dark:border-white/[0.14] hover:border-slate-900/25 dark:hover:border-white/25'
+                }`}
               >
-                <ArrowUpDown className="w-3.5 h-3.5 stroke-[2.2]" />
+                <ArrowUpDown className="w-3.5 h-3.5 stroke-[1.25]" />
                 <span>{lang === 'bn' ? 'সাজান' : 'Sort'}</span>
               </button>
 
-              {/* Sort options Dropdown overlay */}
               {isSortOpen && (
                 <>
                   <div 
-                    className="fixed inset-0 z-40" 
+                    className="fixed inset-0 z-[60]" 
                     onClick={() => setIsSortOpen(false)} 
                   />
-                  <div className="absolute right-0 mt-1.5 w-48 glass-dropdown border border-slate-200/80 dark:border-white/15 rounded-2xl z-50 p-1.5 space-y-0.5 animate-reveal">
+                  <div className="absolute right-0 mt-1.5 w-48 glass-dropdown border rounded-2xl z-[70] p-1.5 space-y-0.5 animate-reveal">
                     {(['recent', 'high_balance', 'low_balance'] as const).map((option) => {
                        const label = option === 'recent'
                           ? (lang === 'bn' ? 'সাম্প্রতিক' : 'Recent')
@@ -1661,14 +2168,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                              setSortBy(option);
                              setIsSortOpen(false);
                            }}
-                           className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                           className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
                              sortBy === option 
-                               ? 'bg-slate-100 dark:bg-slate-800 text-slate-950 dark:text-white' 
-                               : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                               ? 'bg-slate-950/[0.07] dark:bg-white/[0.12] text-slate-950 dark:text-white' 
+                               : 'text-slate-700 dark:text-slate-300 hover:bg-slate-900/[0.04] dark:hover:bg-white/[0.06]'
                            }`}
                          >
                            <span>{label}</span>
-                           {sortBy === option && <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 stroke-[3]" />}
+                           {sortBy === option && <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 stroke-[1.5]" />}
                          </button>
                        );
                     })}
@@ -1678,218 +2185,30 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             </div>
           </div>
 
-          {/* Customer list database with distinctive bold borders */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-            {filteredCustomers.map(c => {
-              const initials = c.name
-                .split(' ')
-                .map(n => n[0])
-                .filter(Boolean)
-                .slice(0, 2)
-                .join('')
-                .toUpperCase() || 'C';
-
-              const isDue = c.outstandingDue > 0;
-              const isOverpaid = c.outstandingDue < 0;
-
-              return (
-                <SwipeableCustomerItem
-                  key={c.id}
-                  customer={c}
-                  lang={lang}
-                  isSelected={selectedCustomerId === c.id}
-                  swipeGesturesEnabled={swipeGesturesEnabled}
-                  isDeleting={deletingCustomer?.id === c.id}
-                  onWhatsApp={() => {
-                    if (!c.phone || !c.phone.trim()) {
-                      triggerHaptic('double');
-                      window.history.pushState({ ...window.history.state, modal: 'phoneWarningCustomer' }, '');
-                      setPhoneWarningCustomer(c);
-                    } else {
-                      triggerHaptic('single');
-                      window.open(getShareLink(c, 'whatsapp'), '_blank');
-                    }
-                  }}
-                  onDelete={() => {
-                    triggerHaptic('double');
-                    handleDelete(c);
-                  }}
-                  onClick={() => {}}
-                  activeSwipingId={activeSwipingId}
-                  setActiveSwipingId={setActiveSwipingId}
-                >
-                  <div
-                    onClick={() => {
-                      setSelectedCustomerId(selectedCustomerId === c.id ? null : c.id);
-                    }}
-                    className={`surface-glass-interactive border-2 p-4 sm:p-5 pb-3 sm:pb-3.5 rounded-2xl cursor-pointer flex flex-col justify-between gap-3 group ${
-                      selectedCustomerId === c.id 
-                        ? 'border-slate-950 dark:border-white ring-2 ring-slate-950/20 dark:ring-white/20' 
-                        : 'border-slate-300/90 dark:border-slate-700/90'
-                    }`}
-                  >
-                    {/* Top Row: Avatar + Name & Phone + Balance */}
-                    <div className="flex items-center justify-between gap-3">
-                      {/* Left: Initials + Name */}
-                      <div className="flex items-center gap-3 min-w-0 pr-2">
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-black text-xs shrink-0 border-2 ${
-                          isDue 
-                            ? 'bg-ledger-red-subtle text-ledger-red border-ledger-red-subtle' 
-                            : isOverpaid 
-                            ? 'bg-ledger-green-subtle text-ledger-green border-ledger-green-subtle'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
-                        }`}>
-                          {initials}
-                        </div>
-
-                        <div className="min-w-0">
-                          <div 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              triggerHaptic('single');
-                              window.history.pushState({ ...window.history.state, modal: 'pinActionCustomer' }, '');
-                              setPinActionCustomer(c);
-                            }}
-                            className="text-sm sm:text-base font-extrabold text-slate-950 dark:text-white truncate flex items-center gap-1.5 cursor-pointer group-hover:opacity-80 transition-opacity"
-                          >
-                            <span className="truncate">{c.name}</span>
-                            {pinnedCustomerNames.includes(c.name) && (
-                              <Pin className="w-3.5 h-3.5 text-amber-500 fill-amber-500 rotate-45 shrink-0" />
-                            )}
-                          </div>
-                          <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1 truncate font-mono">
-                            {c.accountType === 'credit_card' ? (
-                              <>
-                                <Calendar className="w-3 h-3 shrink-0 opacity-70" />
-                                <span className="truncate">
-                                  {lang === 'bn'
-                                    ? `বিলিং: প্রতি মাসের ${formatNumber(c.billingDay || 15, 'bn')} তারিখ`
-                                    : `Billing Day: ${c.billingDay || 15}`}
-                                </span>
-                              </>
-                            ) : (
-                              <>
-                                <Phone className="w-3 h-3 shrink-0 opacity-70" />
-                                <span className="truncate">{c.phone ? cleanBangladeshiPhone(c.phone) : (lang === 'bn' ? '(ফোন নম্বর নেই)' : '(No phone)')}</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Right: Balance Header */}
-                      <div className="text-right shrink-0">
-                        <div className={`text-base sm:text-lg font-black font-mono tabular-nums truncate ${
-                          isDue
-                            ? 'text-ledger-red'
-                            : isOverpaid
-                            ? 'text-ledger-green'
-                            : 'text-slate-400 dark:text-slate-500'
-                        }`}>
-                          {c.outstandingDue === 0
-                            ? `৳ ${lang === 'bn' ? '০' : '0'}`
-                            : `${c.outstandingDue < 0 ? '-' : ''}৳ ${formatNumber(Math.abs(c.outstandingDue), lang)}`}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Bottom Row: Informative Status Strip + Card Tag + 1-Tap Quick Action Shortcuts */}
-                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs h-[32px]">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        {/* Status Badge with Subtle Balanced Hairline */}
-                        <span className={`px-2 py-1 rounded-md text-[10px] font-bold border leading-none inline-flex items-center gap-1 shrink-0 ${
-                          lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'
-                        } ${
-                          isDue
-                            ? 'bg-ledger-red-subtle text-ledger-red border-ledger-red-subtle'
-                            : isOverpaid
-                            ? 'bg-ledger-green-subtle text-ledger-green border-ledger-green-subtle'
-                            : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700'
-                        }`}>
-                          {c.accountType === 'credit_card' ? (
-                            isDue ? (
-                              lang === 'bn' ? 'কার্ড বিল বকেয়া' : 'Card Bill Due'
-                            ) : isOverpaid ? (
-                              lang === 'bn' ? 'অতিরিক্ত জমা' : 'Extra Credit'
-                            ) : (
-                              lang === 'bn' ? 'বিল পরিশোধিত' : 'Bill Settled'
-                            )
-                          ) : isDue ? (
-                            lang === 'bn' ? 'বকেয়া ব্যালেন্স' : 'Due Balance'
-                          ) : isOverpaid ? (
-                            lang === 'bn' ? 'অগ্রিম ক্রেডিট' : 'Advance Credit'
-                          ) : (
-                            lang === 'bn' ? 'পরিশোধিত' : 'Settled'
-                          )}
-                        </span>
-
-                        {/* Card Tag matching border, font, and background of adjacent status tag */}
-                        {c.accountType === 'credit_card' && (
-                          <span className={`px-2 py-1 rounded-md text-[10px] font-bold border leading-none inline-flex items-center gap-1 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700 shrink-0 ${
-                            lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'
-                          }`}>
-                            <CreditCard className="w-2.5 h-2.5 shrink-0" />
-                            <span>{lang === 'bn' ? 'কার্ড' : 'Card'}</span>
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Quick 1-tap WhatsApp, Call, and Open Ledger Arrow Shortcuts */}
-                      <div className="flex items-center gap-1.5">
-                        {c.phone && (
-                          <>
-                            <a
-                              href={`https://wa.me/${(c.phone.startsWith('01') ? '88' : '') + c.phone.replace(/[^0-9]/g, '')}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                triggerHaptic('single');
-                              }}
-                              className="p-1.5 rounded-lg border-2 border-emerald-300 hover:border-emerald-600 dark:border-emerald-800 dark:hover:border-emerald-500 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 transition-colors shadow-2xs active:scale-95 flex items-center justify-center"
-                              title="WhatsApp"
-                            >
-                              <MessageSquare className="w-3.5 h-3.5" />
-                            </a>
-                            <a
-                              href={`tel:${c.phone}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                triggerHaptic('single');
-                              }}
-                              className="p-1.5 rounded-lg border-2 border-slate-300 dark:border-slate-700 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 transition-colors shadow-2xs active:scale-95 flex items-center justify-center"
-                              title={lang === 'bn' ? 'কল করুন' : 'Call'}
-                            >
-                              <Phone className="w-3.5 h-3.5" />
-                            </a>
-                          </>
-                        )}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            triggerHaptic('single');
-                            setSelectedCustomerId(selectedCustomerId === c.id ? null : c.id);
-                          }}
-                          className="p-1 -mr-1 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer flex items-center justify-center"
-                          title={lang === 'bn' ? 'খাতা খুলুন' : 'Open Ledger'}
-                          aria-label={lang === 'bn' ? 'খাতা খুলুন' : 'Open Ledger'}
-                        >
-                          <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
-                        </button>
-                      </div>
-                    </div>
-
-                  </div>
-                </SwipeableCustomerItem>
-              );
-            })}
+          {/* Customer Profile Grid (First viewport cards render immediately, rest yield cleanly after paint) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {(listBatchExpanded || searchQuery.trim().length > 0 ? filteredCustomers : filteredCustomers.slice(0, 16)).map((c, idx) => (
+              <CustomerCardGridItem
+                key={c.id}
+                customer={c}
+                index={idx}
+                lang={lang}
+                isSelected={selectedCustomerId === c.id}
+                isPinned={pinnedCustomerNameSet.has(c.name)}
+                swipeGesturesEnabled={swipeGesturesEnabled}
+                isDeleting={deletingCustomer?.id === c.id}
+                onSelectCustomer={handleCardSelect}
+                onOpenPinModal={handleCardOpenPin}
+                onWhatsAppCustomer={handleCardWhatsApp}
+                onDeleteCustomer={handleCardDelete}
+              />
+            ))}
 
             {filteredCustomers.length === 0 && (
-              <div className="col-span-1 sm:col-span-2 p-10 text-center surface-glass rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 text-slate-500">
-                <Users className="w-8 h-8 mx-auto stroke-[1.5] mb-2 text-slate-400" />
+              <div className="col-span-1 sm:col-span-2 p-10 text-center surface-glass rounded-[28px] border border-dashed text-slate-500">
+                <Users className="w-8 h-8 mx-auto stroke-[1.25] mb-2 text-slate-400" />
                 <p className="font-bold text-sm text-slate-900 dark:text-white">{t.noCustomersFound}</p>
-                <p className="text-xs mt-1 text-slate-500 dark:text-slate-400">{t.createOneAbove}</p>
+                <p className={`text-xs mt-1 text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'font-editorial-bn' : ''}`}>{t.createOneAbove}</p>
               </div>
             )}
           </div>
@@ -1897,7 +2216,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       ) : (
  
  /* 2. CHOSEN CUSTOMER DETAIL SHEET VIEW */
- <div className="space-y-6">
+ <div className="space-y-5 motion-view-enter">
  {/* Back button */}
  <button
  onClick={() => {
@@ -1906,35 +2225,35 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  setIsEditingCustomer(false);
   setLedgerLimit(5);
   }}
-  className="surface-glass-interactive flex items-center gap-2 px-3.5 py-2 font-bold text-slate-900 dark:text-slate-100 rounded-xl text-xs cursor-pointer border-2 border-slate-900/60 dark:border-slate-400 active:scale-95"
+  className="surface-glass-interactive inline-flex items-center gap-2 px-4 py-2 font-bold text-slate-900 dark:text-slate-100 rounded-full text-xs cursor-pointer border border-slate-200/80 dark:border-white/[0.1] touch-press shadow-2xs"
  id="back_to_list_btn"
  >
- <ArrowLeft className="w-4 h-4 stroke-[2.5]" />
+ <ArrowLeft className="w-3.5 h-3.5 stroke-[1.5]" />
  <span>{t.backToList}</span>
  </button>
 
  {/* Customer Profile card */}
- <div className="surface-hero-glass border rounded-2xl p-4 sm:p-6 space-y-4 sm:space-y-5 relative overflow-hidden">
+ <SpotlightCard className="surface-hero-glass border rounded-[28px] p-5 sm:p-6 space-y-5 relative overflow-hidden">
   {/* Subtle atmospheric accent glow behind profile card */}
   <div
     aria-hidden="true"
-    className="pointer-events-none absolute -top-24 -right-24 w-56 h-56 rounded-full blur-3xl opacity-[0.11] dark:opacity-[0.15]"
+    className="pointer-events-none absolute -top-24 -right-24 w-56 h-56 rounded-full blur-3xl opacity-[0.12] dark:opacity-[0.16]"
     style={{ backgroundColor: 'var(--accent-color)' }}
   />
  
  {/* Edit and Pin Buttons on the Top Right Side of the Card */}
   {!isEditingCustomer && (
-    <div className="absolute right-4 top-4 flex items-center gap-2 z-25">
+    <div className="absolute right-4 top-4 sm:right-5 sm:top-5 flex items-center gap-1.5 z-25">
       <button
         type="button"
         onClick={() => {
           triggerHaptic('single');
           togglePinCustomer(selectedCustomer.id);
         }}
-        className="p-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border-2 border-slate-300 dark:border-slate-700 rounded-xl transition-colors cursor-pointer flex items-center justify-center"
-        title={pinnedCustomerNames.includes(selectedCustomer.name) ? (lang === 'bn' ? 'আনপিন করুন' : 'Unpin Customer') : (lang === 'bn' ? 'পিন করুন' : 'Pin Customer')}
+        className="w-9 h-9 bg-slate-100/80 hover:bg-slate-200/80 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-700 dark:text-slate-200 border border-slate-200/70 dark:border-white/[0.08] rounded-full transition-colors cursor-pointer flex items-center justify-center touch-press"
+        title={pinnedCustomerNameSet.has(selectedCustomer.name) ? (lang === 'bn' ? 'আনপিন করুন' : 'Unpin Customer') : (lang === 'bn' ? 'পিন করুন' : 'Pin Customer')}
       >
-        <Pin className={`w-4 h-4 ${pinnedCustomerNames.includes(selectedCustomer.name) ? 'text-amber-500 fill-amber-500 rotate-45' : 'text-slate-500 dark:text-slate-400'}`} />
+        <Pin className={`w-4 h-4 stroke-[1.25] ${pinnedCustomerNameSet.has(selectedCustomer.name) ? 'text-amber-500 fill-amber-500 rotate-45' : 'text-slate-500 dark:text-slate-400'}`} />
       </button>
       <button
         type="button"
@@ -1943,13 +2262,15 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           handleGenerateReceiptImage();
         }}
         disabled={isGeneratingReceipt}
-        className="p-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border-2 border-slate-300 dark:border-slate-700 rounded-xl transition-colors cursor-pointer flex items-center justify-center"
-        title={lang === 'bn' ? 'রসিদ ইমেজ তৈরি ও ডাউনলোড করুন' : 'Generate & Download Receipt Image'}
+        className="w-9 h-9 bg-slate-100/80 hover:bg-slate-200/80 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-700 dark:text-slate-200 border border-slate-200/70 dark:border-white/[0.08] rounded-full transition-colors cursor-pointer flex items-center justify-center touch-press"
+        title={selectedCustomer.accountType === 'credit_card'
+          ? (lang === 'bn' ? 'বিল্ড স্টেটমেন্ট PDF ডাউনলোড করুন' : 'Generate Billed Statement PDF')
+          : (lang === 'bn' ? 'রসিদ ইমেজ তৈরি ও ডাউনলোড করুন' : 'Generate & Download Receipt Image')}
       >
         {isGeneratingReceipt ? (
-          <RefreshCw className="w-4 h-4 text-slate-500 animate-spin" />
+          <RefreshCw className="w-4 h-4 text-slate-500 animate-spin stroke-[1.25]" />
         ) : (
-          <ReceiptText className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+          <ReceiptText className="w-4 h-4 text-slate-500 dark:text-slate-400 stroke-[1.25]" />
         )}
       </button>
       <button
@@ -1964,15 +2285,15 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           window.history.replaceState({ tab: 'customers', customerId: selectedCustomer.id, modal: 'editingCustomer', quickEntry: false }, '', `?tab=customers&c=${selectedCustomer.id}`);
           setIsEditingCustomer(true);
         }}
-        className="p-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border-2 border-slate-300 dark:border-slate-700 rounded-xl transition-colors cursor-pointer flex items-center justify-center"
+        className="w-9 h-9 bg-slate-100/80 hover:bg-slate-200/80 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-700 dark:text-slate-200 border border-slate-200/70 dark:border-white/[0.08] rounded-full transition-colors cursor-pointer flex items-center justify-center touch-press"
         title={lang === 'bn' ? 'তথ্য পরিবর্তন করুন' : 'Edit Customer Info'}
       >
-        <Pencil className="w-4 h-4" />
+        <Pencil className="w-4 h-4 stroke-[1.25]" />
       </button>
     </div>
   )}
 
- <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10 pt-2">
+ <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10 pt-1">
  <AnimatePresence mode="wait" initial={false}>
  {isEditingCustomer ? (
  <motion.div
@@ -1981,27 +2302,34 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
    animate={{ opacity: 1, y: 0, scale: 1 }}
    exit={{ opacity: 0, y: -6, scale: 0.98 }}
    transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-   className="flex-1 space-y-3 max-w-md"
+   className="flex-1 space-y-3.5 max-w-md"
  >
  {/* Account Type Selector in Edit Mode */}
  <div>
-   <label className={`block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
+   <label className={`block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1.5 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>
      {lang === 'bn' ? 'হিসাবের ধরন' : 'Account Type'}
    </label>
-   <div className="grid grid-cols-2 gap-2">
+   <div className="relative grid grid-cols-2 p-1 rounded-full bg-slate-900/[0.045] dark:bg-white/[0.05] border border-slate-900/[0.08] dark:border-white/[0.09]">
+     <div
+       aria-hidden="true"
+       className="pointer-events-none absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-slate-950 dark:bg-white shadow-xs will-change-transform transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+       style={{
+         transform: `translate3d(${editAccountType === 'credit_card' ? '100%' : '0%'}, 0, 0)`
+       }}
+     />
      <button
        type="button"
        onClick={() => {
          triggerHaptic('tick');
          setEditAccountType('standard');
        }}
-       className={`py-2 px-3 rounded-xl border-2 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+       className={`relative z-10 py-2 px-3 rounded-full text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors duration-200 ${
          editAccountType === 'standard'
-           ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
-           : 'bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
+           ? 'text-white dark:text-slate-950'
+           : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
        }`}
      >
-       <Users className="w-3.5 h-3.5" />
+       <Users className="w-3.5 h-3.5 stroke-[1.25]" />
        <span>{lang === 'bn' ? 'গ্রাহক খতিয়ান' : 'Customer Ledger'}</span>
      </button>
      <button
@@ -2010,33 +2338,44 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
          triggerHaptic('tick');
          setEditAccountType('credit_card');
        }}
-       className={`py-2 px-3 rounded-xl border-2 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+       className={`relative z-10 py-2 px-3 rounded-full text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors duration-200 ${
          editAccountType === 'credit_card'
-           ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
-           : 'bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
+           ? 'text-white dark:text-slate-950'
+           : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
        }`}
      >
-       <CreditCard className="w-3.5 h-3.5" />
+       <CreditCard className="w-3.5 h-3.5 stroke-[1.25]" />
        <span>{lang === 'bn' ? 'ক্রেডিট কার্ড' : 'Credit Card'}</span>
      </button>
    </div>
  </div>
 
  <div>
- <label className={`block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
- {editAccountType === 'credit_card' ? (lang === 'bn' ? 'কার্ড / হিসাবের নাম' : 'Card / Account Name') : (lang === 'bn' ? 'গ্রাহকের নাম' : 'Customer Name')}
+ <label className={`block mb-1.5 overflow-hidden ${lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}`}>
+   <AnimatePresence mode="wait" initial={false}>
+     <motion.span
+       key={editAccountType}
+       initial={{ opacity: 0, y: 3 }}
+       animate={{ opacity: 1, y: 0 }}
+       exit={{ opacity: 0, y: -3 }}
+       transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
+       className="inline-block"
+     >
+       {editAccountType === 'credit_card' ? (lang === 'bn' ? 'কার্ড / হিসাবের নাম' : 'Card / Account Name') : (lang === 'bn' ? 'গ্রাহকের নাম' : 'Customer Name')}
+     </motion.span>
+   </AnimatePresence>
  </label>
  <input
  type="text"
  value={editName}
  onChange={(e) => setEditName(e.target.value)}
- className="w-full px-3.5 py-2.5 border-2 border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white focus:outline-none focus:border-slate-950 dark:focus:border-white text-sm font-bold"
+ className="w-full px-4 py-2.5 border border-slate-200/80 dark:border-white/[0.1] rounded-2xl bg-slate-50/80 dark:bg-white/[0.04] text-slate-950 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-white text-sm font-bold transition-colors"
  placeholder={editAccountType === 'credit_card' ? (lang === 'bn' ? 'যেমন: সিটি ব্যাংক অ্যামেক্স' : 'e.g. City Bank Amex') : (lang === 'bn' ? 'নাম লিখুন' : 'Enter name')}
  required
  />
  </div>
  <div>
- <label className={`block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
+ <label className={`block mb-1.5 ${lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}`}>
  {lang === 'bn' ? 'মোবাইল নম্বর' : 'Mobile Number'}
  </label>
  <div className="flex gap-2">
@@ -2045,7 +2384,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       id="edit_customer_phone"
       value={editPhone}
       onChange={(e) => setEditPhone(cleanBangladeshiPhone(e.target.value))}
-      className="flex-1 px-3.5 py-2.5 border-2 border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white focus:outline-none focus:border-slate-950 dark:focus:border-white text-sm font-bold"
+      className="flex-1 px-4 py-2.5 border border-slate-200/80 dark:border-white/[0.1] rounded-2xl bg-slate-50/80 dark:bg-white/[0.04] text-slate-950 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-white text-sm font-bold font-mono transition-colors"
       placeholder={lang === 'bn' ? 'যেমন: ০১৭...' : 'e.g. 017...'}
     />
     <button
@@ -2075,40 +2414,48 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           }
         }
       })}
-      className="px-3.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border-2 border-emerald-300 dark:border-emerald-800 rounded-xl flex items-center justify-center cursor-pointer transition-all shadow-2xs shrink-0"
+      className="w-11 h-11 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25 rounded-2xl flex items-center justify-center cursor-pointer transition-all shrink-0 touch-press"
       title={lang === 'bn' ? 'কন্টাক্ট নির্বাচন করুন' : 'Pick Contact'}
     >
-      <BookUser className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+      <BookUser className="w-5 h-5 text-emerald-600 dark:text-emerald-400 stroke-[1.25]" />
     </button>
   </div>
  </div>
 
- {editAccountType === 'credit_card' && (
-   <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border-2 border-slate-300 dark:border-slate-700">
-     <div className="flex items-center justify-between gap-2">
-       <label className={`text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1.5 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
-         <Calendar className="w-3.5 h-3.5" />
-         <span>{lang === 'bn' ? 'স্টেটমেন্ট বিলিং তারিখ (১-৩১)' : 'Statement Billing Day (1–31)'}</span>
-       </label>
-       <input
-         type="text"
-         inputMode="numeric"
-         data-numpad="true"
-         placeholder={lang === 'bn' ? '১-৩১' : '1–31'}
-         value={editBillingDay}
-         onChange={(e) => {
-           const clean = e.target.value.replace(/[^0-9]/g, '');
-           if (!clean) {
-             setEditBillingDay('');
-             return;
-           }
-           setEditBillingDay(String(Math.min(31, Math.max(1, parseInt(clean, 10)))));
-         }}
-         className="w-20 px-2.5 py-1.5 text-center border-2 border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-[#0D121D] text-slate-950 dark:text-white font-mono font-black text-sm focus:outline-none focus:border-slate-950 dark:focus:border-white placeholder:text-slate-400 placeholder:font-normal"
-       />
-     </div>
-   </div>
- )}
+ <AnimatePresence>
+   {editAccountType === 'credit_card' && (
+     <motion.div
+       key="edit-billing-day"
+       initial={{ opacity: 0, y: -8 }}
+       animate={{ opacity: 1, y: 0 }}
+       exit={{ opacity: 0, y: -8 }}
+       className="p-3.5 rounded-2xl surface-subcard border border-slate-200/70 dark:border-white/[0.08]"
+     >
+       <div className="flex items-center justify-between gap-2">
+         <label className={`flex items-center gap-1.5 ${lang === 'bn' ? 'text-[11px] font-bold text-slate-600 dark:text-slate-300 tracking-normal' : 'micro-mono-label text-slate-600 dark:text-slate-300 font-bold'}`}>
+           <Calendar className="w-3.5 h-3.5 stroke-[1.25]" />
+           <span>{lang === 'bn' ? 'স্টেটমেন্ট বিলিং তারিখ (১-৩১)' : 'Statement Billing Day (1–31)'}</span>
+         </label>
+         <input
+           type="text"
+           inputMode="numeric"
+           data-numpad="true"
+           placeholder={lang === 'bn' ? '১-৩১' : '1–31'}
+           value={editBillingDay}
+           onChange={(e) => {
+             const clean = e.target.value.replace(/[^0-9]/g, '');
+             if (!clean) {
+               setEditBillingDay('');
+               return;
+             }
+             setEditBillingDay(String(Math.min(31, Math.max(1, parseInt(clean, 10)))));
+           }}
+           className="w-20 px-2.5 py-1.5 text-center border border-slate-200/80 dark:border-white/[0.1] rounded-xl bg-white/80 dark:bg-white/[0.06] text-slate-950 dark:text-white font-mono font-black text-sm focus:outline-none focus:border-slate-900 dark:focus:border-white placeholder:text-slate-400 placeholder:font-normal"
+         />
+       </div>
+     </motion.div>
+   )}
+ </AnimatePresence>
 
  {editError && (
  <p className="text-xs font-bold text-rose-600 dark:text-rose-400">{editError}</p>
@@ -2147,7 +2494,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  setIsSavingEdit(false);
  }
  }}
- className="px-4 py-2 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold text-xs rounded-xl border-2 border-slate-950 dark:border-white transition-colors cursor-pointer"
+ className="px-5 py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold text-xs rounded-full transition-colors cursor-pointer touch-press"
  >
  {isSavingEdit ? (lang === 'bn' ? 'সংরক্ষণ হচ্ছে...' : 'Saving...') : (lang === 'bn' ? 'সংরক্ষণ করুন' : 'Save')}
  </button>
@@ -2158,7 +2505,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
    triggerHaptic('single');
    setIsEditingCustomer(false);
  }}
- className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl border-2 border-slate-300 dark:border-slate-700 transition-colors cursor-pointer"
+ className="px-5 py-2.5 bg-slate-100/90 hover:bg-slate-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-800 dark:text-slate-200 font-bold text-xs rounded-full border border-slate-200/80 dark:border-white/[0.08] transition-colors cursor-pointer touch-press"
  >
  {lang === 'bn' ? 'বাতিল' : 'Cancel'}
  </button>
@@ -2172,15 +2519,15 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
    exit={{ opacity: 0, y: -4 }}
    transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
  >
- <h2 className="text-xl sm:text-2xl font-extrabold text-slate-950 dark:text-white pr-24">{selectedCustomer.name}</h2>
+ <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-slate-950 dark:text-white pr-28">{selectedCustomer.name}</h2>
  {selectedCustomer.phone ? (
- <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-1.5 font-mono">
- <Phone className="w-4 h-4 text-emerald-500 shrink-0" />
+ <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-2 font-mono">
+ <Phone className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[1.5]" />
  <span>{cleanBangladeshiPhone(selectedCustomer.phone)}</span>
  <a 
  href={`tel:${cleanBangladeshiPhone(selectedCustomer.phone)}`}
  onClick={() => triggerHaptic('single')}
- className="ml-1.5 text-xs font-sans font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 px-2.5 py-0.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 inline-block cursor-pointer transition-colors"
+ className="ml-1.5 text-[11px] font-sans font-bold bg-slate-100/90 hover:bg-slate-200/80 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] px-3 py-0.5 rounded-full border border-slate-200/70 dark:border-white/[0.08] text-slate-700 dark:text-slate-200 inline-flex items-center cursor-pointer transition-colors touch-press"
  >
  {lang === 'bn' ? 'কল করুন' : 'Call Now'}
  </a>
@@ -2200,9 +2547,9 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
      toast.error(lang === 'bn' ? 'সংরক্ষণ ব্যর্থ হয়েছে' : 'Failed to save phone number');
    }
  })}
- className="mt-1.5 text-xs sm:text-sm font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1.5 cursor-pointer"
+ className="mt-2 text-xs sm:text-sm font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1.5 cursor-pointer"
  >
- <Phone className="w-3.5 h-3.5" />
+ <Phone className="w-3.5 h-3.5 stroke-[1.25]" />
  <span>{lang === 'bn' ? '+ মোবাইল নম্বর যুক্ত করুন' : '+ Add phone number'}</span>
  </button>
  )}
@@ -2210,8 +2557,8 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  {/* Single-line Billing Date underneath the Phone Number matching Phone Number styling */}
  {selectedCustomer.accountType === 'credit_card' && creditCardCycleData && (
    <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-1.5 font-mono whitespace-nowrap overflow-hidden text-ellipsis">
-     <Calendar className="w-4 h-4 text-ledger-green shrink-0" />
-     <span className="truncate text-[13px]">
+     <Calendar className="w-3.5 h-3.5 text-ledger-green shrink-0 stroke-[1.5]" />
+     <span className="truncate text-[12px]">
        {creditCardCycleData.isBillingDayToday
          ? (lang === 'bn'
              ? `আজ বিলিং দিন (${creditCardCycleData.lastStatementDate.toLocaleDateString('bn-BD', { month: 'short', day: 'numeric' })})`
@@ -2228,30 +2575,30 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
  </div>
  {/* CURRENT BALANCE CARD + SUBTLE LEFT ELLIPSIS TOGGLE FOR TOTAL BILLED & TOTAL PAID */}
- <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
-   {/* Neutral Total Outstanding Box with Dark Background in Dark Mode & Right-Aligned Text */}
-   <div className="p-3.5 sm:p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-[#07090E] flex items-center justify-between gap-3">
-     {/* Subtle, non-distracting Circle-Ellipsis Button on the left */}
+ <div className="pt-3 border-t border-slate-900/[0.06] dark:border-white/[0.06] space-y-3 relative z-10">
+   {/* Neutral Total Outstanding Box */}
+   <div className="p-4 sm:p-5 rounded-2xl border border-slate-200/70 dark:border-white/[0.08] surface-subcard flex items-center justify-between gap-3">
+     {/* Subtle Circle-Ellipsis Button on the left */}
      <button
        type="button"
        onClick={() => {
          triggerHaptic('single');
          setShowExtraBalanceCards(prev => !prev);
        }}
-       className={`p-1.5 -ml-1 rounded-lg transition-colors cursor-pointer shrink-0 flex items-center justify-center active:scale-95 ${
+       className={`w-9 h-9 rounded-full transition-colors cursor-pointer shrink-0 flex items-center justify-center touch-press ${
          showExtraBalanceCards
-           ? 'text-slate-900 dark:text-slate-100 bg-slate-200/70 dark:bg-slate-800/80'
-           : 'text-slate-400/80 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/50'
+           ? 'text-slate-950 dark:text-white bg-slate-200/80 dark:bg-white/[0.12]'
+           : 'text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-white/[0.08]'
        }`}
        title={showExtraBalanceCards ? (lang === 'bn' ? 'মোট বিবরণ লুকান' : 'Hide totals') : (lang === 'bn' ? 'মোট বকেয়া ও আদায় দেখুন' : 'Show Total Billed & Total Paid')}
        aria-expanded={showExtraBalanceCards}
        aria-label={showExtraBalanceCards ? (lang === 'bn' ? 'মোট বিবরণ লুকান' : 'Hide totals') : (lang === 'bn' ? 'মোট বকেয়া ও আদায় দেখুন' : 'Show Total Billed & Total Paid')}
      >
-       <CircleEllipsis className="w-4.5 h-4.5" />
+       <CircleEllipsis className="w-4.5 h-4.5 stroke-[1.25]" />
      </button>
 
      <div className="space-y-1.5 min-w-0 flex-1 text-right">
-       <span className={`text-xs sm:text-[13px] font-bold text-slate-600 dark:text-slate-300 block ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'}`}>
+       <span className={`block ${lang === 'bn' ? 'text-xs font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}`}>
          {selectedCustomer.accountType === 'credit_card'
            ? (lang === 'bn' ? 'মোট বকেয়া কার্ড ব্যালেন্স' : 'Total Outstanding Card Balance')
            : lang === 'bn'
@@ -2262,7 +2609,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                  : t.currentBalance)
              : t.currentBalance}
        </span>
-       <div className={`text-2xl sm:text-[28px] leading-tight font-black font-mono tabular-nums ${
+       <div className={`font-display text-3xl sm:text-4xl leading-none font-black tabular-nums tracking-tight ${
          selectedCustomer.outstandingDue > 0
            ? 'text-ledger-red'
            : selectedCustomer.outstandingDue < 0
@@ -2273,14 +2620,16 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
            ? `৳ ${lang === 'bn' ? '০ (পরিশোধিত)' : '0 (Settled)'}`
            : `${selectedCustomer.outstandingDue < 0 ? '-' : ''}৳ ${formatNumber(Math.abs(selectedCustomer.outstandingDue), lang)}`}
        </div>
-       <p className="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300 font-semibold">
+       <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
          {selectedCustomer.accountType === 'credit_card' ? (
            selectedCustomer.outstandingDue > 0
              ? (creditCardCycleData && creditCardCycleData.unpaidCarryOver > 0
                  ? (lang === 'bn'
-                     ? `পূর্ববর্তী সাইকেল থেকে বিলকৃত ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'bn')} অন্তর্ভুক্ত`
-                     : `Includes ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'en')} billed from previous cycle`)
-                 : (lang === 'bn' ? 'চলতি সাইকেলের আনবিল্ড খরচ (বিলিং দিনে বিল্ড হবে)' : 'Unbilled current cycle spend (bills on billing day)'))
+                     ? `${creditCardCycleData.lastStatementDate.toLocaleDateString('bn-BD', { month: 'short', day: 'numeric' })}-এ বিল্ড হওয়া ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'bn')} অন্তর্ভুক্ত`
+                     : `Includes ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'en')} moved to Billed on ${creditCardCycleData.lastStatementDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`)
+                 : (lang === 'bn'
+                     ? `${creditCardCycleData ? creditCardCycleData.nextStatementDate.toLocaleDateString('bn-BD', { month: 'short', day: 'numeric' }) : ''}-এর আগের আনবিল্ড লেনদেন (বিলিং দিনে বিল্ড হবে)`
+                     : `Unbilled transactions before ${creditCardCycleData ? creditCardCycleData.nextStatementDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'billing date'} (bills on billing day)`))
              : selectedCustomer.outstandingDue < 0
              ? (lang === 'bn' ? 'কার্ডে অতিরিক্ত ক্রেডিট ব্যালেন্স আছে' : 'Extra credit balance on card')
              : (lang === 'bn' ? 'সব কার্ড বিল পরিশোধিত' : 'All card bills settled')
@@ -2295,82 +2644,155 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
      </div>
    </div>
 
-   {/* Hidden by default: Unified Total Billed & Total Paid single box (matching Dashboard today summary layout) */}
+   {/* Expanded Telemetry Panel: Lifetime Total Billed & Total Paid */}
    <AnimatePresence>
-     {showExtraBalanceCards && (
-       <motion.div
-         initial={{ opacity: 0, y: -8 }}
-         animate={{ opacity: 1, y: 0 }}
-         exit={{ opacity: 0, y: -8 }}
-         className="p-3.5 sm:p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-[#07090E]"
-       >
-         <div className="grid grid-cols-2 divide-x divide-slate-200/70 dark:divide-white/[0.08]">
-           {/* Left Column: Total Billed */}
-           <div className="pr-3 text-center space-y-1 min-w-0">
-             <span className={`text-[10px] font-bold text-slate-500 dark:text-slate-400 block truncate ${
-               lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'
-             }`}>
-               {selectedCustomer.accountType === 'credit_card'
-                 ? (lang === 'bn' ? 'মোট কার্ড খরচ' : 'Total Card Spend')
-                 : (lang === 'bn' ? 'মোট বিলকৃত (বকেয়া)' : 'Total Billed (Dues)')}
-             </span>
-             <div className="text-lg sm:text-xl font-black font-mono text-ledger-red tabular-nums tracking-tight truncate">
-               ৳ {formatNumber(selectedCustomerMetrics.totalBilled, lang)}
+     {showExtraBalanceCards && (() => {
+       const billedAmt = selectedCustomerMetrics.totalBilled || 0;
+       const paidAmt = selectedCustomerMetrics.totalPaid || 0;
+       const totalVolume = billedAmt + paidAmt;
+       const billedPct = totalVolume > 0 ? Math.round((billedAmt / totalVolume) * 100) : 50;
+       const paidPct = totalVolume > 0 ? 100 - billedPct : 50;
+       const recoveryPct = billedAmt > 0 ? Math.min(100, Math.round((paidAmt / billedAmt) * 100)) : (paidAmt > 0 ? 100 : 0);
+
+       return (
+         <motion.div
+           initial={{ opacity: 0, y: -6, scale: 0.985 }}
+           animate={{ opacity: 1, y: 0, scale: 1 }}
+           exit={{ opacity: 0, y: -6, scale: 0.985 }}
+           transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+           className="surface-glass rounded-[22px] p-3.5 sm:p-4 border border-slate-900/[0.08] dark:border-white/[0.1] space-y-3.5 overflow-hidden"
+         >
+           <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+             {/* Total Billed Sub-Card */}
+             <div className="relative overflow-hidden surface-subcard rounded-[18px] p-3.5 sm:p-4 border border-slate-900/[0.06] dark:border-white/[0.08] flex flex-col justify-between gap-2.5 min-w-0">
+               <div
+                 aria-hidden="true"
+                 className="pointer-events-none absolute -top-8 -right-8 w-20 h-20 rounded-full blur-2xl opacity-50"
+                 style={{ backgroundColor: 'var(--ledger-red-bg)' }}
+               />
+               <div className="relative z-10 flex items-center justify-between gap-1.5">
+                 <span className={`truncate ${
+                   lang === 'bn' ? 'text-[10px] font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label !text-[10px] text-slate-500 dark:text-slate-400 font-semibold'
+                 }`}>
+                   {selectedCustomer.accountType === 'credit_card'
+                     ? (lang === 'bn' ? 'মোট কার্ড খরচ' : 'Card Spend')
+                     : (lang === 'bn' ? 'মোট বিলকৃত' : 'Total Billed')}
+                 </span>
+                 <ArrowUpRight className="w-3.5 h-3.5 stroke-[1.25] text-ledger-red shrink-0" />
+               </div>
+
+               <div className="relative z-10 space-y-1 min-w-0">
+                 <div className="font-display text-lg sm:text-2xl font-extrabold text-ledger-red tabular-nums tracking-tight truncate">
+                   ৳{formatNumber(billedAmt, lang)}
+                 </div>
+                 <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono truncate">
+                   {formatNumber(selectedCustomerMetrics.txCount, lang)} {lang === 'bn' ? 'টি খতিয়ান এন্ট্রি' : 'ledger entries'}
+                 </p>
+               </div>
              </div>
-             <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono truncate">
-               {formatNumber(selectedCustomerMetrics.txCount, lang)} {lang === 'bn' ? 'টি খতিয়ান এন্ট্রি' : 'ledger entries'}
-             </p>
+
+             {/* Total Paid Sub-Card */}
+             <div className="relative overflow-hidden surface-subcard rounded-[18px] p-3.5 sm:p-4 border border-slate-900/[0.06] dark:border-white/[0.08] flex flex-col justify-between gap-2.5 min-w-0">
+               <div
+                 aria-hidden="true"
+                 className="pointer-events-none absolute -top-8 -right-8 w-20 h-20 rounded-full blur-2xl opacity-55"
+                 style={{ backgroundColor: 'var(--ledger-green-bg)' }}
+               />
+               <div className="relative z-10 flex items-center justify-between gap-1.5">
+                 <span className={`truncate ${
+                   lang === 'bn' ? 'text-[10px] font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label !text-[10px] text-slate-500 dark:text-slate-400 font-semibold'
+                 }`}>
+                   {selectedCustomer.accountType === 'credit_card'
+                     ? (lang === 'bn' ? 'বিল পরিশোধ' : 'Bill Paid')
+                     : (lang === 'bn' ? 'মোট আদায়' : 'Total Paid')}
+                 </span>
+                 <ArrowDownLeft className="w-3.5 h-3.5 stroke-[1.25] text-ledger-green shrink-0" />
+               </div>
+
+               <div className="relative z-10 space-y-1 min-w-0">
+                 <div className="font-display text-lg sm:text-2xl font-extrabold text-ledger-green tabular-nums tracking-tight truncate">
+                   ৳{formatNumber(paidAmt, lang)}
+                 </div>
+                 <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono truncate">
+                   {selectedCustomer.accountType === 'credit_card'
+                     ? (lang === 'bn' ? 'রেকর্ডকৃত বিল নিষ্পত্তি' : 'Recorded settlements')
+                     : (lang === 'bn' ? 'যাচাইকৃত আদায়' : 'Verified inflow')}
+                 </p>
+               </div>
+             </div>
            </div>
 
-           {/* Right Column: Total Paid */}
-           <div className="pl-3 text-center space-y-1 min-w-0">
-             <span className={`text-[10px] font-bold text-slate-500 dark:text-slate-400 block truncate ${
-               lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'
-             }`}>
-               {selectedCustomer.accountType === 'credit_card'
-                 ? (lang === 'bn' ? 'মোট বিল পরিশোধ' : 'Total Bill Payments')
-                 : (lang === 'bn' ? 'মোট পরিশোধিত (আদায়)' : 'Total Paid (Inflow)')}
-             </span>
-             <div className="text-lg sm:text-xl font-black font-mono text-ledger-green tabular-nums tracking-tight truncate">
-               ৳ {formatNumber(selectedCustomerMetrics.totalPaid, lang)}
+           {/* Proportional Billed vs Paid Recovery Telemetry Bar */}
+           <div className="pt-2.5 border-t border-slate-900/[0.06] dark:border-white/[0.06] space-y-2">
+             <div className="flex items-center justify-between text-[10.5px] font-mono font-semibold tabular-nums">
+               <span className="text-ledger-red">
+                 {lang === 'bn' ? 'বাকি' : 'Billed'} {formatNumber(billedPct, lang)}%
+               </span>
+               <span className="text-slate-500 dark:text-slate-400">
+                 {formatNumber(recoveryPct, lang)}% {lang === 'bn' ? 'আদায় হার' : 'settled'}
+               </span>
+               <span className="text-ledger-green">
+                 {lang === 'bn' ? 'আদায়' : 'Paid'} {formatNumber(paidPct, lang)}%
+               </span>
              </div>
-             <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono truncate">
-               {selectedCustomer.accountType === 'credit_card'
-                 ? (lang === 'bn' ? 'রেকর্ডকৃত বিল নিষ্পত্তি' : 'Recorded bill settlements')
-                 : (lang === 'bn' ? 'যাচাইকৃত আদায়' : 'Verified collections')}
-             </p>
+             <div className="h-3.5 w-full rounded-full bg-slate-900/[0.05] dark:bg-white/[0.055] border border-slate-900/[0.06] dark:border-white/[0.07] p-[1.5px] flex items-center gap-[1.5px] overflow-hidden shadow-[inset_0_1px_2px_rgba(15,23,42,0.06)] dark:shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]">
+               {billedPct > 0 && (
+                 <div
+                   className="h-full rounded-full relative overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] dash-anim-bar-x"
+                   style={{
+                     width: `${billedPct}%`,
+                     background: 'linear-gradient(90deg, rgba(253, 164, 175, 0.90) 0%, rgba(244, 63, 94, 0.84) 48%, rgba(190, 18, 60, 0.72) 100%)',
+                     boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.65)'
+                   }}
+                 >
+                   <span aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-75 glass-bar-etch" />
+                 </div>
+               )}
+               {paidPct > 0 && (
+                 <div
+                   className="h-full rounded-full relative overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] dash-anim-bar-x"
+                   style={{
+                     width: `${paidPct}%`,
+                     background: 'linear-gradient(90deg, rgba(110, 231, 183, 0.88) 0%, rgba(16, 185, 129, 0.82) 52%, rgba(13, 148, 136, 0.70) 100%)',
+                     boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.65)'
+                   }}
+                 >
+                   <span aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-75 glass-bar-etch" />
+                 </div>
+               )}
+             </div>
            </div>
-         </div>
-       </motion.div>
-     )}
+         </motion.div>
+       );
+     })()}
    </AnimatePresence>
  </div>
 
  {/* Quick message template picker card */}
  {selectedCustomer.phone && selectedCustomer.outstandingDue > 0 && (
-  <details className="bg-slate-50 dark:bg-slate-900/60 px-3.5 py-2.5 open:pb-3.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 transition-colors relative z-10 group [&_summary::-webkit-details-marker]:hidden">
+  <details className="surface-subcard px-4 py-3 open:pb-4 rounded-2xl border border-slate-200/70 dark:border-white/[0.08] transition-colors relative z-10 group [&_summary::-webkit-details-marker]:hidden">
     <summary
       onClick={() => triggerHaptic('single')}
-      className={`text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center justify-between cursor-pointer list-none select-none leading-none ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}
+      className={`flex items-center justify-between cursor-pointer list-none select-none leading-none ${lang === 'bn' ? 'text-xs font-bold text-slate-700 dark:text-slate-200 tracking-normal' : 'micro-mono-label text-slate-600 dark:text-slate-300 font-bold'}`}
     >
       <div className="flex items-center gap-2">
-        <MessageSquare className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+        <MessageSquare className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 stroke-[1.5]" />
         <span>{t.predefinedMessages}</span>
       </div>
-      <ChevronDown className="w-4 h-4 text-slate-500 dark:text-slate-400 transition-transform group-open:-rotate-180 shrink-0" />
+      <ChevronDown className="w-4 h-4 text-slate-500 dark:text-slate-400 transition-transform group-open:-rotate-180 shrink-0 stroke-[1.5]" />
     </summary>
-    <div className="mt-3 pt-3 border-t border-slate-200/80 dark:border-slate-800/80">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-3">
+    <div className="mt-3 pt-3 border-t border-slate-900/[0.06] dark:border-white/[0.06]">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
         <button
           type="button"
           onClick={() => {
             triggerHaptic('single');
             setSelectedTemplate(1);
           }}
-          className={`p-2.5 text-left rounded-xl text-xs font-bold border-2 transition-all cursor-pointer ${
+          className={`p-2.5 text-left rounded-2xl text-xs font-bold transition-all cursor-pointer touch-press ${
             selectedTemplate === 1
-              ? 'bg-emerald-600 border-slate-950 dark:border-white text-white shadow-2xs'
-              : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60'
+              ? 'bg-emerald-600 border-2 border-emerald-500 text-white shadow-xs'
+              : 'border bg-white/70 dark:bg-white/[0.04] border-slate-200/70 dark:border-white/[0.08] text-slate-700 dark:text-slate-200 hover:bg-slate-100/70 dark:hover:bg-white/[0.08]'
           }`}
         >
           {t.templatePolite}
@@ -2381,10 +2803,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             triggerHaptic('single');
             setSelectedTemplate(2);
           }}
-          className={`p-2.5 text-left rounded-xl text-xs font-bold border-2 transition-all cursor-pointer ${
+          className={`p-2.5 text-left rounded-2xl text-xs font-bold transition-all cursor-pointer touch-press ${
             selectedTemplate === 2
-              ? 'bg-emerald-600 border-slate-950 dark:border-white text-white shadow-2xs'
-              : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60'
+              ? 'bg-emerald-600 border-2 border-emerald-500 text-white shadow-xs'
+              : 'border bg-white/70 dark:bg-white/[0.04] border-slate-200/70 dark:border-white/[0.08] text-slate-700 dark:text-slate-200 hover:bg-slate-100/70 dark:hover:bg-white/[0.08]'
           }`}
         >
           {t.templateRespect}
@@ -2395,10 +2817,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             triggerHaptic('single');
             setSelectedTemplate(3);
           }}
-          className={`p-2.5 text-left rounded-xl text-xs font-bold border-2 transition-all cursor-pointer ${
+          className={`p-2.5 text-left rounded-2xl text-xs font-bold transition-all cursor-pointer touch-press ${
             selectedTemplate === 3
-              ? 'bg-emerald-600 border-slate-950 dark:border-white text-white shadow-2xs'
-              : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60'
+              ? 'bg-emerald-600 border-2 border-emerald-500 text-white shadow-xs'
+              : 'border bg-white/70 dark:bg-white/[0.04] border-slate-200/70 dark:border-white/[0.08] text-slate-700 dark:text-slate-200 hover:bg-slate-100/70 dark:hover:bg-white/[0.08]'
           }`}
         >
           {t.templateFormal}
@@ -2406,7 +2828,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       </div>
       
       {/* Live Message Preview */}
-      <div className="bg-white dark:bg-[#0D121D] border border-slate-200 dark:border-slate-800 p-3.5 rounded-xl text-xs italic text-slate-700 dark:text-slate-200 leading-relaxed font-medium">
+      <div className="bg-white/80 dark:bg-white/[0.04] border border-slate-200/70 dark:border-white/[0.08] p-3.5 rounded-2xl text-xs italic text-slate-700 dark:text-slate-200 leading-relaxed font-medium">
         "{getMessageText(selectedCustomer, selectedTemplate)}"
       </div>
     </div>
@@ -2414,7 +2836,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  )}
 
  {/* SEND REMINDERS / ACTIONS */}
- <div className="!mt-2.5 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex flex-wrap gap-2.5">
+ <div className="!mt-3 pt-3 border-t border-slate-900/[0.06] dark:border-white/[0.06] flex flex-wrap gap-2.5 relative z-10">
  {selectedCustomer.phone && selectedCustomer.outstandingDue > 0 && (
  <>
  <a
@@ -2422,18 +2844,18 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  target="_blank"
  rel="noreferrer"
  onClick={() => triggerHaptic('single')}
- className="w-full basis-full sm:w-auto sm:basis-auto sm:flex-1 sm:min-w-[150px] py-2.5 px-3.5 bg-[#25D366] hover:bg-[#20ba59] border-2 border-transparent font-bold text-white rounded-xl shadow-xs flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm transition-all"
+ className="w-full basis-full sm:w-auto sm:basis-auto sm:flex-1 sm:min-w-[150px] py-2.5 px-4 bg-[#25D366] hover:bg-[#20ba59] font-bold text-white rounded-full shadow-xs flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm transition-all touch-press"
  >
- <MessageCircleMore className="w-4 h-4 shrink-0" />
+ <MessageCircleMore className="w-4 h-4 shrink-0 stroke-[1.5]" />
  <span>{t.remindWhatsApp}</span>
  </a>
 
  <a
  href={getShareLink(selectedCustomer, 'sms')}
  onClick={() => triggerHaptic('single')}
- className="flex-1 min-w-[140px] py-2.5 px-3.5 bg-blue-600 hover:bg-blue-700 border-2 border-transparent font-bold text-white rounded-xl shadow-xs flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm transition-all"
+ className="flex-1 min-w-[140px] py-2.5 px-4 bg-blue-600 hover:bg-blue-700 font-bold text-white rounded-full shadow-xs flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm transition-all touch-press"
  >
- <Send className="w-4 h-4 shrink-0" />
+ <Send className="w-4 h-4 shrink-0 stroke-[1.5]" />
  <span>{t.sendSmsReminder}</span>
  </a>
  </>
@@ -2445,32 +2867,39 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
      triggerHaptic('double');
      handleDelete(selectedCustomer);
    }}
-   className="py-2.5 px-3.5 bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/30 dark:hover:bg-rose-900/40 dark:text-rose-400 border-2 border-rose-300 dark:border-rose-800/80 hover:border-rose-600 dark:hover:border-rose-400 rounded-xl flex items-center justify-center gap-2 cursor-pointer text-xs font-bold transition-all"
+   className="py-2.5 px-4 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 rounded-full flex items-center justify-center gap-2 cursor-pointer text-xs font-bold transition-all touch-press"
  >
- <Trash2 className="w-4 h-4 shrink-0" />
+ <Trash2 className="w-3.5 h-3.5 shrink-0 stroke-[1.5]" />
  <span>{t.deleteAccount}</span>
  </button>
  </div>
- </div>
+ </SpotlightCard>
 
- {/* TWO DUAL BIG DIRECT ENTRY BUTTONS (WITH DISTINCTIVE BOLD BORDERS) */}
+ {/* TWO DUAL BIG DIRECT ENTRY CAPSULE CARDS */}
  <div className="grid grid-cols-2 gap-3 sm:gap-4">
  <button
  onClick={() => {
    setActionTargetCycle(cardCycleTab);
    setOpenActionType('due');
+   setActionTag(null);
  }}
- className={`py-3.5 px-3 rounded-2xl border-2 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-[0.98] shadow-xs ${
+ className={`py-4 px-3 rounded-[24px] flex flex-col items-center justify-center gap-2 cursor-pointer transition-all touch-press shadow-xs ${
  openActionType === 'due' 
- ? 'bg-rose-600 border-rose-600 text-white font-black' 
- : 'bg-white hover:bg-rose-50/60 border-rose-300 hover:border-rose-600 dark:border-rose-900 dark:hover:border-rose-500 text-rose-600 dark:bg-[#0D121D] dark:hover:bg-rose-950/20 dark:text-rose-400 font-bold'
+ ? 'bg-rose-600 border-2 border-rose-500 text-white font-black' 
+ : 'border surface-glass-interactive border-rose-500/20 text-rose-600 dark:text-rose-400 font-bold hover:border-rose-500/40'
  }`}
  >
- {selectedCustomer.accountType === 'credit_card' ? (
-   <CreditCard className="w-5 h-5 stroke-[2.5]" />
- ) : (
-   <ArrowUpRight className="w-5 h-5 stroke-[3]" />
- )}
+ <div className={`w-9 h-9 rounded-full flex items-center justify-center ${
+   openActionType === 'due'
+     ? 'bg-white/20 text-white'
+     : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+ }`}>
+   {selectedCustomer.accountType === 'credit_card' ? (
+     <CreditCard className="w-4.5 h-4.5 stroke-[1.5]" />
+   ) : (
+     <ArrowUpRight className="w-4.5 h-4.5 stroke-[1.5]" />
+   )}
+ </div>
  <span className="font-extrabold text-xs sm:text-sm text-center leading-snug">
    + {selectedCustomer.accountType === 'credit_card'
        ? (lang === 'bn' ? 'কার্ড বিল যোগ' : 'Add Card Bill')
@@ -2479,14 +2908,23 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  </button>
 
  <button
- onClick={() => setOpenActionType('payment')}
- className={`py-3.5 px-3 rounded-2xl border-2 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-[0.98] shadow-xs ${
+ onClick={() => {
+   setOpenActionType('payment');
+   setActionTag(null);
+ }}
+ className={`py-4 px-3 rounded-[24px] flex flex-col items-center justify-center gap-2 cursor-pointer transition-all touch-press shadow-xs ${
  openActionType === 'payment' 
- ? 'bg-emerald-600 border-emerald-600 text-white font-black' 
- : 'bg-white hover:bg-emerald-50/60 border-emerald-300 hover:border-emerald-600 dark:border-emerald-900 dark:hover:border-emerald-500 text-emerald-600 dark:bg-[#0D121D] dark:hover:bg-emerald-950/20 dark:text-emerald-400 font-bold'
+ ? 'bg-emerald-600 border-2 border-emerald-500 text-white font-black' 
+ : 'border surface-glass-interactive border-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold hover:border-emerald-500/40'
  }`}
  >
- <ArrowDownLeft className="w-5 h-5 stroke-[3]" />
+ <div className={`w-9 h-9 rounded-full flex items-center justify-center ${
+   openActionType === 'payment'
+     ? 'bg-white/20 text-white'
+     : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+ }`}>
+   <ArrowDownLeft className="w-4.5 h-4.5 stroke-[1.5]" />
+ </div>
  <span className="font-extrabold text-xs sm:text-sm text-center leading-snug">
    + {selectedCustomer.accountType === 'credit_card'
        ? (lang === 'bn' ? 'কার্ড বিল পরিশোধ' : 'Pay Card Bill')
@@ -2499,14 +2937,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  <AnimatePresence>
  {openActionType && (
  <motion.div
- initial={{ opacity: 0, scale: 0.96, y: 10 }}
+ initial={{ opacity: 0, scale: 0.97, y: 10 }}
  animate={{ opacity: 1, scale: 1, y: 0 }}
- exit={{ opacity: 0, scale: 0.96, y: 8 }}
+ exit={{ opacity: 0, scale: 0.97, y: 8 }}
  transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
- className="surface-glass border p-4 sm:p-5 rounded-2xl space-y-4"
+ className="surface-glass border p-5 rounded-[28px] space-y-4"
  >
- <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-2.5">
- <h4 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white">
+ <div className="flex items-center justify-between border-b border-slate-900/[0.06] dark:border-white/[0.06] pb-3">
+ <h4 className="font-display text-sm sm:text-base font-bold text-slate-900 dark:text-white">
  {selectedCustomer.accountType === 'credit_card'
    ? (openActionType === 'due'
        ? (lang === 'bn' ? `${selectedCustomer.name}-এর জন্য কার্ড বিল লিখুন` : `Record Card Bill for ${selectedCustomer.name}`)
@@ -2520,28 +2958,29 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
    onClick={() => {
      triggerHaptic('medium');
      setOpenActionType(null);
+     setActionTag(null);
    }}
-   className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+   className="w-8 h-8 bg-slate-100/80 hover:bg-slate-200 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] border border-slate-200/70 dark:border-white/[0.08] rounded-full text-slate-600 dark:text-slate-300 transition-colors cursor-pointer flex items-center justify-center touch-press"
  >
- <X className="w-4 h-4" />
+ <X className="w-4 h-4 stroke-[1.5]" />
  </button>
  </div>
 
  <form onSubmit={handleAddInlineTransaction} className="space-y-4">
- {/* Optional Cycle Selector when recording a Card Bill on a Credit Card account */}
- {selectedCustomer.accountType === 'credit_card' && openActionType === 'due' && (
-   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
+ {/* Compact Inline Cycle Selector for Credit Card accounts */}
+ {selectedCustomer.accountType === 'credit_card' && (
+   <div className="flex items-center justify-between gap-2 px-1 py-0.5">
      <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
        {lang === 'bn' ? 'কোন বিলিং সাইকেলে যুক্ত করবেন?' : 'Add bill to which statement cycle?'}
      </span>
-     <div className="flex items-center gap-1.5">
+     <div className="flex items-center gap-1 p-0.5 rounded-full bg-slate-200/60 dark:bg-white/[0.06] shrink-0">
        <button
          type="button"
          onClick={() => setActionTargetCycle('unbilled')}
-         className={`px-2.5 py-1 rounded-lg text-xs font-bold border cursor-pointer transition-all ${
+         className={`px-3 py-1 rounded-full text-xs font-bold cursor-pointer transition-all ${
            actionTargetCycle === 'unbilled'
-             ? 'bg-slate-950 text-white border-transparent dark:bg-white dark:text-slate-950'
-             : 'bg-white dark:bg-[#0D121D] text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
+             ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 shadow-2xs font-bold'
+             : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
          }`}
        >
          {lang === 'bn' ? 'আনবিল্ড' : 'Unbilled'}
@@ -2549,10 +2988,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
        <button
          type="button"
          onClick={() => setActionTargetCycle('billed')}
-         className={`px-2.5 py-1 rounded-lg text-xs font-bold border cursor-pointer transition-all ${
+         className={`px-3 py-1 rounded-full text-xs font-bold cursor-pointer transition-all ${
            actionTargetCycle === 'billed'
-             ? 'bg-slate-950 text-white border-transparent dark:bg-white dark:text-slate-950'
-             : 'bg-white dark:bg-[#0D121D] text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
+             ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 shadow-2xs font-bold'
+             : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
          }`}
        >
          {lang === 'bn' ? 'বিল্ড' : 'Billed'}
@@ -2562,8 +3001,8 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  )}
 
  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
- <div className="space-y-1">
- <label className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>{t.amount} (৳) *</label>
+ <div className="space-y-1.5">
+ <label className={lang === 'bn' ? 'text-xs font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}>{t.amount} (৳) *</label>
  <input
  type="text"
  inputMode="decimal"
@@ -2580,14 +3019,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  }
  setActionAmount(formatIndianNumberString(sanitized));
  }}
- className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl text-slate-950 dark:text-white text-lg sm:text-xl font-mono font-bold focus:outline-none focus:border-slate-950 dark:focus:border-white transition-colors"
+ className="w-full px-4 py-3 bg-slate-50/80 dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.1] rounded-2xl text-slate-950 dark:text-white text-xl font-mono font-bold focus:outline-none focus:border-slate-900 dark:focus:border-white transition-colors"
  required
  autoFocus
  />
 
-              {openActionType && !txSubmitting && getDuplicate(openActionType, actionAmount) && (
+              {activeRealtimeDuplicate && (
                 <p className="text-xs font-bold text-amber-600 dark:text-amber-500 mt-1.5 flex items-center gap-1.5">
-                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 stroke-[1.25]" />
                   {t.duplicateRealtimeWarning}
                 </p>
               )}
@@ -2601,13 +3040,13 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                     if (!isChecked) {
                       setActionAmount(formatIndianNumberString(targetBilled.toString()));
                       if (!actionDesc.trim()) {
-                        setActionDesc(lang === 'bn' ? 'গত মাসের বিল পরিশোধ' : 'Last Month Bill Payment');
+                        setActionDesc(lang === 'bn' ? 'বিল্ড স্টেটমেন্ট পরিশোধ' : 'Billed Statement Payment');
                       }
                     } else {
                       setActionAmount('');
                     }
                   }}
-                  className="w-full flex items-center text-left gap-2.5 mt-2 p-2.5 bg-amber-50/70 dark:bg-amber-950/30 rounded-xl border-2 border-amber-300 dark:border-amber-800 hover:border-amber-600 dark:hover:border-amber-400 cursor-pointer transition-colors select-none shadow-2xs"
+                  className="w-full flex items-center text-left gap-2.5 mt-2 p-3 bg-amber-500/10 hover:bg-amber-500/15 rounded-2xl border border-amber-500/25 cursor-pointer transition-colors select-none"
                 >
                   <input
                     type="checkbox"
@@ -2615,8 +3054,8 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                     checked={actionAmount.replace(/,/g, '') === creditCardCycleData.unpaidCarryOver.toString()}
                     readOnly
                   />
-                  <span className="text-xs font-bold text-amber-900 dark:text-amber-200 select-none">
-                    {lang === 'bn' ? 'গত মাসের বিলকৃত স্টেটমেন্ট পরিশোধ করুন' : 'Pay last month billed statement'} (৳{formatNumber(creditCardCycleData.unpaidCarryOver, lang)})
+                  <span className="text-xs font-bold text-amber-800 dark:text-amber-200 select-none">
+                    {lang === 'bn' ? 'বিল্ড স্টেটমেন্ট পরিশোধ করুন' : 'Pay billed statement'} (৳{formatNumber(creditCardCycleData.unpaidCarryOver, lang)})
                   </span>
                 </div>
               )}
@@ -2633,7 +3072,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                       setActionAmount('');
                     }
                   }}
-                  className="w-full flex items-center text-left gap-2.5 mt-2 p-2.5 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800/80 rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer transition-colors select-none shadow-2xs"
+                  className="w-full flex items-center text-left gap-2.5 mt-2 p-3 surface-subcard hover:bg-slate-200/50 dark:hover:bg-white/[0.06] rounded-2xl border border-slate-200/70 dark:border-white/[0.08] cursor-pointer transition-colors select-none"
                 >
                   <input
                     type="checkbox"
@@ -2661,7 +3100,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  const newVal = (currentVal + preset).toString();
  setActionAmount(formatIndianNumberString(newVal));
  }}
- className="bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 px-2.5 py-1 rounded-lg text-xs font-mono font-bold text-slate-900 dark:text-slate-100 transition-colors cursor-pointer shadow-2xs active:scale-95"
+ className="bg-slate-100/80 hover:bg-slate-200/80 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] border border-slate-200/70 dark:border-white/[0.08] px-3 py-1 rounded-full text-xs font-mono font-bold text-slate-900 dark:text-slate-100 transition-colors cursor-pointer touch-press"
  >
  +৳{formatNumber(preset, lang)}
  </button>
@@ -2670,24 +3109,35 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  key="clear"
  type="button"
  onClick={() => setActionAmount('')}
- className="bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border-2 border-rose-300 dark:border-rose-900 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer active:scale-95"
+ className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 px-3 py-1 rounded-full text-xs font-bold transition-colors cursor-pointer touch-press"
  >
  {lang === 'bn' ? 'মুছে ফেলুন' : 'Clear'}
  </button>
  </div>
  </div>
- <div className="space-y-1">
- <label className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>{t.notes}</label>
+
+ {openActionType && (
+   <TagPickerBar
+     type={openActionType}
+     selectedTag={actionTag}
+     onSelectTag={(tag) => setActionTag(tag)}
+     transactions={transactions}
+     lang={lang}
+   />
+ )}
+
+ <div className="space-y-1.5">
+ <label className={lang === 'bn' ? 'text-xs font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}>{t.notes}</label>
  <input
  type="text"
- placeholder={selectedCustomer.accountType === 'credit_card'
+ placeholder={actionTag ? getTagDefaultDescription(actionTag, lang) : (selectedCustomer.accountType === 'credit_card'
    ? (openActionType === 'due'
        ? (lang === 'bn' ? 'যেমন: দারাজ শপিং, বিদ্যুৎ বিল, গ্রোসারি...' : 'e.g. Grocery, Electricity Bill, Online Shopping...')
        : (lang === 'bn' ? 'যেমন: বিকাশ / ব্যাংক ট্রান্সফার পেমেন্ট...' : 'e.g. Paid via Bank Transfer / bKash...'))
-   : t.notesPlaceholder}
+   : t.notesPlaceholder)}
  value={actionDesc}
  onChange={(e) => setActionDesc(e.target.value)}
- className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl text-slate-950 dark:text-white text-sm focus:outline-none focus:border-slate-950 dark:focus:border-white transition-colors"
+ className="w-full px-4 py-3 bg-slate-50/80 dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.1] rounded-2xl text-slate-950 dark:text-white text-sm focus:outline-none focus:border-slate-900 dark:focus:border-white transition-colors"
  />
  </div>
  </div>
@@ -2695,15 +3145,18 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  <div className="flex justify-end items-center gap-2 pt-1">
  <button
  type="button"
- onClick={() => setOpenActionType(null)}
- className="px-3.5 py-2 text-xs bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border-2 border-slate-300 dark:border-slate-700 font-bold rounded-xl cursor-pointer transition-colors"
+ onClick={() => {
+   setOpenActionType(null);
+   setActionTag(null);
+ }}
+ className="px-5 py-2.5 text-xs bg-slate-100/90 hover:bg-slate-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-800 dark:text-slate-200 border border-slate-200/80 dark:border-white/[0.08] font-bold rounded-full cursor-pointer transition-colors touch-press"
  >
  {t.cancel}
  </button>
  <button
  type="submit"
  disabled={txSubmitting}
- className={`px-4 py-2 text-xs text-white font-bold rounded-xl transition-all cursor-pointer border-2 border-transparent shadow-xs ${
+ className={`px-5 py-2.5 text-xs text-white font-bold rounded-full transition-all cursor-pointer shadow-xs touch-press ${
  openActionType === 'due' 
  ? 'bg-rose-600 hover:bg-rose-700' 
  : 'bg-emerald-600 hover:bg-emerald-700'
@@ -2728,45 +3181,67 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  </AnimatePresence>
 
    {/* HISTORICAL LEDGER FOR THIS CUSTOMER */}
-  <div id="statements_timeline" className="space-y-3">
-    <div className="flex flex-wrap items-center justify-between gap-2">
+  <div id="statements_timeline" className="space-y-3.5">
+    <div className="flex flex-wrap items-center justify-between gap-2.5 px-1">
       {selectedCustomer.accountType === 'credit_card' && creditCardCycleData ? (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => {
-              triggerHaptic('single');
-              setCardCycleTab('unbilled');
-            }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border-2 transition-all cursor-pointer flex items-center gap-1.5 ${
-              cardCycleTab === 'unbilled'
-                ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-2xs'
-                : 'bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
-            }`}
-          >
-            <span>{lang === 'bn' ? 'আনবিল্ড' : 'Unbilled'}</span>
-            <span className="px-1.5 py-0.2 rounded-md text-[10px] font-mono bg-slate-500/20">
-              {formatNumber(creditCardCycleData.unbilledTxs.length, lang)}
-            </span>
-          </button>
+        <div className="flex items-center gap-2">
+          {/* Segmented Cycle Switcher Capsule (Clearly distinct from Tag Filter pills below) */}
+          <div className="relative inline-grid grid-cols-2 p-1 rounded-full surface-subcard border border-slate-200/75 dark:border-white/[0.08]">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-slate-950 dark:bg-white shadow-xs will-change-transform transition-transform duration-200 ease-[cubic-bezier(0.22,1.12,0.36,1)]"
+              style={{
+                transform: `translate3d(${cardCycleTab === 'billed' ? '100%' : '0%'}, 0, 0)`
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                if (cardCycleTab !== 'unbilled') {
+                  triggerHaptic('single');
+                  setCardCycleTab('unbilled');
+                }
+              }}
+              className={`relative z-10 px-3.5 py-1.5 rounded-full text-xs font-bold transition-colors duration-150 cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                cardCycleTab === 'unbilled'
+                  ? 'text-white dark:text-slate-950'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
+              }`}
+            >
+              <span>{lang === 'bn' ? 'আনবিল্ড' : 'Unbilled'}</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono tabular-nums ${
+                cardCycleTab === 'unbilled'
+                  ? 'bg-white/20 dark:bg-slate-950/15'
+                  : 'bg-slate-500/15'
+              }`}>
+                {formatNumber(creditCardCycleData.unbilledTxs.length, lang)}
+              </span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              triggerHaptic('single');
-              setCardCycleTab('billed');
-            }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border-2 transition-all cursor-pointer flex items-center gap-1.5 ${
-              cardCycleTab === 'billed'
-                ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-2xs'
-                : 'bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
-            }`}
-          >
-            <span>{lang === 'bn' ? 'বিল্ড' : 'Billed'}</span>
-            <span className="px-1.5 py-0.2 rounded-md text-[10px] font-mono bg-slate-500/20">
-              {formatNumber(creditCardCycleData.billedTxs.length, lang)}
-            </span>
-          </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (cardCycleTab !== 'billed') {
+                  triggerHaptic('single');
+                  setCardCycleTab('billed');
+                }
+              }}
+              className={`relative z-10 px-3.5 py-1.5 rounded-full text-xs font-bold transition-colors duration-150 cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                cardCycleTab === 'billed'
+                  ? 'text-white dark:text-slate-950'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
+              }`}
+            >
+              <span>{lang === 'bn' ? 'বিল্ড' : 'Billed'}</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono tabular-nums ${
+                cardCycleTab === 'billed'
+                  ? 'bg-white/20 dark:bg-slate-950/15'
+                  : 'bg-slate-500/15'
+              }`}>
+                {formatNumber(creditCardCycleData.billedTxs.length, lang)}
+              </span>
+            </button>
+          </div>
 
           <button
             type="button"
@@ -2777,32 +3252,32 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             title={lang === 'bn' ? 'মাসিক কার্ড সাইকেল' : 'Monthly card cycle'}
             aria-label={lang === 'bn' ? 'মাসিক কার্ড সাইকেল' : 'Monthly card cycle'}
             aria-expanded={showMonthlyCycle}
-            className={`px-2.5 py-1.5 rounded-xl text-xs font-extrabold border-2 transition-all cursor-pointer flex items-center justify-center ${
+            className={`w-9 h-9 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center justify-center touch-press ${
               showMonthlyCycle
-                ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-2xs'
-                : 'bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
+                ? 'bg-slate-950 text-white border border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-xs'
+                : 'border surface-glass-interactive border-slate-200/75 dark:border-white/[0.08] text-slate-600 dark:text-slate-400'
             }`}
           >
             <ListClockIcon className="w-4 h-4" />
           </button>
         </div>
       ) : (
-        <span className={`text-xs font-extrabold text-zinc-400 dark:text-zinc-500 block ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
+        <span className={`block ${lang === 'bn' ? 'text-xs font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}`}>
           {t.statements} ({formatNumber(activeCustomerTxCount, lang)})
         </span>
       )}
 
-      {/* Client Statement Tools / Borderless Merge Button */}
+      {/* Client Statement Tools / Minimal Icon + Text Merge Trigger */}
       {archiveCustomerExcessStatements && (
         <button
           type="button"
           onClick={() => {
             triggerHaptic('single');
-            setIsManageStatementsOpen(true);
+            openManageStatementsModal();
           }}
-          className="px-2.5 py-1 rounded-lg bg-slate-100/80 hover:bg-slate-200/80 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-colors active:scale-95"
+          className="inline-flex items-center gap-1.5 py-1 text-slate-500 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white text-xs font-semibold cursor-pointer transition-colors touch-press"
         >
-          <Archive className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+          <Archive className="w-3.5 h-3.5 stroke-[1.25]" />
           <span>{lang === 'bn' ? 'মার্জ' : 'Merge'}</span>
         </button>
       )}
@@ -2815,16 +3290,16 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -8 }}
-          className="surface-subcard p-4 rounded-2xl border border-slate-200/80 dark:border-white/[0.08] space-y-3.5"
+          className="surface-subcard p-4 sm:p-5 rounded-[24px] border border-slate-200/70 dark:border-white/[0.08] space-y-4"
         >
-            {/* Two-Card Comparison Grid: Unbilled (This Month) & Billed (Last Month) - History only (non-clickable) */}
+            {/* Two-Card Comparison Grid: Unbilled (Before Billing Date) & Billed (Moved on Billing Day) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* 1. UNBILLED (THIS MONTH) CARD */}
-              <div className="surface-glass p-3.5 rounded-xl border flex flex-col justify-between gap-2">
-                <div className="space-y-1">
+              {/* 1. UNBILLED CARD */}
+              <div className="surface-glass p-4 rounded-2xl border flex flex-col justify-between gap-2.5">
+                <div className="space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className={`text-[10px] font-extrabold text-slate-900 dark:text-white px-2 py-0.5 rounded bg-slate-200/80 dark:bg-slate-800 ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'}`}>
-                      {lang === 'bn' ? 'আনবিল্ড • চলতি মাস' : 'Unbilled • This Month'}
+                    <span className={`text-[10px] font-bold text-slate-900 dark:text-white px-2.5 py-0.5 rounded-full bg-slate-200/70 dark:bg-white/[0.08] ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'}`}>
+                      {lang === 'bn' ? 'আনবিল্ড • চলতি সাইকেল' : 'Unbilled • Open Cycle'}
                     </span>
                     <span className="text-[10px] font-mono font-semibold text-slate-500 dark:text-slate-400">
                       {creditCardCycleData.lastStatementDate.toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { month: 'short', day: 'numeric' })}
@@ -2839,10 +3314,12 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                         ৳ {formatNumber(creditCardCycleData.thisMonthSpend, lang)}
                       </div>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                        {lang === 'bn' ? 'চলতি সাইকেলে নতুন খরচ (বিলিং দিনে বিল্ড হবে)' : 'Current cycle spend (bills on billing day)'}
+                        {lang === 'bn'
+                          ? `${creditCardCycleData.nextStatementDate.toLocaleDateString('bn-BD', { month: 'short', day: 'numeric' })}-এর আগে করা লেনদেন (বিলিং দিনে বিল্ড হবে)`
+                          : `Before ${creditCardCycleData.nextStatementDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · moves to Billed on billing day`}
                       </p>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right shrink-0">
                       <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500 block">
                         {formatNumber(creditCardCycleData.unbilledTxs.length, lang)} {lang === 'bn' ? 'টি এন্ট্রি' : 'entries'}
                       </span>
@@ -2850,11 +3327,11 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                   </div>
                 </div>
 
-                {/* Carry-Over Indicator inside This Month */}
+                {/* Carry-Over Indicator inside Open Cycle */}
                 {creditCardCycleData.unpaidCarryOver > 0 ? (
-                  <div className="mt-1 pt-2 border-t border-amber-200/80 dark:border-amber-900/50 space-y-1">
+                  <div className="mt-1 pt-2.5 border-t border-amber-500/20 space-y-1">
                     <div className="flex items-center justify-between text-[11px] font-bold text-amber-700 dark:text-amber-400">
-                      <span>{lang === 'bn' ? '+ পূর্বের বিল্ড বকেয়া জের:' : '+ Carried over billed due:'}</span>
+                      <span>{lang === 'bn' ? '+ পূর্বের বিল্ড বকেয়া জের:' : '+ Unpaid billed balance:'}</span>
                       <span className="font-mono">৳ {formatNumber(creditCardCycleData.unpaidCarryOver, lang)}</span>
                     </div>
                     <div className="flex items-center justify-between text-xs font-extrabold text-slate-950 dark:text-white">
@@ -2865,37 +3342,37 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-1 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                    <span>{lang === 'bn' ? 'পূর্বের কোনো বকেয়া জের নেই' : 'No unpaid carry-over from billed statements'}</span>
-                    <Check className="w-3.5 h-3.5 text-ledger-green shrink-0" />
+                  <div className="mt-1 pt-2.5 border-t border-slate-900/[0.06] dark:border-white/[0.06] flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                    <span>{lang === 'bn' ? 'পূর্বের কোনো বিল্ড বকেয়া জের নেই' : 'No unpaid billed carry-over'}</span>
+                    <Check className="w-3.5 h-3.5 text-ledger-green shrink-0 stroke-[1.5]" />
                   </div>
                 )}
               </div>
 
-              {/* 2. BILLED (LAST MONTH) CARD */}
-              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0D121D] flex flex-col justify-between gap-2">
-                <div className="space-y-1">
+              {/* 2. BILLED CARD */}
+              <div className="surface-glass p-4 rounded-2xl border flex flex-col justify-between gap-2.5">
+                <div className="space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className={`text-[10px] font-extrabold text-slate-700 dark:text-slate-200 px-2 py-0.5 rounded bg-slate-200/80 dark:bg-slate-800 ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'}`}>
-                      {lang === 'bn' ? 'বিল্ড • গত মাস' : 'Billed • Last Month'}
+                    <span className={`text-[10px] font-bold text-slate-700 dark:text-slate-200 px-2.5 py-0.5 rounded-full bg-slate-200/70 dark:bg-white/[0.08] ${lang === 'bn' ? 'tracking-normal' : 'font-mono uppercase tracking-wider'}`}>
+                      {lang === 'bn' ? 'বিল্ড • ক্লোজড স্টেটমেন্ট' : 'Billed • Statement Closed'}
                     </span>
                     <span className="text-[10px] font-mono font-semibold text-slate-500 dark:text-slate-400">
-                      {creditCardCycleData.prevStatementDate.toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { month: 'short', day: 'numeric' })}
-                      {' – '}
-                      {creditCardCycleData.lastMonthEndDisplay.toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { month: 'short', day: 'numeric' })}
+                      {creditCardCycleData.lastStatementDate.toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { month: 'short', day: 'numeric' })}
                     </span>
                   </div>
 
                   <div className="pt-1 flex items-baseline justify-between gap-2">
                     <div>
                       <div className="text-xl sm:text-2xl font-black font-mono text-slate-900 dark:text-white tabular-nums">
-                        ৳ {formatNumber(creditCardCycleData.lastMonthCycleSpend, lang)}
+                        ৳ {formatNumber(creditCardCycleData.billedStatementAmount > 0 ? creditCardCycleData.billedStatementAmount : creditCardCycleData.lastMonthCycleSpend, lang)}
                       </div>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                        {lang === 'bn' ? 'গত সাইকেলে মোট কার্ড খরচ' : 'Spent in last month cycle'}
+                        {lang === 'bn'
+                          ? `${creditCardCycleData.lastStatementDate.toLocaleDateString('bn-BD', { month: 'short', day: 'numeric' })} বিলিং দিনে বিল্ড-এ স্থানান্তরিত`
+                          : `Moved into Billed on ${creditCardCycleData.lastStatementDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
                       </p>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right shrink-0">
                       <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500 block">
                         {formatNumber(creditCardCycleData.billedTxs.length, lang)} {lang === 'bn' ? 'টি এন্ট্রি' : 'entries'}
                       </span>
@@ -2904,23 +3381,23 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 </div>
 
                 {/* Statement Settlement Status */}
-                <div className="mt-1 pt-2 border-t border-slate-100 dark:border-slate-800/80 space-y-1">
+                <div className="mt-1 pt-2.5 border-t border-slate-900/[0.06] dark:border-white/[0.06] space-y-1">
                   {creditCardCycleData.billedStatementAmount === 0 && creditCardCycleData.lastMonthCycleSpend === 0 ? (
                     <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                      <span>{lang === 'bn' ? 'গত মাসে কোনো বিল ছিল না' : 'No billed balance last cycle'}</span>
-                      <Check className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span>{lang === 'bn' ? 'কোনো বিল্ড বকেয়া ছিল না' : 'No billed statement due'}</span>
+                      <Check className="w-3.5 h-3.5 text-slate-400 shrink-0 stroke-[1.5]" />
                     </div>
                   ) : creditCardCycleData.unpaidCarryOver === 0 ? (
                     <div className="flex items-center justify-between text-[11px] font-bold text-ledger-green">
-                      <span>{lang === 'bn' ? 'গত মাসের স্টেটমেন্ট সম্পূর্ণ পরিশোধিত' : 'Last month statement paid in full'}</span>
-                      <Check className="w-3.5 h-3.5 shrink-0 stroke-[2.5]" />
+                      <span>{lang === 'bn' ? 'বিল্ড স্টেটমেন্ট সম্পূর্ণ পরিশোধিত' : 'Billed statement paid in full'}</span>
+                      <Check className="w-3.5 h-3.5 shrink-0 stroke-[1.5]" />
                     </div>
                   ) : (
                     <div className="flex items-center justify-between text-[11px] font-bold text-amber-700 dark:text-amber-400">
                       <span>
                         {lang === 'bn'
-                          ? `অপরিশোধিত ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'bn')} চলতি মাসে যুক্ত`
-                          : `৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'en')} unpaid → carried to This Month`}
+                          ? `অপরিশোধিত বিল্ড বকেয়া ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'bn')}`
+                          : `৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'en')} unpaid billed due remaining`}
                       </span>
                     </div>
                   )}
@@ -2930,46 +3407,45 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
             {/* Billing Cycle Rule Notice & Spend Comparison */}
             <div className="pt-1 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-              {/* Spend vs Last Month comparison insight */}
               <div className="text-xs text-slate-600 dark:text-slate-300 font-medium flex items-start gap-1.5">
-                <Info className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                <Info className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5 stroke-[1.25]" />
                 <div className="space-y-0.5">
                   <div>
                     {creditCardCycleData.lastMonthCycleSpend === 0 ? (
                       <span>
                         {lang === 'bn'
-                          ? `চলতি সাইকেলে মোট খরচ ৳${formatNumber(creditCardCycleData.thisMonthSpend, 'bn')}`
-                          : `৳${formatNumber(creditCardCycleData.thisMonthSpend, 'en')} spent so far in this billing cycle`}
+                          ? `চলতি আনবিল্ড সাইকেলে মোট খরচ ৳${formatNumber(creditCardCycleData.thisMonthSpend, 'bn')}`
+                          : `৳${formatNumber(creditCardCycleData.thisMonthSpend, 'en')} in unbilled charges before next billing date`}
                       </span>
                     ) : creditCardCycleData.thisMonthSpend > creditCardCycleData.lastMonthCycleSpend ? (
                       <span>
                         {lang === 'bn'
-                          ? `গত মাসের তুলনায় এই মাসে ৳${formatNumber(creditCardCycleData.thisMonthSpend - creditCardCycleData.lastMonthCycleSpend, 'bn')} বেশি খরচ হয়েছে`
-                          : `৳${formatNumber(creditCardCycleData.thisMonthSpend - creditCardCycleData.lastMonthCycleSpend, 'en')} more spent this month vs last month`}
+                          ? `গত সাইকেলের তুলনায় এবার ৳${formatNumber(creditCardCycleData.thisMonthSpend - creditCardCycleData.lastMonthCycleSpend, 'bn')} বেশি আনবিল্ড খরচ`
+                          : `৳${formatNumber(creditCardCycleData.thisMonthSpend - creditCardCycleData.lastMonthCycleSpend, 'en')} more unbilled vs last cycle`}
                       </span>
                     ) : creditCardCycleData.thisMonthSpend < creditCardCycleData.lastMonthCycleSpend ? (
                       <span>
                         {lang === 'bn'
-                          ? `গত মাসের তুলনায় এই মাসে ৳${formatNumber(creditCardCycleData.lastMonthCycleSpend - creditCardCycleData.thisMonthSpend, 'bn')} কম খরচ হয়েছে`
-                          : `৳${formatNumber(creditCardCycleData.lastMonthCycleSpend - creditCardCycleData.thisMonthSpend, 'en')} less spent this month vs last month`}
+                          ? `গত সাইকেলের তুলনায় এবার ৳${formatNumber(creditCardCycleData.lastMonthCycleSpend - creditCardCycleData.thisMonthSpend, 'bn')} কম আনবিল্ড খরচ`
+                          : `৳${formatNumber(creditCardCycleData.lastMonthCycleSpend - creditCardCycleData.thisMonthSpend, 'en')} less unbilled vs last cycle`}
                       </span>
                     ) : (
                       <span>
                         {lang === 'bn'
-                          ? 'চলতি মাস এবং গত মাসের খরচের পরিমাণ সমান'
-                          : 'Spending this month matches last month exactly'}
+                          ? 'চলতি ও গত সাইকেলের খরচের পরিমাণ সমান'
+                          : 'Unbilled spending matches last closed cycle'}
                       </span>
                     )}
                   </div>
                   <div className="text-[11px] text-slate-500 dark:text-slate-400">
                     {lang === 'bn'
-                      ? `প্রতি মাসের ${formatNumber(creditCardCycleData.billingDay, 'bn')} তারিখে পূর্বের সাইকেলের আনবিল্ড খরচ বিল্ড হিসেবে গণ্য হয়।`
-                      : `Current cycle bills stay Unbilled and only convert to Billed on day ${creditCardCycleData.billingDay}.`}
+                      ? `বিলিং তারিখ (${formatNumber(creditCardCycleData.billingDay, 'bn')} তারিখ)-এর আগের লেনদেন আনবিল্ড থাকে এবং বিলিং দিনে স্বয়ংক্রিয়ভাবে বিল্ড-এ চলে যায়।`
+                      : `Transactions before the billing date stay Unbilled and move into Billed automatically on day ${creditCardCycleData.billingDay}.`}
                   </div>
                 </div>
               </div>
 
-              {/* 1-Tap Quick Settle Action Buttons */}
+              {/* 1-Tap Quick Settle Action Button */}
               <div className="flex flex-wrap items-center gap-2 shrink-0">
                 {creditCardCycleData.unpaidCarryOver > 0 && (
                   <button
@@ -2978,12 +3454,12 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                       triggerHaptic('single');
                       setOpenActionType('payment');
                       setActionAmount(formatIndianNumberString(creditCardCycleData.unpaidCarryOver.toString()));
-                      setActionDesc(lang === 'bn' ? 'গত মাসের বিল পরিশোধ' : 'Last Month Bill Payment');
+                      setActionDesc(lang === 'bn' ? 'বিল্ড স্টেটমেন্ট পরিশোধ' : 'Billed Statement Payment');
                     }}
-                    className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs cursor-pointer transition-all shadow-2xs active:scale-95"
+                    className="px-4 py-2 rounded-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs cursor-pointer transition-all shadow-xs touch-press"
                   >
                     {lang === 'bn'
-                      ? `বিলকৃত বকেয়া পরিশোধ (৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'bn')})`
+                      ? `বিল্ড বকেয়া পরিশোধ (৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'bn')})`
                       : `Pay Billed Due (৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'en')})`}
                   </button>
                 )}
@@ -2993,15 +3469,92 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       )}
     </AnimatePresence>
 
-    <div className="surface-glass border rounded-2xl overflow-hidden">
+    <div className="surface-glass border rounded-[28px] overflow-hidden">
+      {/* Integrated Ledger Tag Filter Strip (scoped inside the ledger card header; supports PC wheel & drag scroll) */}
+      {(availableLedgerTags.length > 0 || ledgerTagFilter) && (
+        <div className="relative px-3.5 sm:px-4 py-2.5 border-b border-slate-900/[0.06] dark:border-white/[0.06] bg-slate-900/[0.015] dark:bg-white/[0.02]">
+          {ledgerTagEdges.left && (
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label="Scroll tag filters left"
+              onClick={() => scrollLedgerTagsByStep(-1)}
+              className="hidden sm:flex absolute left-2.5 top-1/2 -translate-y-1/2 z-10 w-6 h-6 rounded-full surface-glass-interactive border items-center justify-center text-slate-700 dark:text-slate-200 shadow-sm cursor-pointer"
+            >
+              <ChevronLeft className="w-3.5 h-3.5 stroke-[1.75]" />
+            </button>
+          )}
+
+          <div
+            ref={ledgerTagScrollRef}
+            {...ledgerTagScrollHandlers}
+            className={`flex items-center gap-1.5 overflow-x-auto hide-scrollbar select-none whitespace-nowrap ${
+              isDraggingLedgerTags ? 'cursor-grabbing' : 'sm:cursor-grab'
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('level3');
+                setLedgerTagFilter(null);
+              }}
+              className={`touch-press shrink-0 px-3 py-1.5 rounded-full text-xs font-bold cursor-pointer transition-colors duration-150 ${
+                !ledgerTagFilter
+                  ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 shadow-xs'
+                  : 'surface-subcard border text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              {lang === 'bn' ? 'সব লেনদেন' : 'All Tags'}
+            </button>
+
+            {availableLedgerTags.map((tagId) => {
+              const meta = getTagMeta(tagId);
+              if (!meta) return null;
+              const isSelected = ledgerTagFilter === tagId;
+              const IconComp = meta.icon;
+              return (
+                <button
+                  key={tagId}
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic('level3');
+                    setLedgerTagFilter(isSelected ? null : tagId);
+                  }}
+                  className={`touch-press shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors duration-150 ${
+                    isSelected
+                      ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 shadow-xs ring-1 ring-slate-950 dark:ring-white font-bold'
+                      : 'surface-subcard border text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
+                  }`}
+                >
+                  <IconComp className="w-3.5 h-3.5 stroke-[1.5]" style={{ color: isSelected ? undefined : meta.color }} />
+                  <span>{lang === 'bn' ? meta.bn : meta.en}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {ledgerTagEdges.right && (
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label="Scroll tag filters right"
+              onClick={() => scrollLedgerTagsByStep(1)}
+              className="hidden sm:flex absolute right-2.5 top-1/2 -translate-y-1/2 z-10 w-6 h-6 rounded-full surface-glass-interactive border items-center justify-center text-slate-700 dark:text-slate-200 shadow-sm cursor-pointer"
+            >
+              <ChevronRight className="w-3.5 h-3.5 stroke-[1.75]" />
+            </button>
+          )}
+        </div>
+      )}
+
       {groupedTransactions.length === 0 ? (
         <div className="p-10 text-center text-slate-400 dark:text-slate-500 flex flex-col items-center gap-2">
-          <ReceiptText className="w-10 h-10 stroke-[1.5]" />
+          <ReceiptText className="w-10 h-10 stroke-[1.25]" />
           <p className="font-bold text-slate-800 dark:text-slate-200">
             {selectedCustomer.accountType === 'credit_card'
               ? (cardCycleTab === 'unbilled'
-                  ? (lang === 'bn' ? 'চলতি আনবিল্ড সাইকেলে কোনো লেনদেন নেই' : 'No unbilled transactions this month')
-                  : (lang === 'bn' ? 'গত মাসের বিল্ড সাইকেলে কোনো লেনদেন নেই' : 'No billed transactions from last month'))
+                  ? (lang === 'bn' ? 'বিলিং তারিখের আগে কোনো আনবিল্ড লেনদেন নেই' : 'No unbilled transactions before billing date')
+                  : (lang === 'bn' ? 'এখনো কোনো বিল্ড লেনদেন নেই' : 'No billed transactions moved into statement yet'))
               : t.noHistory}
           </p>
           <p className="text-xs text-slate-400 dark:text-slate-500">
@@ -3012,60 +3565,67 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
         </div>
       ) : (
         <>
-          <div className="divide-y divide-slate-200/60 dark:divide-white/[0.06]">
+          <div className="divide-y divide-slate-900/[0.06] dark:divide-white/[0.06] transition-none">
             {groupedTransactions.map(group => (
               <div key={group.dateStr} className="flex flex-col">
-                {/* Date Header Indicator */}
-                <div className="px-4 py-2 bg-slate-100/65 dark:bg-white/[0.04] backdrop-blur-md border-b border-slate-200/60 dark:border-white/[0.06] flex items-center justify-between">
-                  <span className={`text-[11px] font-mono font-bold text-slate-600 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
-                    {group.dateObj.toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                {/* Date or Tag Header Indicator */}
+                <div className="px-4 sm:px-5 py-2.5 bg-slate-900/[0.025] dark:bg-white/[0.03] border-b border-slate-900/[0.06] dark:border-white/[0.06] flex items-center justify-between transition-none">
+                  <span className={`text-[11px] font-mono font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
+                    {group.isTagGroup ? (
+                      <span className="flex items-center gap-1.5 normal-case font-sans font-bold text-slate-700 dark:text-slate-200">
+                        <TagIcon tag={group.tagKey !== 'untagged' ? group.tagKey : undefined} type="due" className="w-3.5 h-3.5 stroke-[1.5]" />
+                        <span>{group.label}</span>
+                      </span>
+                    ) : (
+                      (lang === 'bn' ? LEDGER_DATE_FMT_BN : LEDGER_DATE_FMT_EN).format(group.dateObj)
+                    )}
                   </span>
-                  <span className="text-[10px] font-mono font-bold text-slate-500 dark:text-slate-400">
+                  <span className="text-[10px] font-mono font-bold text-slate-400 dark:text-slate-500">
                     {formatNumber(group.items.length, lang)} {lang === 'bn' ? 'টি এন্ট্রি' : 'entries'}
                   </span>
                 </div>
                 
                 {/* Grouped Transactions List */}
-                <div className="flex flex-col">
+                <div className="flex flex-col divide-y divide-slate-900/[0.05] dark:divide-white/[0.05] transition-none">
                   {group.items.map((tx: Transaction) => (
                     <div 
                       key={tx.id} 
                       id={`tx-row-${tx.id}`}
-                      className={`p-4 flex flex-col hover:bg-slate-50/70 dark:hover:bg-slate-900/50 transition-all duration-300 group cursor-default ${
+                      className={`p-4 sm:px-5 flex flex-col hover:bg-slate-900/[0.02] dark:hover:bg-white/[0.02] transition-[background-color,box-shadow] duration-150 group cursor-default ${
                         highlightedTxId === tx.id 
-                          ? 'ring-4 ring-inset ring-amber-500/80 dark:ring-amber-400/80 bg-amber-50 dark:bg-amber-950/40 rounded-2xl' 
+                          ? 'ring-2 ring-inset ring-amber-500/80 dark:ring-amber-400/80 bg-amber-500/10' 
                           : recentlyEditedTxId === tx.id
-                          ? 'ring-[3px] ring-inset ring-emerald-500 dark:ring-emerald-400 bg-emerald-50/80 dark:bg-emerald-950/35 rounded-2xl'
+                          ? 'ring-2 ring-inset ring-emerald-500 dark:ring-emerald-400 bg-emerald-500/10'
                           : ''
                       }`}
                     >
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-3">
                         <div className="flex items-center gap-3.5 min-w-0">
-                          <div className={`p-2 rounded-lg shrink-0 ${
+                          <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
                             tx.type === 'due' 
                               ? 'bg-ledger-red-subtle text-ledger-red' 
                               : 'bg-ledger-green-subtle text-ledger-green'
                           }`}>
-                            {tx.type === 'due' ? <ArrowUpRight className="w-4.5 h-4.5 stroke-[2.5]" /> : <ArrowDownLeft className="w-4.5 h-4.5 stroke-[2.5]" />}
+                            <TagIcon tag={tx.tag} type={tx.type} className="w-4 h-4 stroke-[1.5]" />
                           </div>
                           <div className="min-w-0">
-                            <div className="text-[15px] sm:text-base font-semibold text-slate-900 dark:text-slate-100 truncate">
+                            <div className="text-[15px] font-semibold text-slate-900 dark:text-slate-100 truncate">
                               {tx.description || (tx.type === 'due' ? t.dueTrigger : t.paymentTrigger)}
                             </div>
-                            <div className={`text-xs text-slate-400 dark:text-slate-500 font-bold mt-0.5 flex items-center gap-2 flex-wrap ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>
-                              <span>{new Date(tx.date).toLocaleTimeString(lang === 'bn' ? 'bn-BD' : 'en-US', { hour: '2-digit', minute: '2-digit' })}</span>
+                            <div className={`text-[11px] text-slate-400 dark:text-slate-500 font-medium mt-0.5 flex items-center gap-2 flex-wrap ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>
+                              <span className="font-mono">{(lang === 'bn' ? LEDGER_TIME_FMT_BN : LEDGER_TIME_FMT_EN).format(parseFirestoreDate(tx.date))}</span>
                               {(tx.isEdited || recentlyEditedTxId === tx.id || (tx.auditHistory && tx.auditHistory.length > 0)) && (
                                 <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     triggerHaptic('single');
-                                    setAuditLogTx(tx);
+                                    openAuditLogModal(tx);
                                   }}
-                                  className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-500/10 hover:bg-slate-500/20 dark:bg-slate-400/10 dark:hover:bg-slate-400/20 text-slate-600 dark:text-slate-300 normal-case tracking-normal leading-none cursor-pointer transition-colors"
+                                  className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-500/10 hover:bg-slate-500/20 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-600 dark:text-slate-300 normal-case tracking-normal leading-none cursor-pointer transition-colors"
                                   title={lang === 'bn' ? 'সম্পাদনার ইতিহাস দেখুন' : 'View edit audit history'}
                                 >
-                                  <History className="w-2.5 h-2.5" />
+                                  <History className="w-2.5 h-2.5 stroke-[1.5]" />
                                   <span>{lang === 'bn' ? 'সম্পাদিত' : 'Edited'}</span>
                                 </button>
                               )}
@@ -3079,17 +3639,17 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                           }`}>
                             {tx.type === 'due' ? '+' : '-'} ৳{formatNumber(tx.amount, lang)}
                           </div>
-                          <div className="flex items-center gap-2 mt-1 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-1 mt-1 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation();
                                 triggerHaptic('single');
                                 openEditTxModal(tx);
                               }}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-ledger-green hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                              className="w-7 h-7 rounded-full text-slate-400 hover:text-ledger-green hover:bg-slate-200/60 dark:hover:bg-white/[0.08] flex items-center justify-center cursor-pointer transition-colors"
                               title={lang === 'bn' ? 'পরিবর্তন' : 'Edit'}
                             >
-                              <Pencil className="w-4 h-4" />
+                              <Pencil className="w-3.5 h-3.5 stroke-[1.25]" />
                             </button>
                             <button 
                               onClick={(e) => {
@@ -3097,10 +3657,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                                 triggerHaptic('double');
                                 openDeleteTxModal(tx);
                               }}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-ledger-red hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                              className="w-7 h-7 rounded-full text-slate-400 hover:text-ledger-red hover:bg-slate-200/60 dark:hover:bg-white/[0.08] flex items-center justify-center cursor-pointer transition-colors"
                               title={lang === 'bn' ? 'মুছুন' : 'Delete'}
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-3.5 h-3.5 stroke-[1.25]" />
                             </button>
                           </div>
                         </div>
@@ -3118,7 +3678,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             if (!showMoreVisible && !showLessVisible) return null;
 
             return (
-              <div className="p-3.5 text-center flex justify-center gap-2.5 border-t border-slate-200/60 dark:border-white/[0.06] bg-slate-900/[0.015] dark:bg-white/[0.015]">
+              <div className="p-3.5 text-center flex justify-center gap-2.5 border-t border-slate-900/[0.06] dark:border-white/[0.06] bg-slate-900/[0.015] dark:bg-white/[0.015]">
                 {showMoreVisible && (
                   <button 
                     type="button"
@@ -3126,10 +3686,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                       triggerHaptic('single');
                       loadMoreTransactions();
                     }}
-                    className="surface-glass-interactive flex items-center justify-center gap-1.5 px-4 py-2 border-2 border-slate-300/90 dark:border-slate-700/90 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-full shadow-2xs active:scale-95 transition-all cursor-pointer"
+                    className="surface-glass-interactive flex items-center justify-center gap-1.5 px-5 py-2 border border-slate-200/80 dark:border-white/[0.1] text-slate-800 dark:text-slate-200 text-xs font-bold rounded-full shadow-2xs touch-press transition-all cursor-pointer"
                   >
                     <span>{lang === 'bn' ? 'আরও দেখুন' : 'Show More'}</span>
-                    <ChevronDown className="w-3.5 h-3.5 stroke-[2.5]" />
+                    <ChevronDown className="w-3.5 h-3.5 stroke-[1.5]" />
                   </button>
                 )}
                 {showLessVisible && (
@@ -3139,10 +3699,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                       triggerHaptic('single');
                       resetCustomerTxLimit();
                     }}
-                    className="surface-glass-interactive flex items-center justify-center gap-1.5 px-4 py-2 border-2 border-slate-300/90 dark:border-slate-700/90 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-full shadow-2xs active:scale-95 transition-all cursor-pointer"
+                    className="surface-glass-interactive flex items-center justify-center gap-1.5 px-5 py-2 border border-slate-200/80 dark:border-white/[0.1] text-slate-800 dark:text-slate-200 text-xs font-bold rounded-full shadow-2xs touch-press transition-all cursor-pointer"
                   >
                     <span>{lang === 'bn' ? 'কম দেখুন' : 'Show Less'}</span>
-                    <ChevronUp className="w-3.5 h-3.5 stroke-[2.5]" />
+                    <ChevronUp className="w-3.5 h-3.5 stroke-[1.5]" />
                   </button>
                 )}
               </div>
@@ -3154,22 +3714,21 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
     {/* ARCHIVED STATEMENTS STORED ON THIS CUSTOMER'S PROFILE */}
     {(() => {
-      const profileArchives = archivedStatements.filter((a: any) => a && a.customerId === selectedCustomer.id);
-      if (profileArchives.length === 0) return null;
-      const totalArchivedTxCount = profileArchives.reduce(
+      if (activeCustomerArchives.length === 0) return null;
+      const totalArchivedTxCount = activeCustomerArchives.reduce(
         (sum: number, a: any) => sum + (typeof a.entriesCount === 'number' ? a.entriesCount : 1),
         0
       );
 
       return (
-        <div className="surface-glass border rounded-2xl p-4 sm:p-5 space-y-3">
+        <div className="surface-glass border rounded-[28px] p-5 space-y-3.5">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700/60 flex items-center justify-center shrink-0">
-                <Archive className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-full bg-slate-100/80 dark:bg-white/[0.06] border border-slate-200/70 dark:border-white/[0.08] flex items-center justify-center shrink-0">
+                <Archive className="w-4 h-4 text-slate-600 dark:text-slate-300 stroke-[1.25]" />
               </div>
               <div className="min-w-0">
-                <h4 className="text-xs sm:text-sm font-extrabold text-slate-950 dark:text-white truncate">
+                <h4 className="text-xs sm:text-sm font-bold text-slate-950 dark:text-white truncate">
                   {lang === 'bn' ? 'আর্কাইভকৃত পুরনো স্টেটমেন্ট' : 'Archived Profile Statements'}
                 </h4>
                 <p className="text-[11px] font-mono font-semibold text-slate-500 dark:text-slate-400 truncate mt-0.5">
@@ -3191,7 +3750,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                     }
                   }
                   if (records.length === 0) {
-                    records = profileArchives.map((item: any) => ({
+                    records = activeCustomerArchives.map((item: any) => ({
                       id: item.id,
                       customerId: item.customerId,
                       customerName: item.customerName || selectedCustomer.name,
@@ -3230,19 +3789,19 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                   toast.error(lang === 'bn' ? 'ডাউনলোড করতে সমস্যা হয়েছে' : 'Failed to download archive');
                 }
               }}
-              className="px-3 py-2 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold text-xs rounded-xl border-2 border-slate-950 dark:border-white flex items-center gap-1.5 cursor-pointer transition-colors shrink-0 shadow-2xs active:scale-95"
+              className="px-4 py-2 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold text-xs rounded-full flex items-center gap-1.5 cursor-pointer transition-colors shrink-0 shadow-2xs touch-press"
             >
-              <Download className="w-3.5 h-3.5" />
+              <Download className="w-3.5 h-3.5 stroke-[1.5]" />
               <span>{lang === 'bn' ? 'ডাউনলোড' : 'Download'}</span>
             </button>
           </div>
 
-          <div className="divide-y divide-slate-100 dark:divide-slate-800/80 border-t border-slate-100 dark:border-slate-800/80 pt-2">
-            {profileArchives.slice(0, 4).map((arch: any) => {
+          <div className="divide-y divide-slate-900/[0.06] dark:divide-white/[0.06] border-t border-slate-900/[0.06] dark:border-white/[0.06] pt-2">
+            {activeCustomerArchives.slice(0, 4).map((arch: any) => {
               const txDate = parseFirestoreDate(arch.date || arch.archivedAt);
               const isBatch = typeof arch.entriesCount === 'number';
               return (
-                <div key={arch.id} className="py-2 flex items-center justify-between gap-3 text-xs">
+                <div key={arch.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
                   <div className="flex items-center gap-2 min-w-0">
                     {isBatch ? (
                       <span className="font-mono font-bold text-slate-900 dark:text-slate-200">
@@ -3255,11 +3814,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                     )}
                     <span className="text-slate-400 shrink-0">•</span>
                     <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400 shrink-0">
-                      {txDate.toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric'
-                      })}
+                      {(lang === 'bn' ? LEDGER_SHORT_DATE_FMT_BN : LEDGER_SHORT_DATE_FMT_EN).format(txDate)}
                     </span>
                   </div>
                   {isBatch ? (
@@ -3281,11 +3836,11 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 </div>
               );
             })}
-            {profileArchives.length > 4 && (
-              <div className="pt-2 text-[11px] font-mono text-slate-400 dark:text-slate-500 text-center">
+            {activeCustomerArchives.length > 4 && (
+              <div className="pt-2.5 text-[11px] font-mono text-slate-400 dark:text-slate-500 text-center">
                 {lang === 'bn'
-                  ? `+ আরও ${formatNumber(profileArchives.length - 4, lang)}টি আর্কাইভকৃত লেনদেন (ডাউনলোড ফাইলে সম্পূর্ণ তালিকা)`
-                  : `+ ${profileArchives.length - 4} more archived entries available in download`}
+                  ? `+ আরও ${formatNumber(activeCustomerArchives.length - 4, lang)}টি আর্কাইভকৃত লেনদেন (ডাউনলোড ফাইলে সম্পূর্ণ তালিকা)`
+                  : `+ ${activeCustomerArchives.length - 4} more archived entries available in download`}
               </div>
             )}
           </div>
@@ -3299,27 +3854,28 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
   {/* Edit Transaction Modal */}
   {editingTx && (
-    <div 
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) closeTxModals();
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="animate-slide-up glass-modal w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border"
-      >
-        <div className="flex items-center justify-between pb-3.5 mb-5 border-b border-slate-100 dark:border-slate-800/80">
-          <h3 className="text-base font-extrabold text-slate-950 dark:text-white">
+    <ModalPortal lockScroll={false}>
+      <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+        <div
+          className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+          onClick={closeTxModals}
+        />
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-md rounded-t-[2rem] sm:rounded-3xl shadow-2xl p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pb-6 border max-h-[90dvh] overflow-y-auto hide-scrollbar"
+        >
+          <div className="sm:hidden w-10 h-1 bg-slate-400/40 dark:bg-white/20 rounded-full mx-auto -mt-2 mb-4" />
+        <div className="flex items-center justify-between pb-3.5 mb-5 border-b border-slate-900/[0.06] dark:border-white/[0.06]">
+          <h3 className="font-display text-lg font-bold text-slate-950 dark:text-white">
             {lang === 'bn' ? 'লেনদেন পরিবর্তন' : 'Edit Transaction'}
           </h3>
-          <button type="button" aria-label="Close" onClick={closeTxModals} className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 cursor-pointer transition-colors">
-            <X className="w-4 h-4" />
+          <button type="button" aria-label="Close" onClick={closeTxModals} className="w-8 h-8 bg-slate-100/80 hover:bg-slate-200 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] border border-slate-200/70 dark:border-white/[0.08] rounded-full text-slate-600 dark:text-slate-300 cursor-pointer transition-colors flex items-center justify-center touch-press">
+            <X className="w-4 h-4 stroke-[1.5]" />
           </button>
         </div>
         <div className="space-y-4">
-          <div className="space-y-1">
-            <label className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>{t.amount} (৳)</label>
+          <div className="space-y-1.5">
+            <label className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>{t.amount} (৳)</label>
             <input
               id="edit-tx-amount-input"
               type="text"
@@ -3330,38 +3886,56 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 const clean = e.target.value.replace(/[^0-9.]/g, '');
                 setEditTxAmount(clean);
               }}
-              className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl text-slate-950 dark:text-white text-lg font-mono font-bold focus:outline-none focus:border-slate-950 dark:focus:border-white"
+              className="w-full px-4 py-3 bg-slate-50/80 dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.1] rounded-2xl text-slate-950 dark:text-white text-xl font-mono font-bold focus:outline-none focus:border-slate-900 dark:focus:border-white transition-colors"
             />
           </div>
-          <div className="space-y-1">
-            <label className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>{t.notes}</label>
+          <div className="space-y-1.5">
+            <label className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>{t.notes}</label>
             <input
               id="edit-tx-desc-input"
               type="text"
               value={editTxDesc}
               onChange={(e) => setEditTxDesc(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl text-slate-950 dark:text-white text-sm focus:outline-none focus:border-slate-950 dark:focus:border-white"
+              className="w-full px-4 py-3 bg-slate-50/80 dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.1] rounded-2xl text-slate-950 dark:text-white text-sm focus:outline-none focus:border-slate-900 dark:focus:border-white transition-colors"
+            />
+          </div>
+          {/* Editable Tag Assignment */}
+          <div className="pt-0.5">
+            <TagPickerBar
+              type={editingTx.type}
+              selectedTag={editTxTag}
+              onSelectTag={setEditTxTag}
+              transactions={selectedCustomerTransactions}
+              lang={lang}
             />
           </div>
           <div className="flex gap-2.5 pt-2">
             <button
               type="button"
               onClick={closeTxModals}
-              className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer transition-colors"
+              className="flex-1 py-2.5 bg-slate-100/90 hover:bg-slate-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-800 dark:text-slate-200 font-bold text-xs rounded-full border border-slate-200/80 dark:border-white/[0.08] cursor-pointer transition-colors touch-press"
             >
               {lang === 'bn' ? 'বাতিল' : 'Cancel'}
             </button>
             <button
+              type="button"
               onClick={() => {
                 const newAmount = parseFloat(editTxAmount.replace(/,/g, ''));
+                if (!newAmount || isNaN(newAmount) || newAmount <= 0) {
+                  toast.error(lang === 'bn' ? 'সঠিক পরিমাণ লিখুন' : 'Please enter a valid amount');
+                  return;
+                }
                 const trimmedDesc = editTxDesc.trim();
                 const origDesc = (editingTx.description || '').trim();
-                if (newAmount > 0 && editTransaction) {
-                  const hasChanged = Math.abs(newAmount - editingTx.amount) > 0.001 || trimmedDesc !== origDesc;
+                const origTag = editingTx.tag || null;
+                const newTagVal = editTxTag || null;
+                if (editTransaction) {
+                  const hasChanged = Math.abs(newAmount - editingTx.amount) > 0.001 || trimmedDesc !== origDesc || newTagVal !== origTag;
                   const editedId = editingTx.id;
                   if (hasChanged) {
                     triggerHaptic('double');
-                    editTransaction(editedId, editingTx.type, newAmount, trimmedDesc);
+                    const finalDesc = trimmedDesc || (newTagVal ? getTagDefaultDescription(newTagVal, lang) : '');
+                    editTransaction(editedId, editingTx.type, newAmount, finalDesc, newTagVal);
                     setRecentlyEditedTxId(editedId);
                     setTimeout(() => {
                       setRecentlyEditedTxId(prev => (prev === editedId ? null : prev));
@@ -3370,34 +3944,35 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                   closeTxModals();
                 }
               }}
-              className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl border-2 border-transparent cursor-pointer transition-colors"
+              className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-full cursor-pointer transition-colors touch-press"
             >
               {lang === 'bn' ? 'সংরক্ষণ করুন' : 'Save Changes'}
             </button>
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </ModalPortal>
   )}
 
  {/* Delete Transaction Modal */}
   {deletingTx && (
-    <div 
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
-      onClick={closeTxModals}
-    >
-      <motion.div
-        onClick={(e) => e.stopPropagation()}
-        initial={{ opacity: 0, y: 50 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.15 }}
-        className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border"
-      >
+    <ModalPortal lockScroll={false}>
+      <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+        <div
+          className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+          onClick={closeTxModals}
+        />
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-sm rounded-t-[2rem] sm:rounded-3xl shadow-2xl p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pb-6 border max-h-[90dvh] overflow-y-auto hide-scrollbar"
+        >
+          <div className="sm:hidden w-10 h-1 bg-slate-400/40 dark:bg-white/20 rounded-full mx-auto -mt-2 mb-4" />
         <div className="text-center mb-6">
-          <div className="w-14 h-14 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3.5">
-            <Trash2 className="w-7 h-7 text-rose-600 dark:text-rose-400" />
+          <div className="w-14 h-14 bg-rose-500/10 border border-rose-500/20 rounded-full flex items-center justify-center mx-auto mb-3.5">
+            <Trash2 className="w-6 h-6 text-rose-600 dark:text-rose-400 stroke-[1.5]" />
           </div>
-          <h3 className="text-base font-extrabold text-slate-950 dark:text-white mb-1.5">
+          <h3 className="font-display text-lg font-bold text-slate-950 dark:text-white mb-1.5">
             {lang === 'bn' ? 'হিসাব মুছুন' : 'Delete Transaction'}
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -3405,10 +3980,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           </p>
           
           {/* Details Card showing what is being deleted */}
-          <div className="surface-subcard border rounded-xl p-3.5 text-left space-y-2 mt-4">
+          <div className="surface-subcard border border-slate-200/70 dark:border-white/[0.08] rounded-2xl p-4 text-left space-y-2.5 mt-4">
             <div className="flex justify-between items-center">
-              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{lang === 'bn' ? 'ধরন' : 'Type'}</span>
-              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${lang === 'bn' ? 'tracking-normal' : 'uppercase'} ${
+              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>{lang === 'bn' ? 'ধরন' : 'Type'}</span>
+              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${lang === 'bn' ? 'tracking-normal' : 'uppercase'} ${
                 deletingTx.type === 'due' 
                   ? 'bg-ledger-red-subtle text-ledger-red border-ledger-red-subtle' 
                   : 'bg-ledger-green-subtle text-ledger-green border-ledger-green-subtle'
@@ -3417,7 +3992,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               </span>
             </div>
             <div className="flex justify-between items-baseline">
-              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{lang === 'bn' ? 'পরিমাণ' : 'Amount'}</span>
+              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>{lang === 'bn' ? 'পরিমাণ' : 'Amount'}</span>
               <span className={`text-sm font-black font-mono ${
                 deletingTx.type === 'due' ? 'text-ledger-red' : 'text-ledger-green'
               }`}>
@@ -3425,14 +4000,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               </span>
             </div>
             <div className="flex justify-between items-baseline">
-              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{lang === 'bn' ? 'তারিখ' : 'Date'}</span>
+              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>{lang === 'bn' ? 'তারিখ' : 'Date'}</span>
               <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                 {new Date(deletingTx.date).toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { dateStyle: 'medium' })}
               </span>
             </div>
             {deletingTx.description && (
-              <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800 flex justify-between items-start gap-4">
-                <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 shrink-0 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{lang === 'bn' ? 'বিবরণ' : 'Notes'}</span>
+              <div className="pt-2 border-t border-slate-900/[0.06] dark:border-white/[0.06] flex justify-between items-start gap-4">
+                <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 shrink-0 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>{lang === 'bn' ? 'বিবরণ' : 'Notes'}</span>
                 <span className="text-xs font-bold text-slate-800 dark:text-slate-200 text-right truncate max-w-[200px]">{deletingTx.description}</span>
               </div>
             )}
@@ -3446,39 +4021,41 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 closeTxModals();
               }
             }}
-            className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent cursor-pointer text-xs transition-colors"
+            className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-full cursor-pointer text-xs transition-colors touch-press"
           >
             {lang === 'bn' ? 'হ্যাঁ, মুছুন' : 'Yes, Delete'}
           </button>
           <button
             onClick={closeTxModals}
-            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer text-xs transition-colors"
+            className="w-full py-3 bg-slate-100/90 hover:bg-slate-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-800 dark:text-slate-200 font-bold rounded-full border border-slate-200/80 dark:border-white/[0.08] cursor-pointer text-xs transition-colors touch-press"
           >
             {lang === 'bn' ? 'বাতিল' : 'Cancel'}
           </button>
         </div>
-      </motion.div>
-    </div>
+      </div>
+      </div>
+    </ModalPortal>
   )}
 
 
   {/* Phone Warning Modal */}
   {phoneWarningCustomer && (
-    <div 
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
-      onClick={closePhoneWarningModal}
-    >
-      <motion.div
-        onClick={(e) => e.stopPropagation()}
-        initial={{ opacity: 0, y: 50 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border"
-      >
+    <ModalPortal lockScroll={false}>
+      <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+        <div
+          className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+          onClick={closePhoneWarningModal}
+        />
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-sm rounded-t-[2rem] sm:rounded-3xl shadow-2xl p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pb-6 border max-h-[90dvh] overflow-y-auto hide-scrollbar"
+        >
+          <div className="sm:hidden w-10 h-1 bg-slate-400/40 dark:bg-white/20 rounded-full mx-auto -mt-2 mb-4" />
         <div className="text-center mb-6">
-          <div className="w-14 h-14 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3.5">
-            <Phone className="w-7 h-7 text-amber-600 dark:text-amber-400" />
+          <div className="w-14 h-14 bg-amber-500/10 border border-amber-500/20 rounded-full flex items-center justify-center mx-auto mb-3.5">
+            <Phone className="w-6 h-6 text-amber-600 dark:text-amber-400 stroke-[1.5]" />
           </div>
-          <h3 className="text-base font-extrabold text-amber-600 dark:text-amber-400 mb-1.5">
+          <h3 className="font-display text-lg font-bold text-amber-600 dark:text-amber-400 mb-1.5">
             {lang === 'bn' ? 'মোবাইল নম্বর নেই' : 'No Phone Number'}
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
@@ -3487,8 +4064,8 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               : 'Please add/link a phone number to this customer profile first to send WhatsApp reminders.'}
           </p>
           
-          <div className="surface-subcard border rounded-xl p-3.5 text-left mt-4 flex justify-between items-baseline">
-            <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{lang === 'bn' ? 'গ্রাহক' : 'Customer'}</span>
+          <div className="surface-subcard border border-slate-200/70 dark:border-white/[0.08] rounded-2xl p-4 text-left mt-4 flex justify-between items-baseline">
+            <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>{lang === 'bn' ? 'গ্রাহক' : 'Customer'}</span>
             <span className="text-sm font-bold text-slate-900 dark:text-white truncate max-w-[200px]">{phoneWarningCustomer.name}</span>
           </div>
         </div>
@@ -3516,7 +4093,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 if (phoneInput) phoneInput.focus();
               }, 150);
             }}
-            className="w-full py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-xl border-2 border-slate-950 dark:border-white cursor-pointer text-xs transition-colors"
+            className="w-full py-3 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-full cursor-pointer text-xs transition-colors touch-press"
           >
             {lang === 'bn' ? 'মোবাইল নম্বর যুক্ত করুন' : 'Add Phone Number'}
           </button>
@@ -3527,38 +4104,40 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 window.history.back();
               }
             }}
-            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer text-xs transition-colors"
+            className="w-full py-3 bg-slate-100/90 hover:bg-slate-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-800 dark:text-slate-200 font-bold rounded-full border border-slate-200/80 dark:border-white/[0.08] cursor-pointer text-xs transition-colors touch-press"
           >
             {lang === 'bn' ? 'বাতিল' : 'Cancel'}
           </button>
         </div>
-      </motion.div>
-    </div>
+      </div>
+      </div>
+    </ModalPortal>
   )}
 
   {/* Pin Action Modal */}
   {pinActionCustomer && (
-    <div 
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md animate-in fade-in duration-200"
-      onClick={closePinActionModal}
-    >
-      <motion.div
-        onClick={(e) => e.stopPropagation()}
-        initial={{ opacity: 0, y: 50 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border"
-      >
+    <ModalPortal lockScroll={false}>
+      <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+        <div
+          className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+          onClick={closePinActionModal}
+        />
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-sm rounded-t-[2rem] sm:rounded-3xl shadow-2xl p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pb-6 border max-h-[90dvh] overflow-y-auto hide-scrollbar"
+        >
+          <div className="sm:hidden w-10 h-1 bg-slate-400/40 dark:bg-white/20 rounded-full mx-auto -mt-2 mb-4" />
         <div className="text-center mb-6">
-          <div className="w-14 h-14 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3.5">
-            <Pin className={`w-7 h-7 text-amber-500 ${pinnedCustomerNames.includes(pinActionCustomer.name) ? 'rotate-45 fill-amber-500' : ''}`} />
+          <div className="w-14 h-14 bg-amber-500/10 border border-amber-500/20 rounded-full flex items-center justify-center mx-auto mb-3.5">
+            <Pin className={`w-6 h-6 text-amber-500 stroke-[1.5] ${pinnedCustomerNameSet.has(pinActionCustomer.name) ? 'rotate-45 fill-amber-500' : ''}`} />
           </div>
-          <h3 className="text-base font-extrabold text-slate-950 dark:text-white mb-1.5">
-            {pinnedCustomerNames.includes(pinActionCustomer.name) 
+          <h3 className="font-display text-lg font-bold text-slate-950 dark:text-white mb-1.5">
+            {pinnedCustomerNameSet.has(pinActionCustomer.name) 
               ? (lang === 'bn' ? 'গ্রাহক আনপিন করুন' : 'Unpin Customer') 
               : (lang === 'bn' ? 'গ্রাহক পিন করুন' : 'Pin Customer')}
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            {pinnedCustomerNames.includes(pinActionCustomer.name)
+            {pinnedCustomerNameSet.has(pinActionCustomer.name)
               ? (lang === 'bn' 
                   ? `আপনি কি নিশ্চিত ${pinActionCustomer.name}-কে তালিকা থেকে আনপিন করতে চান?` 
                   : `Are you sure you want to unpin ${pinActionCustomer.name} from the top?`)
@@ -3578,9 +4157,9 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 window.history.back();
               }
             }}
-            className="w-full py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-xl border-2 border-slate-950 dark:border-white cursor-pointer text-xs transition-colors"
+            className="w-full py-3 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-full cursor-pointer text-xs transition-colors touch-press"
           >
-            {pinnedCustomerNames.includes(pinActionCustomer.name)
+            {pinnedCustomerNameSet.has(pinActionCustomer.name)
               ? (lang === 'bn' ? 'হ্যাঁ, আনপিন করুন' : 'Yes, Unpin')
               : (lang === 'bn' ? 'হ্যাঁ, পিন করুন' : 'Yes, Pin to top')}
           </button>
@@ -3592,32 +4171,34 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 window.history.back();
               }
             }}
-            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer text-xs transition-colors"
+            className="w-full py-3 bg-slate-100/90 hover:bg-slate-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-800 dark:text-slate-200 font-bold rounded-full border border-slate-200/80 dark:border-white/[0.08] cursor-pointer text-xs transition-colors touch-press"
           >
             {lang === 'bn' ? 'বাতিল' : 'Cancel'}
           </button>
         </div>
-      </motion.div>
-    </div>
+      </div>
+      </div>
+    </ModalPortal>
   )}
 
   {/* Delete Customer Account Modal */}
   {deletingCustomer && (
-    <div 
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
-      onClick={closeDeleteCustomerModal}
-    >
-      <motion.div
-        onClick={(e) => e.stopPropagation()}
-        initial={{ opacity: 0, y: 50 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border"
-      >
+    <ModalPortal lockScroll={false}>
+      <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+        <div
+          className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+          onClick={closeDeleteCustomerModal}
+        />
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-sm rounded-t-[2rem] sm:rounded-3xl shadow-2xl p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pb-6 border max-h-[90dvh] overflow-y-auto hide-scrollbar"
+        >
+          <div className="sm:hidden w-10 h-1 bg-slate-400/40 dark:bg-white/20 rounded-full mx-auto -mt-2 mb-4" />
         <div className="text-center mb-6">
-          <div className="w-14 h-14 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3.5">
-            <AlertTriangle className="w-7 h-7 text-rose-600 dark:text-rose-400" />
+          <div className="w-14 h-14 bg-rose-500/10 border border-rose-500/20 rounded-full flex items-center justify-center mx-auto mb-3.5">
+            <AlertTriangle className="w-6 h-6 text-rose-600 dark:text-rose-400 stroke-[1.5]" />
           </div>
-          <h3 className="text-base font-extrabold text-rose-600 dark:text-rose-400 mb-1.5">
+          <h3 className="font-display text-lg font-bold text-rose-600 dark:text-rose-400 mb-1.5">
             {lang === 'bn' ? 'গ্রাহক অ্যাকাউন্ট ট্র্যাশে সরান' : 'Move Customer to Trash'}
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
@@ -3627,19 +4208,19 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           </p>
           
           {/* Details Card showing customer name, phone, and outstanding balance */}
-          <div className="surface-subcard border rounded-xl p-3.5 text-left space-y-2 mt-4">
+          <div className="surface-subcard border border-slate-200/70 dark:border-white/[0.08] rounded-2xl p-4 text-left space-y-2.5 mt-4">
             <div className="flex justify-between items-baseline">
-              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{lang === 'bn' ? 'নাম' : 'Name'}</span>
+              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>{lang === 'bn' ? 'নাম' : 'Name'}</span>
               <span className="text-sm font-bold text-slate-900 dark:text-white truncate max-w-[200px]">{deletingCustomer.name}</span>
             </div>
             {deletingCustomer.phone && (
               <div className="flex justify-between items-baseline">
-                <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{lang === 'bn' ? 'মোবাইল' : 'Mobile'}</span>
+                <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>{lang === 'bn' ? 'মোবাইল' : 'Mobile'}</span>
                 <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300">{deletingCustomer.phone}</span>
               </div>
             )}
             <div className="flex justify-between items-baseline">
-              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{lang === 'bn' ? 'বর্তমান ব্যালেন্স' : 'Current Balance'}</span>
+              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>{lang === 'bn' ? 'বর্তমান ব্যালেন্স' : 'Current Balance'}</span>
               <span className={`text-sm font-black font-mono ${
                 deletingCustomer.outstandingDue > 0
                   ? 'text-rose-600 dark:text-rose-400'
@@ -3667,7 +4248,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               setSelectedCustomerId(null);
               toast.info(lang === 'bn' ? 'গ্রাহক ট্র্যাশে স্থানান্তরিত হয়েছে' : 'Customer account moved to trash');
             }}
-            className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent cursor-pointer text-xs transition-colors"
+            className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-full cursor-pointer text-xs transition-colors touch-press"
           >
             {lang === 'bn' ? 'হ্যাঁ, ট্র্যাশে পাঠান' : 'Yes, Trash'}
           </button>
@@ -3678,27 +4259,33 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 window.history.back();
               }
             }}
-            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer text-xs transition-colors"
+            className="w-full py-3 bg-slate-100/90 hover:bg-slate-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-800 dark:text-slate-200 font-bold rounded-full border border-slate-200/80 dark:border-white/[0.08] cursor-pointer text-xs transition-colors touch-press"
           >
             {lang === 'bn' ? 'বাতিল' : 'Cancel'}
           </button>
         </div>
-      </motion.div>
-    </div>
+      </div>
+      </div>
+    </ModalPortal>
   )}
   {/* Duplicate Entry Warning Modal */}
   {duplicateTxWarning && (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md">
-      <motion.div
-        initial={{ opacity: 0, y: 50 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-6 border"
-      >
+    <ModalPortal lockScroll={false}>
+      <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+        <div
+          className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+          onClick={() => setDuplicateTxWarning(null)}
+        />
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-sm rounded-t-[2rem] sm:rounded-3xl shadow-2xl p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pb-6 border max-h-[90dvh] overflow-y-auto hide-scrollbar"
+        >
+          <div className="sm:hidden w-10 h-1 bg-slate-400/40 dark:bg-white/20 rounded-full mx-auto -mt-2 mb-4" />
         <div className="text-center mb-6">
-          <div className="w-14 h-14 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3.5">
-            <AlertTriangle className="w-7 h-7 text-amber-600 dark:text-amber-400" />
+          <div className="w-14 h-14 bg-amber-500/10 border border-amber-500/20 rounded-full flex items-center justify-center mx-auto mb-3.5">
+            <AlertTriangle className="w-6 h-6 text-amber-600 dark:text-amber-400 stroke-[1.5]" />
           </div>
-          <h3 className="text-base font-extrabold text-amber-600 dark:text-amber-400 mb-1.5">
+          <h3 className="font-display text-lg font-bold text-amber-600 dark:text-amber-400 mb-1.5">
             {t.duplicateWarningTitle}
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
@@ -3706,19 +4293,19 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           </p>
           
           {/* Details Card */}
-          <div className="surface-subcard border rounded-xl p-3.5 text-left space-y-2 mt-4">
+          <div className="surface-subcard border border-slate-200/70 dark:border-white/[0.08] rounded-2xl p-4 text-left space-y-2.5 mt-4">
             <div className="flex justify-between items-baseline">
-              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{t.type}</span>
-              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${
+              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>{t.type}</span>
+              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
                 duplicateTxWarning.type === 'due' 
-                  ? 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400 border-rose-200 dark:border-rose-800' 
-                  : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800'
+                  ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20' 
+                  : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
               }`}>
                 {duplicateTxWarning.type === 'due' ? t.duePlus : t.paymentMinus}
               </span>
             </div>
             <div className="flex justify-between items-baseline">
-              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>{t.amount}</span>
+              <span className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>{t.amount}</span>
               <span className={`text-sm font-black font-mono ${
                 duplicateTxWarning.type === 'due' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
               }`}>
@@ -3736,7 +4323,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               }
               setDuplicateTxWarning(null);
             }}
-            className="w-full py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-xl border-2 border-slate-950 dark:border-white cursor-pointer text-xs transition-colors"
+            className="w-full py-3 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-full cursor-pointer text-xs transition-colors touch-press"
           >
             {t.viewExistingEntry}
           </button>
@@ -3747,7 +4334,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               setDuplicateTxWarning(null);
               await executeInlineTransaction(true);
             }}
-            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer text-xs transition-colors"
+            className="w-full py-3 bg-slate-100/90 hover:bg-slate-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-800 dark:text-slate-200 font-bold rounded-full border border-slate-200/80 dark:border-white/[0.08] cursor-pointer text-xs transition-colors touch-press"
           >
             {t.addAnyway}
           </button>
@@ -3756,99 +4343,148 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             onClick={() => {
               setDuplicateTxWarning(null);
             }}
-            className="w-full py-2.5 bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 font-bold rounded-xl text-xs cursor-pointer transition-colors"
+            className="w-full py-3 bg-transparent hover:bg-slate-100/60 dark:hover:bg-white/[0.05] text-slate-500 dark:text-slate-400 font-bold rounded-full text-xs cursor-pointer transition-colors touch-press"
           >
             {t.cancel}
           </button>
         </div>
-      </motion.div>
-    </div>
+      </div>
+      </div>
+    </ModalPortal>
   )}
 
-  {/* RECEIPT IMAGE PREVIEW MODAL */}
+  {/* RECEIPT / STATEMENT PREVIEW MODAL */}
   {receiptResult && (
-    <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 dark:bg-black/80 backdrop-blur-md animate-in fade-in duration-150"
-      onClick={closeReceiptModal}
-    >
-      <motion.div
-        onClick={(e) => e.stopPropagation()}
-        initial={{ opacity: 0, scale: 0.96, y: 16 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="glass-modal w-full max-w-sm sm:max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] border"
-      >
-        {/* Modal Header */}
-        <div className="p-3.5 px-5 border-b border-slate-200/70 dark:border-white/[0.08] flex items-center justify-between bg-slate-50/50 dark:bg-white/[0.02]">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/80 shrink-0">
-              <ReceiptText className="w-4 h-4" />
+    <ModalPortal lockScroll={false}>
+      <div className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-4 no-select overflow-hidden">
+        <div
+          className="absolute inset-0 bg-slate-950/65 dark:bg-black/80 animate-backdrop-blur"
+          onClick={closeReceiptModal}
+        />
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="animate-slide-up relative z-10 glass-modal w-full max-w-sm sm:max-w-md rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90dvh] border"
+        >
+          {/* Modal Header */}
+          <div className="p-4 px-5 border-b border-slate-900/[0.06] dark:border-white/[0.06] flex items-center justify-between bg-slate-900/[0.02] dark:bg-white/[0.02] shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center justify-center shrink-0">
+                {receiptResult.kind === 'pdf' ? (
+                  <FileText className="w-4 h-4 stroke-[1.5]" />
+                ) : (
+                  <ReceiptText className="w-4 h-4 stroke-[1.5]" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <h3 className="font-display font-bold text-sm text-slate-950 dark:text-white truncate">
+                  {receiptResult.kind === 'pdf'
+                    ? (lang === 'bn' ? 'বিল্ড কার্ড স্টেটমেন্ট (PDF)' : 'Billed Card Statement (PDF)')
+                    : (lang === 'bn' ? 'ডিজিটাল রসিদ স্লিপ' : 'Digital Receipt Slip')}
+                </h3>
+                <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400 truncate">
+                  {receiptResult.fileName}
+                </p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <h3 className="font-extrabold text-sm text-slate-950 dark:text-white truncate">
-                {lang === 'bn' ? 'ডিজিটাল রসিদ স্লিপ' : 'Digital Receipt Slip'}
-              </h3>
-              <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400 truncate">
-                {receiptResult.fileName}
-              </p>
+            <button
+              type="button"
+              onClick={closeReceiptModal}
+              className="w-8 h-8 rounded-full bg-slate-100/80 hover:bg-slate-200 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] border border-slate-200/70 dark:border-white/[0.08] text-slate-500 dark:text-slate-300 transition-colors cursor-pointer shrink-0 ml-2 flex items-center justify-center touch-press"
+            >
+              <X className="w-4 h-4 stroke-[1.5]" />
+            </button>
+          </div>
+
+          {/* Preview Container */}
+          {receiptResult.kind === 'pdf' ? (
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 bg-slate-100 dark:bg-[#07090E] flex flex-col items-center gap-3 hide-scrollbar transition-colors">
+              {receiptResult.previewPages.map((pageUrl, pageIdx) => (
+                <div
+                  key={pageIdx}
+                  className="w-full max-w-[330px] bg-white rounded-lg overflow-hidden border border-slate-200 dark:border-white/10 shadow-[0_12px_26px_-6px_rgba(15,23,42,0.16)] dark:shadow-[0_20px_32px_-6px_rgba(0,0,0,0.75)] will-change-transform"
+                  style={{ transform: 'translate3d(0, 0, 0)' }}
+                >
+                  <img
+                    src={pageUrl}
+                    alt={`Statement Page ${pageIdx + 1}`}
+                    decoding="async"
+                    className="w-full h-auto block select-none"
+                  />
+                </div>
+              ))}
             </div>
-          </div>
-          <button
-            type="button"
-            onClick={closeReceiptModal}
-            className="p-1.5 rounded-lg border-2 border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 transition-colors cursor-pointer shrink-0 ml-2"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+          ) : (
+            <div className="flex-1 min-h-0 overflow-y-auto p-5 sm:p-6 bg-white dark:bg-[#07090E] bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] dark:bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:14px_14px] flex justify-center items-start hide-scrollbar transition-colors">
+              <div
+                className="max-w-[272px] sm:max-w-[290px] w-full shadow-[0_14px_28px_-6px_rgba(15,23,42,0.16)] dark:shadow-[0_22px_34px_-6px_rgba(0,0,0,0.78)] will-change-transform"
+                style={{ transform: 'translate3d(0, 0, 0)' }}
+              >
+                <img 
+                  src={receiptResult.dataUrl} 
+                  alt="Customer Receipt" 
+                  decoding="async"
+                  className="w-full h-auto block select-none"
+                />
+              </div>
+            </div>
+          )}
 
-        {/* Image Preview Container with subtle studio grid backdrop (White in Light Mode, Dark in Dark Mode) */}
-        <div className="flex-1 overflow-y-auto p-5 sm:p-6 bg-white dark:bg-[#07090E] bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] dark:bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:14px_14px] flex justify-center items-start hide-scrollbar transition-colors">
-          <div className="max-w-[272px] sm:max-w-[290px] w-full filter drop-shadow-[0_12px_24px_rgba(15,23,42,0.14)] dark:drop-shadow-[0_22px_30px_rgba(0,0,0,0.75)] transition-transform">
-            <img 
-              src={receiptResult.dataUrl} 
-              alt="Customer Receipt" 
-              className="w-full h-auto block select-none"
-            />
-          </div>
-        </div>
-
-        {/* Actions Footer */}
-        <div className="p-4 border-t border-slate-200/70 dark:border-white/[0.08] bg-white/60 dark:bg-white/[0.02] space-y-2">
+          {/* Actions Footer */}
+          <div className="p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:pb-4 border-t border-slate-900/[0.06] dark:border-white/[0.06] bg-white/60 dark:bg-white/[0.02] space-y-2 shrink-0">
           <div className="flex gap-2">
             <button
               type="button"
               onClick={() => {
                 triggerHaptic('double');
-                downloadReceiptImage(receiptResult.dataUrl, receiptResult.fileName);
-                showNotification(lang === 'bn' ? 'রসিদ ডাউনলোড সম্পন্ন' : 'Receipt Downloaded', {
-                  body: lang === 'bn' ? `${receiptResult.fileName} সফলভাবে ডাউনলোড হয়েছে` : `${receiptResult.fileName} downloaded successfully.`,
-                  icon: '/icon-192.png'
-                });
-                toast.success(lang === 'bn' ? 'রসিদ ইমেজ ডাউনলোড সম্পন্ন হয়েছে' : 'Receipt downloaded successfully');
+                if (receiptResult.kind === 'pdf') {
+                  downloadReceiptPdf(receiptResult.blob, receiptResult.fileName);
+                  showNotification(lang === 'bn' ? 'স্টেটমেন্ট PDF ডাউনলোড সম্পন্ন' : 'Statement PDF Downloaded', {
+                    body: lang === 'bn' ? `${receiptResult.fileName} সফলভাবে ডাউনলোড হয়েছে` : `${receiptResult.fileName} downloaded successfully.`,
+                    icon: '/icon-192.png'
+                  });
+                  toast.success(lang === 'bn' ? 'PDF স্টেটমেন্ট ডাউনলোড সম্পন্ন হয়েছে' : 'Statement PDF downloaded successfully');
+                } else {
+                  downloadReceiptImage(receiptResult.dataUrl, receiptResult.fileName);
+                  showNotification(lang === 'bn' ? 'রসিদ ডাউনলোড সম্পন্ন' : 'Receipt Downloaded', {
+                    body: lang === 'bn' ? `${receiptResult.fileName} সফলভাবে ডাউনলোড হয়েছে` : `${receiptResult.fileName} downloaded successfully.`,
+                    icon: '/icon-192.png'
+                  });
+                  toast.success(lang === 'bn' ? 'রসিদ ইমেজ ডাউনলোড সম্পন্ন হয়েছে' : 'Receipt downloaded successfully');
+                }
               }}
-              className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl border-2 border-transparent text-xs flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer active:scale-[0.98]"
+              className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-full text-xs flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer touch-press"
             >
-              <Download className="w-4 h-4" />
-              <span>{lang === 'bn' ? 'ডাউনলোড PNG' : 'Download PNG'}</span>
+              <Download className="w-4 h-4 stroke-[1.5]" />
+              <span>
+                {receiptResult.kind === 'pdf'
+                  ? (lang === 'bn' ? 'ডাউনলোড PDF' : 'Download PDF')
+                  : (lang === 'bn' ? 'ডাউনলোড PNG' : 'Download PNG')}
+              </span>
             </button>
 
             <button
               type="button"
               onClick={async () => {
                 triggerHaptic('single');
-                const success = await copyReceiptImage(receiptResult.blob);
+                const success = receiptResult.kind === 'pdf'
+                  ? await copyPlainTextReceipt(receiptResult.plainTextSummary)
+                  : await copyReceiptImage(receiptResult.blob);
                 if (success) {
                   setIsCopiedReceipt(true);
-                  toast.success(lang === 'bn' ? 'ছবি ক্লিপবোর্ডে কপি হয়েছে (হোয়াটসঅ্যাপে পেস্ট করুন)' : 'Image copied to clipboard');
+                  toast.success(
+                    receiptResult.kind === 'pdf'
+                      ? (lang === 'bn' ? 'স্টেটমেন্ট টেক্সট ক্লিপবোর্ডে কপি হয়েছে' : 'Statement text copied to clipboard')
+                      : (lang === 'bn' ? 'ছবি ক্লিপবোর্ডে কপি হয়েছে (হোয়াটসঅ্যাপে পেস্ট করুন)' : 'Image copied to clipboard')
+                  );
                   setTimeout(() => setIsCopiedReceipt(false), 2500);
                 } else {
                   toast.error(lang === 'bn' ? 'কপি সমর্থিত নয়, ডাউনলোড বাটন ব্যবহার করুন' : 'Copy not supported on this browser');
                 }
               }}
-              className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-[0.98]"
-              title={lang === 'bn' ? 'ক্লিপবোর্ডে কপি করুন' : 'Copy Image'}
+              className="px-4 py-2.5 bg-slate-100/90 hover:bg-slate-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-800 dark:text-slate-200 font-bold rounded-full border border-slate-200/80 dark:border-white/[0.08] text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer touch-press"
+              title={receiptResult.kind === 'pdf' ? (lang === 'bn' ? 'টেক্সট কপি করুন' : 'Copy Text') : (lang === 'bn' ? 'ক্লিপবোর্ডে কপি করুন' : 'Copy Image')}
             >
-              {isCopiedReceipt ? <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> : <Copy className="w-4 h-4" />}
+              {isCopiedReceipt ? <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 stroke-[1.5]" /> : <Copy className="w-4 h-4 stroke-[1.5]" />}
               <span className="hidden sm:inline">{isCopiedReceipt ? (lang === 'bn' ? 'কপি হয়েছে' : 'Copied!') : (lang === 'bn' ? 'কপি' : 'Copy')}</span>
             </button>
 
@@ -3857,19 +4493,24 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 type="button"
                 onClick={async () => {
                   triggerHaptic('single');
-                  await shareReceiptImage(receiptResult.blob, receiptResult.fileName, selectedCustomer?.name || 'Customer');
+                  if (receiptResult.kind === 'pdf') {
+                    await shareReceiptPdf(receiptResult.blob, receiptResult.fileName, selectedCustomer?.name || 'Customer');
+                  } else {
+                    await shareReceiptImage(receiptResult.blob, receiptResult.fileName, selectedCustomer?.name || 'Customer');
+                  }
                 }}
-                className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-[0.98]"
+                className="px-4 py-2.5 bg-slate-100/90 hover:bg-slate-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-800 dark:text-slate-200 font-bold rounded-full border border-slate-200/80 dark:border-white/[0.08] text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer touch-press"
                 title={lang === 'bn' ? 'শেয়ার করুন' : 'Share'}
               >
-                <Share2 className="w-4 h-4" />
+                <Share2 className="w-4 h-4 stroke-[1.5]" />
                 <span className="hidden sm:inline">{lang === 'bn' ? 'শেয়ার' : 'Share'}</span>
               </button>
             )}
           </div>
         </div>
-      </motion.div>
-    </div>
+      </div>
+      </div>
+    </ModalPortal>
   )}
 
   {/* Modern Contact Phone Selector Modal */}
@@ -3890,44 +4531,49 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
   {/* Client-Specific Statement Merge & Fresh Ledger Modal */}
   {isManageStatementsOpen && selectedCustomer && archiveCustomerExcessStatements && (
-    <div 
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md no-select"
-      onClick={() => { if (!isManualArchiving) setIsManageStatementsOpen(false); }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="animate-slide-up glass-modal w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl border overflow-hidden"
-      >
-
-        {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-slate-200/70 dark:border-white/[0.08] flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-extrabold text-slate-950 dark:text-white">
-              {lang === 'bn' ? 'খতিয়ান স্টেটমেন্ট ব্যবস্থাপনা' : 'Manage Client Ledger'}
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-              {selectedCustomer.name} • {formatNumber(activeCustomerTxCount, lang)} {lang === 'bn' ? 'টি সক্রিয় এন্ট্রি' : 'active entries'}
-            </p>
+    <ModalPortal lockScroll={false}>
+      <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+        <div
+          className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+          onClick={() => { if (!isManualArchiving) closeManageStatementsModal(); }}
+        />
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-md rounded-t-[2rem] sm:rounded-3xl shadow-2xl border overflow-hidden max-h-[90dvh] flex flex-col"
+        >
+          <div className="sm:hidden pt-3 flex justify-center shrink-0">
+            <div className="w-10 h-1 bg-slate-400/40 dark:bg-white/20 rounded-full mx-auto" />
           </div>
-          <button
-            type="button"
-            disabled={isManualArchiving}
-            onClick={() => {
-              triggerHaptic('medium');
-              setIsManageStatementsOpen(false);
-            }}
-            className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 cursor-pointer transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
 
-        <div className="p-5 space-y-5 max-h-[80vh] overflow-y-auto hide-scrollbar">
+          {/* Header */}
+          <div className="p-4 sm:p-5 border-b border-slate-900/[0.06] dark:border-white/[0.06] flex items-center justify-between shrink-0">
+            <div>
+              <h3 className="font-display text-lg font-bold text-slate-950 dark:text-white">
+                {lang === 'bn' ? 'খতিয়ান স্টেটমেন্ট ব্যবস্থাপনা' : 'Manage Client Ledger'}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                {selectedCustomer.name} • {formatNumber(activeCustomerTxCount, lang)} {lang === 'bn' ? 'টি সক্রিয় এন্ট্রি' : 'active entries'}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={isManualArchiving}
+              onClick={() => {
+                triggerHaptic('medium');
+                closeManageStatementsModal();
+              }}
+              className="w-8 h-8 bg-slate-100/80 hover:bg-slate-200 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] border border-slate-200/70 dark:border-white/[0.08] rounded-full text-slate-600 dark:text-slate-300 cursor-pointer transition-colors flex items-center justify-center touch-press"
+            >
+              <X className="w-4 h-4 stroke-[1.5]" />
+            </button>
+          </div>
+
+          <div className="flex-1 min-h-0 p-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pb-5 space-y-4 overflow-y-auto hide-scrollbar">
           {/* Option 1: Keep Last N Entries (Manual Merge) */}
-          <div className="p-4 rounded-xl surface-subcard border space-y-3.5">
+          <div className="p-4 rounded-2xl surface-subcard border border-slate-200/70 dark:border-white/[0.08] space-y-3.5">
             <div className="space-y-1">
-              <h4 className={`text-xs font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
-                <Archive className="w-3.5 h-3.5" />
+              <h4 className={`text-xs font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>
+                <Archive className="w-3.5 h-3.5 stroke-[1.5]" />
                 <span>{lang === 'bn' ? 'নির্দিষ্ট সংখ্যক এন্ট্রি রেখে বাকিগুলো মার্জ করুন' : 'Merge & Keep Recent Entries'}</span>
               </h4>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
@@ -3937,7 +4583,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               </p>
             </div>
 
-            {/* Borderless + / - Stepper (No input field or squared border) + Merge Action */}
+            {/* Borderless + / - Stepper + Merge Action */}
             <div className="flex items-center justify-between gap-3 pt-1">
               <div className="inline-flex items-center gap-2 shrink-0 select-none">
                 <button
@@ -3945,29 +4591,29 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                   disabled={isManualArchiving}
                   onClick={() => {
                     triggerHaptic('tick');
-                    const cur = parseInt(manualKeepCountInput, 10) || 15;
-                    setManualKeepCountInput(String(Math.max(1, cur - 5)));
+                    const cur = snapKeepCountToFive(manualKeepCountInput, 15);
+                    setManualKeepCountInput(String(Math.max(5, cur - 5)));
                   }}
-                  className="w-8 h-8 rounded-full bg-slate-200/80 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 active:scale-90 transition-all cursor-pointer disabled:opacity-40"
+                  className="w-8 h-8 rounded-full bg-slate-200/80 hover:bg-slate-300 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] flex items-center justify-center text-slate-700 dark:text-slate-200 active:scale-90 transition-all cursor-pointer disabled:opacity-40"
                   aria-label="Decrease count"
                 >
-                  <Minus className="w-3.5 h-3.5 stroke-[2.5]" />
+                  <Minus className="w-3.5 h-3.5 stroke-[1.5]" />
                 </button>
                 <span className="min-w-[2.25rem] text-center text-base font-mono font-black text-slate-950 dark:text-white tabular-nums">
-                  {formatNumber(parseInt(manualKeepCountInput, 10) || 15, lang)}
+                  {formatNumber(snapKeepCountToFive(manualKeepCountInput, 15), lang)}
                 </span>
                 <button
                   type="button"
                   disabled={isManualArchiving}
                   onClick={() => {
                     triggerHaptic('tick');
-                    const cur = parseInt(manualKeepCountInput, 10) || 15;
+                    const cur = snapKeepCountToFive(manualKeepCountInput, 15);
                     setManualKeepCountInput(String(Math.min(500, cur + 5)));
                   }}
-                  className="w-8 h-8 rounded-full bg-slate-200/80 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 active:scale-90 transition-all cursor-pointer disabled:opacity-40"
+                  className="w-8 h-8 rounded-full bg-slate-200/80 hover:bg-slate-300 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] flex items-center justify-center text-slate-700 dark:text-slate-200 active:scale-90 transition-all cursor-pointer disabled:opacity-40"
                   aria-label="Increase count"
                 >
-                  <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                  <Plus className="w-3.5 h-3.5 stroke-[1.5]" />
                 </button>
               </div>
 
@@ -3975,7 +4621,8 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 type="button"
                 disabled={isManualArchiving}
                 onClick={async () => {
-                  const keepCount = Math.max(1, parseInt(manualKeepCountInput, 10) || 15);
+                  const keepCount = snapKeepCountToFive(manualKeepCountInput, 15);
+                  setManualKeepCountInput(String(keepCount));
                   if (activeCustomerTxCount <= keepCount) {
                     toast.info(
                       lang === 'bn'
@@ -3993,14 +4640,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                         ? `${formatNumber(count, lang)}টি পুরনো এন্ট্রি সফলভাবে আর্কাইভ করা হয়েছে`
                         : `Archived ${count} older entries (kept latest ${keepCount})`
                     );
-                    setIsManageStatementsOpen(false);
+                    closeManageStatementsModal();
                   } catch {
                     toast.error(lang === 'bn' ? 'মার্জ করতে সমস্যা হয়েছে' : 'Failed to merge entries');
                   } finally {
                     setIsManualArchiving(false);
                   }
                 }}
-                className="flex-1 py-2.5 px-3 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold text-xs rounded-xl border-2 border-slate-950 dark:border-white cursor-pointer transition-all active:scale-[0.98] disabled:opacity-60"
+                className="flex-1 py-2.5 px-4 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold text-xs rounded-full cursor-pointer transition-all touch-press disabled:opacity-60"
               >
                 {isManualArchiving
                   ? (lang === 'bn' ? 'প্রসেস হচ্ছে...' : 'Merging...')
@@ -4010,10 +4657,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           </div>
 
           {/* Option 2: Start Fresh Ledger after a settlement (download previous entries in background) */}
-          <div className="p-4 rounded-xl surface-subcard border space-y-3">
+          <div className="p-4 rounded-2xl surface-subcard border border-slate-200/70 dark:border-white/[0.08] space-y-3">
             <div className="space-y-1">
-              <h4 className={`text-xs font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
-                <RotateCcw className="w-3.5 h-3.5" />
+              <h4 className={`text-xs font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>
+                <RotateCcw className="w-3.5 h-3.5 stroke-[1.5]" />
                 <span>{lang === 'bn' ? 'হিসাব নিষ্পত্তির পর নতুন খতিয়ান শুরু করুন' : 'Start Fresh Ledger (Post-Settlement)'}</span>
               </h4>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
@@ -4059,62 +4706,68 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                       ? `নতুন খতিয়ান শুরু হয়েছে (${formatNumber(count, lang)}টি এন্ট্রি ডাউনলোড ও আর্কাইভ হয়েছে)`
                       : `Started fresh ledger (${count} entries downloaded & archived)`
                   );
-                  setIsManageStatementsOpen(false);
+                  closeManageStatementsModal();
                 } catch {
                   toast.error(lang === 'bn' ? 'নতুন খতিয়ান শুরু করতে সমস্যা হয়েছে' : 'Failed to start fresh ledger');
                 } finally {
                   setIsManualArchiving(false);
                 }
               }}
-              className="w-full py-2.5 px-4 bg-white hover:bg-slate-100 dark:bg-[#0D121D] dark:hover:bg-slate-800 text-slate-900 dark:text-white font-bold text-xs rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer transition-all flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50"
+              className="w-full py-2.5 px-4 bg-slate-100/90 hover:bg-slate-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-900 dark:text-white font-bold text-xs rounded-full border border-slate-200/80 dark:border-white/[0.08] cursor-pointer transition-all flex items-center justify-center gap-2 touch-press disabled:opacity-50"
             >
-              <Download className="w-3.5 h-3.5" />
+              <Download className="w-3.5 h-3.5 stroke-[1.5]" />
               <span>{lang === 'bn' ? 'পূর্বের হিসাব ডাউনলোড করে নতুন খতিয়ান শুরু করুন' : 'Download History & Start Fresh Ledger'}</span>
             </button>
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </ModalPortal>
   )}
 
   {/* Transaction Audit History Log Modal */}
   {auditLogTx && (
-    <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md no-select"
-      onClick={() => setAuditLogTx(null)}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="animate-slide-up glass-modal w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl border overflow-hidden flex flex-col max-h-[85vh]"
-      >
-        <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-              <History className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="text-base font-extrabold text-slate-950 dark:text-white">
-                {lang === 'bn' ? 'লেনদেনের পরিবর্তনের ইতিহাস (Audit Log)' : 'Transaction Audit History'}
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                {lang === 'bn' ? 'প্রতিটি পরিবর্তনের রেকর্ড ও বিবরণ' : 'Complete record of revisions made'}
-              </p>
-            </div>
+    <ModalPortal lockScroll={false}>
+      <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+        <div
+          className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+          onClick={closeAuditLogModal}
+        />
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-md rounded-t-[2rem] sm:rounded-3xl shadow-2xl border overflow-hidden flex flex-col max-h-[90dvh]"
+        >
+          <div className="sm:hidden pt-3 flex justify-center shrink-0">
+            <div className="w-10 h-1 bg-slate-400/40 dark:bg-white/20 rounded-full mx-auto" />
           </div>
-          <button
-            type="button"
-            onClick={() => setAuditLogTx(null)}
-            className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 cursor-pointer transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+          <div className="p-4 sm:p-5 border-b border-slate-900/[0.06] dark:border-white/[0.06] flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-slate-100/80 dark:bg-white/[0.06] border border-slate-200/70 dark:border-white/[0.08] text-slate-700 dark:text-slate-300 flex items-center justify-center shrink-0">
+                <History className="w-4 h-4 stroke-[1.5]" />
+              </div>
+              <div>
+                <h3 className="font-display text-base font-bold text-slate-950 dark:text-white">
+                  {lang === 'bn' ? 'লেনদেনের পরিবর্তনের ইতিহাস (Audit Log)' : 'Transaction Audit History'}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {lang === 'bn' ? 'প্রতিটি পরিবর্তনের রেকর্ড ও বিবরণ' : 'Complete record of revisions made'}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={closeAuditLogModal}
+              className="w-8 h-8 bg-slate-100/80 hover:bg-slate-200 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] border border-slate-200/70 dark:border-white/[0.08] rounded-full text-slate-600 dark:text-slate-300 cursor-pointer transition-colors flex items-center justify-center touch-press"
+            >
+              <X className="w-4 h-4 stroke-[1.5]" />
+            </button>
+          </div>
 
-        <div className="p-5 overflow-y-auto space-y-4">
+          <div className="flex-1 min-h-0 p-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pb-5 overflow-y-auto hide-scrollbar space-y-4">
           {/* Current Version */}
-          <div className="p-3.5 rounded-xl border-2 border-emerald-500/50 bg-emerald-50/50 dark:bg-emerald-950/20 space-y-1">
+          <div className="p-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 space-y-1">
             <div className="flex items-center justify-between">
-              <span className={`text-[11px] font-extrabold text-emerald-700 dark:text-emerald-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
+              <span className={`text-[11px] font-extrabold text-emerald-700 dark:text-emerald-400 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>
                 {lang === 'bn' ? 'বর্তমান সক্রিয় হিসাব' : 'Current Active Record'}
               </span>
               <span className="text-xs font-mono font-bold text-emerald-700 dark:text-emerald-400">
@@ -4127,7 +4780,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             {auditLogTx.editedAt && (
               <div className="text-[11px] text-slate-500 dark:text-slate-400">
                 {lang === 'bn' ? 'সর্বশেষ সম্পাদনা: ' : 'Last edited: '}
-                {new Date(auditLogTx.editedAt).toLocaleString(lang === 'bn' ? 'bn-BD' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' })}
+                {(lang === 'bn' ? LEDGER_AUDIT_FMT_BN : LEDGER_AUDIT_FMT_EN).format(parseFirestoreDate(auditLogTx.editedAt))}
               </div>
             )}
           </div>
@@ -4135,7 +4788,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           {/* Past Audit History */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <h4 className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'uppercase tracking-wider'}`}>
+              <h4 className={`text-xs font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>
                 {lang === 'bn' ? 'পূর্ববর্তী সংস্করণসমূহ' : 'Prior Revisions'}
               </h4>
               {auditLogTx.auditHistory && auditLogTx.auditHistory.length > 0 && (
@@ -4147,8 +4800,8 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
             {/* Inform user if maximum 5 revisions limit is reached */}
             {auditLogTx.auditHistory && auditLogTx.auditHistory.length >= 5 && (
-              <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-800 dark:text-amber-300 font-medium flex items-center gap-2">
-                <Info className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-800 dark:text-amber-300 font-medium flex items-center gap-2">
+                <Info className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400 stroke-[1.5]" />
                 <span>
                   {lang === 'bn' 
                     ? 'সর্বোচ্চ ৫টি পূর্ববর্তী সংস্করণ প্রদর্শিত হচ্ছে। এর আগের কোনো সংস্করণ থাকলে তা স্বয়ংক্রিয়ভাবে মুছে দেওয়া হয়েছে।'
@@ -4159,7 +4812,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             {auditLogTx.auditHistory && auditLogTx.auditHistory.length > 0 ? (
               <div className="space-y-2.5">
                 {auditLogTx.auditHistory.map((item, idx) => (
-                  <div key={idx} className="p-3 rounded-xl border surface-subcard space-y-1">
+                  <div key={idx} className="p-3.5 rounded-2xl border border-slate-200/70 dark:border-white/[0.08] surface-subcard space-y-1">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-bold text-slate-500">
                         {lang === 'bn' ? `সংস্করণ #${auditLogTx.auditHistory!.length - idx}` : `Revision #${auditLogTx.auditHistory!.length - idx}`}
@@ -4174,21 +4827,24 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                       </div>
                     )}
                     <div className="text-[10px] text-slate-400 font-mono">
-                      {new Date(item.editedAt).toLocaleString(lang === 'bn' ? 'bn-BD' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' })}
+                      {(lang === 'bn' ? LEDGER_AUDIT_FMT_BN : LEDGER_AUDIT_FMT_EN).format(parseFirestoreDate(item.editedAt))}
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="p-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-center text-xs text-slate-400">
+              <div className="p-4 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 text-center text-xs text-slate-400">
                 {lang === 'bn' ? 'কোনো পূর্ববর্তী সংস্করণ পাওয়া যায়নি।' : 'No earlier revision entries recorded.'}
               </div>
             )}
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </ModalPortal>
   )}
  </div>
  );
-}
+});
+
+export default CustomerManager;

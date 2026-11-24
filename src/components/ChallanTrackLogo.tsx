@@ -9,32 +9,39 @@ interface ChallanTrackLogoProps {
 }
 
 /**
- * Architectural Private-Banking Folio Mark for Challan Track.
+ * Blended Circular Smoked-Glass & Aurora-Frosted Folio Mark for Challan Track.
+ * Combines sleek high-contrast translucent slate glass with a soft blurred accent aura.
  */
 export const ChallanTrackMark: React.FC<{ size?: number; className?: string }> = ({
   size = 38,
   className = ''
 }) => {
-  const iconSize = Math.max(16, Math.round(size * 0.48));
-  const radius = Math.max(10, Math.round(size * 0.28));
+  const iconSize = Math.max(15, Math.round(size * 0.44));
   return (
     <div
-      className={`relative inline-flex items-center justify-center shrink-0 bg-slate-950 dark:bg-white text-white dark:text-slate-950 font-bold select-none shadow-sm transition-all duration-200 ${className}`}
+      className={`challan-mark-surface relative inline-flex items-center justify-center shrink-0 rounded-full overflow-hidden select-none backdrop-blur-xl border text-white transition-all duration-300 ${className}`}
       style={{
         width: size,
         height: size,
-        borderRadius: `${radius}px`,
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16), 0 4px 12px -4px rgba(15,23,42,0.28)'
       }}
       aria-label="Challan Track"
     >
-      <BookOpen style={{ width: iconSize, height: iconSize }} className="stroke-[2] transition-colors duration-200" />
+      {/* Translucent blurry accent-tinted aurora orb beneath the frosted glass */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-1/4 -left-1/4 w-[85%] h-[85%] rounded-full blur-md opacity-60 dark:opacity-45 transition-colors duration-300"
+        style={{ backgroundColor: 'var(--accent-color, #059669)' }}
+      />
+      <BookOpen
+        style={{ width: iconSize, height: iconSize }}
+        className="relative z-10 text-white stroke-[1.55] dark:stroke-[1.45] drop-shadow-[0_1px_2.5px_rgba(0,0,0,0.28)] dark:drop-shadow-[0_1px_2px_rgba(0,0,0,0.20)]"
+      />
     </div>
   );
 };
 
 /**
- * Refined geometric fintech brand typography for Challan Track.
+ * Editorial typographic proportion split for Challan Track.
  */
 export default function ChallanTrackLogo({
   size = 'md',
@@ -53,20 +60,31 @@ export default function ChallanTrackLogo({
     ? 'text-3xl sm:text-4xl'
     : 'text-4xl sm:text-5xl';
 
+  const markSize =
+    typeof size === 'number'
+      ? size
+      : size === 'xl'
+      ? 48
+      : size === 'lg'
+      ? 42
+      : variant === 'full'
+      ? 38
+      : 34;
+
   if (variant === 'icon') {
-    return <ChallanTrackMark size={typeof size === 'number' ? size : 36} className={className} />;
+    return <ChallanTrackMark size={markSize} className={className} />;
   }
 
   if (variant === 'mark-and-text' || variant === 'full') {
     return (
       <div className={`inline-flex items-center gap-3 select-none ${className}`}>
-        <ChallanTrackMark size={variant === 'full' ? 42 : 36} />
+        <ChallanTrackMark size={markSize} />
         <div className="flex flex-col leading-none">
           <div className={`flex items-baseline font-display ${pixelTextSize}`}>
-            <span className="font-extrabold text-slate-950 dark:text-white tracking-[-0.03em]">
+            <span className="font-extrabold text-slate-950 dark:text-white tracking-[-0.04em]">
               Challan
             </span>
-            <span className="font-medium text-slate-500 dark:text-slate-400 tracking-[-0.015em] ml-1">
+            <span className="font-light text-slate-500 dark:text-slate-400 tracking-[-0.02em] ml-1">
               Track
             </span>
           </div>
@@ -76,12 +94,12 @@ export default function ChallanTrackLogo({
   }
 
   return (
-    <div className={`inline-flex items-baseline gap-1.5 select-none ${className}`}>
+    <div className={`inline-flex items-baseline gap-1 select-none ${className}`}>
       <div className={`flex items-baseline font-display ${pixelTextSize}`}>
-        <span className="font-extrabold text-slate-950 dark:text-white tracking-[-0.03em]">
+        <span className="font-extrabold text-slate-950 dark:text-white tracking-[-0.04em]">
           Challan
         </span>
-        <span className="font-medium text-slate-500 dark:text-slate-400 tracking-[-0.015em] ml-1">
+        <span className="font-light text-slate-500 dark:text-slate-400 tracking-[-0.02em] ml-1">
           Track
         </span>
       </div>

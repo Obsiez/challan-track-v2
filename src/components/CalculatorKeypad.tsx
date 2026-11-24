@@ -890,10 +890,7 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
   const unmarkPressed = (el: HTMLElement) => {
     const existing = pressTimersMapRef.current.get(el);
     if (existing) clearTimeout(existing);
-    const t = setTimeout(() => {
-      el.removeAttribute('data-pressed');
-    }, 45);
-    pressTimersMapRef.current.set(el, t);
+    el.removeAttribute('data-pressed');
   };
 
   const handleOpenDesktopKeypad = (e: React.PointerEvent<HTMLButtonElement> | React.MouseEvent<HTMLButtonElement>) => {
@@ -931,11 +928,11 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
           onPointerUp={(e) => unmarkPressed(e.currentTarget)}
           onPointerLeave={(e) => unmarkPressed(e.currentTarget)}
           onPointerCancel={(e) => unmarkPressed(e.currentTarget)}
-          className="numpad-key numpad-hide-btn px-3.5 py-2 rounded-xl border-2 shadow-lg flex items-center gap-2 text-xs font-bold cursor-pointer transition-transform active:scale-95"
+          className="numpad-key numpad-hide-btn px-4 py-2 rounded-full border backdrop-blur-xl shadow-lg flex items-center gap-2 text-xs font-semibold cursor-pointer transition-transform active:scale-95"
           title={lang === 'bn' ? 'কাস্টম কীপ্যাড খুলুন' : 'Open Custom Keypad'}
           aria-label="Open Custom Keypad"
         >
-          <Calculator className="w-4 h-4 stroke-[2.3]" style={{ color: 'var(--accent-color)' }} />
+          <Calculator className="w-4 h-4 stroke-[1.25]" style={{ color: 'var(--accent-color)' }} />
           <span>{lang === 'bn' ? 'কীপ্যাড' : 'Keypad'}</span>
         </button>
       </div>
@@ -1163,16 +1160,16 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
           onPointerUp={(e) => unmarkPressed(e.currentTarget)}
           onPointerLeave={(e) => unmarkPressed(e.currentTarget)}
           onPointerCancel={(e) => unmarkPressed(e.currentTarget)}
-          className="numpad-key numpad-hide-btn pointer-events-auto touch-none h-8 px-3.5 rounded-full border shadow-md flex items-center gap-1 text-xs font-semibold cursor-pointer"
+          className="numpad-key numpad-hide-btn pointer-events-auto touch-none h-8 px-3.5 rounded-full border shadow-md backdrop-blur-md flex items-center gap-1 text-xs font-semibold cursor-pointer"
           aria-label="Hide Keypad"
         >
-          <ChevronDown className="w-3.5 h-3.5 stroke-[2.5]" style={{ color: 'var(--accent-color)' }} />
+          <ChevronDown className="w-3.5 h-3.5 stroke-[1.25]" style={{ color: 'var(--accent-color)' }} />
           <span>{lang === 'bn' ? 'লুকান' : 'Hide'}</span>
         </button>
       </div>
 
       {/* Main Refined Keypad Body — dynamically styled by Theme Surface Palette, Intensity Slider & Accent Color */}
-      <div className="numpad-surface pointer-events-auto touch-none border-t sm:rounded-t-[28px] sm:border-x shadow-2xl px-3.5 pt-3.5 pb-6">
+      <div className="numpad-surface pointer-events-auto touch-none rounded-t-[2rem] border-t sm:border-x shadow-[0_-12px_40px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.14)] px-3.5 pt-3.5 pb-6">
         <div className="grid grid-cols-4 gap-2">
           {/* ROW 1: 7 8 9 Backspace (Hold to Clear) */}
           {['7', '8', '9'].map((d) => (
@@ -1202,7 +1199,7 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
             className="numpad-key numpad-action h-[58px] rounded-2xl border flex items-center justify-center cursor-pointer"
             aria-label="Backspace (Hold to clear)"
           >
-            <Delete className="w-5 h-5 pointer-events-none" />
+            <Delete className="w-5 h-5 stroke-[1.25] pointer-events-none" />
           </button>
 
           {/* ROW 2: 4 5 6 Clear (C) */}
@@ -1278,7 +1275,7 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
             className="numpad-key numpad-action h-[58px] rounded-2xl border font-semibold text-xs flex flex-col items-center justify-center gap-0.5 cursor-pointer"
             title={lang === 'bn' ? 'পরবর্তী ঘরে যান' : 'Next Input Field'}
           >
-            <ArrowRight className="w-4 h-4 stroke-[2.25] pointer-events-none" />
+            <ArrowRight className="w-4 h-4 stroke-[1.25] pointer-events-none" />
             <span className="text-[11px] font-semibold pointer-events-none">
               {lang === 'bn' ? 'পরবর্তী' : 'Next'}
             </span>
@@ -1341,7 +1338,7 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
             onPointerCancel={(e) => unmarkPressed(e.currentTarget)}
             className="numpad-key numpad-done h-[58px] rounded-2xl border font-semibold text-xs flex items-center justify-center gap-1 cursor-pointer"
           >
-            <Check className="w-4 h-4 stroke-[2.75] pointer-events-none" />
+            <Check className="w-4 h-4 stroke-[1.25] pointer-events-none" />
             <span className="pointer-events-none">{lang === 'bn' ? 'সম্পন্ন' : 'Done'}</span>
           </button>
         </div>

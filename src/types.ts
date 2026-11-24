@@ -41,6 +41,7 @@ export interface Transaction {
   type: 'due' | 'payment';
   amount: number;
   description: string;
+  tag?: string;
   date: any;
   createdAt: any;
   isEdited?: boolean;

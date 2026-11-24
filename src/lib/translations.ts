@@ -5,7 +5,7 @@ export const translations = {
  en: {
  appName: "Challan Track",
  appSubtitle: "Challan Ledger",
- dashboard: "Dashboard",
+ dashboard: "Home",
  clients: "Clients",
  reminders: "Reminders",
  settings: "Settings",
@@ -181,7 +181,7 @@ export const translations = {
  bn: {
  appName: "চালান ট্র্যাক",
  appSubtitle: "সহজ খতিয়ান",
- dashboard: "ড্যাশবোর্ড",
+ dashboard: "হোম",
  clients: "গ্রাহকগণ",
  reminders: "অনুস্মারক",
  settings: "সেটিংস",

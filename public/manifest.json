@@ -1,11 +1,12 @@
 {
   "name": "Challan Track",
   "short_name": "ChallanTrack",
-  "description": "Minimalist due tracking ledger.",
+  "description": "Modern atmospheric ledger for tracking client dues, cash collections, and savings goals.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#09090b",
-  "theme_color": "#09090b",
+  "orientation": "portrait",
+  "background_color": "#070B13",
+  "theme_color": "#070B13",
   "icons": [
     {
       "src": "/favicon.svg",

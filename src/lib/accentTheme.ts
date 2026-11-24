@@ -499,11 +499,121 @@ export function applyThemePalette(paletteId: string, intensityOverride?: number)
   );
 }
 
-// Initialize theme variables immediately in browser context
+// =========================================================================
+// BACKGROUND TEXTURE ENGINE (Type, Brightness/Intensity, Segment Spacing)
+// =========================================================================
+export type BackgroundTextureId = 'dotted' | 'grid' | 'cross' | 'diagonal' | 'diamond' | 'none';
+
+export interface BackgroundTextureOption {
+  id: BackgroundTextureId;
+  name: string;
+  nameBn: string;
+}
+
+export const BACKGROUND_TEXTURES: BackgroundTextureOption[] = [
+  { id: 'dotted', name: 'Dotted', nameBn: 'ডট ম্যাট্রিক্স' },
+  { id: 'grid', name: 'Grid', nameBn: 'গ্রিড' },
+  { id: 'cross', name: 'Cross', nameBn: 'ক্রস (+)' },
+  { id: 'diagonal', name: 'Diagonal', nameBn: 'কোনাকুনি' },
+  { id: 'diamond', name: 'Diamond', nameBn: 'ডায়মন্ড' },
+  { id: 'none', name: 'None', nameBn: 'কোনোটিই নয়' },
+];
+
+const BG_TEXTURE_TYPE_KEY = 'challan_bg_texture_type';
+const BG_TEXTURE_INTENSITY_KEY = 'challan_bg_texture_intensity';
+const BG_TEXTURE_SEGMENTS_KEY = 'challan_bg_texture_segments';
+
+export const DEFAULT_BG_TEXTURE: BackgroundTextureId = 'dotted';
+export const DEFAULT_BG_TEXTURE_INTENSITY = 50; // maps cleanly to 0.065 alpha (current default)
+export const DEFAULT_BG_TEXTURE_SEGMENTS = 22;  // 22px (current default)
+
+export function getSavedBackgroundTexture(): BackgroundTextureId {
+  try {
+    const saved = localStorage.getItem(BG_TEXTURE_TYPE_KEY) as BackgroundTextureId | null;
+    if (saved && BACKGROUND_TEXTURES.some((t) => t.id === saved)) return saved;
+    return DEFAULT_BG_TEXTURE;
+  } catch {
+    return DEFAULT_BG_TEXTURE;
+  }
+}
+
+export function getSavedBackgroundTextureIntensity(): number {
+  try {
+    const saved = localStorage.getItem(BG_TEXTURE_INTENSITY_KEY);
+    if (saved !== null) {
+      const parsed = Number(saved);
+      if (!isNaN(parsed)) return Math.max(0, Math.min(100, Math.round(parsed)));
+    }
+    return DEFAULT_BG_TEXTURE_INTENSITY;
+  } catch {
+    return DEFAULT_BG_TEXTURE_INTENSITY;
+  }
+}
+
+export function getSavedBackgroundTextureSegments(): number {
+  try {
+    const saved = localStorage.getItem(BG_TEXTURE_SEGMENTS_KEY);
+    if (saved !== null) {
+      const parsed = Number(saved);
+      if (!isNaN(parsed)) return Math.max(12, Math.min(56, Math.round(parsed)));
+    }
+    return DEFAULT_BG_TEXTURE_SEGMENTS;
+  } catch {
+    return DEFAULT_BG_TEXTURE_SEGMENTS;
+  }
+}
+
+export function applyBackgroundTexture(
+  textureId?: BackgroundTextureId,
+  intensityOverride?: number,
+  segmentsOverride?: number
+) {
+  const rawType = textureId ?? getSavedBackgroundTexture();
+  const validType: BackgroundTextureId = BACKGROUND_TEXTURES.some((t) => t.id === rawType)
+    ? rawType
+    : DEFAULT_BG_TEXTURE;
+
+  const rawIntensity = intensityOverride !== undefined
+    ? Math.max(0, Math.min(100, Math.round(intensityOverride)))
+    : getSavedBackgroundTextureIntensity();
+
+  const rawSegments = segmentsOverride !== undefined
+    ? Math.max(12, Math.min(56, Math.round(segmentsOverride)))
+    : getSavedBackgroundTextureSegments();
+
+  try {
+    localStorage.setItem(BG_TEXTURE_TYPE_KEY, validType);
+    localStorage.setItem(BG_TEXTURE_INTENSITY_KEY, String(rawIntensity));
+    localStorage.setItem(BG_TEXTURE_SEGMENTS_KEY, String(rawSegments));
+  } catch {}
+
+  if (typeof document !== 'undefined') {
+    const root = document.documentElement;
+    root.setAttribute('data-bg-texture', validType);
+
+    // Map 0..100 slider: 0 -> 0, 50 -> 0.065 (exact original default), 100 -> 0.28
+    const alpha =
+      rawIntensity <= 50
+        ? (rawIntensity / 50) * 0.065
+        : 0.065 + ((rawIntensity - 50) / 50) * 0.215;
+
+    root.style.setProperty('--bg-tex-alpha', alpha.toFixed(4));
+    root.style.setProperty('--bg-tex-size', `${rawSegments}px`);
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('background-texture-changed', {
+        detail: { texture: validType, intensity: rawIntensity, segments: rawSegments },
+      })
+    );
+  }
+}
+
+// Initialize theme & background texture variables immediately in browser context
 if (typeof window !== 'undefined') {
   try {
     applyThemePalette(getSavedThemePalette());
+    applyBackgroundTexture();
   } catch {}
 }
-
-

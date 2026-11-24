@@ -46,7 +46,13 @@ export interface OperatorInfo {
   name: string;
   short: string;
   badgeClass: string;
+  logoLight?: string;
+  logoDark?: string;
+  logoLightClass?: string;
+  logoDarkClass?: string;
 }
+
+const operatorPath = (file: string) => `${import.meta.env.BASE_URL}operators/${file}`;
 
 export function getBdOperator(phone: string): OperatorInfo {
   const cleaned = cleanBangladeshiPhone(phone);
@@ -61,46 +67,53 @@ export function getBdOperator(phone: string): OperatorInfo {
   const prefix = cleaned.slice(0, 3);
   switch (prefix) {
     case '013':
+    case '017':
       return {
-        name: 'Skitto',
-        short: 'Skitto',
-        badgeClass: 'bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300 border-violet-200 dark:border-violet-800'
+        name: 'Grameenphone',
+        short: 'GP',
+        badgeClass: 'bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300 border-sky-200 dark:border-sky-800',
+        logoLight: operatorPath('grameenphone.svg'),
+        logoDark: operatorPath('grameenphone.svg')
       };
     case '014':
       return {
-        name: 'Ryze',
-        short: 'Ryze',
-        badgeClass: 'bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300 border-teal-200 dark:border-teal-800'
+        name: 'RYZE',
+        short: 'RYZE',
+        badgeClass: 'bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300 border-teal-200 dark:border-teal-800',
+        logoLight: operatorPath('ryze-dark.svg'),
+        logoDark: operatorPath('ryze-light.svg')
       };
     case '015':
       return {
         name: 'Teletalk',
         short: 'Teletalk',
-        badgeClass: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+        badgeClass: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
+        logoLight: operatorPath('teletalk.svg'),
+        logoDark: operatorPath('teletalk.svg')
       };
     case '016':
       return {
         name: 'Cirkle',
         short: 'Cirkle',
-        badgeClass: 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border-rose-200 dark:border-rose-800'
-      };
-    case '017':
-      return {
-        name: 'Grameenphone',
-        short: 'GP',
-        badgeClass: 'bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300 border-sky-200 dark:border-sky-800'
+        badgeClass: 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border-rose-200 dark:border-rose-800',
+        logoLight: operatorPath('cirkle.svg'),
+        logoDark: operatorPath('cirkle.svg')
       };
     case '018':
       return {
         name: 'Robi',
         short: 'Robi',
-        badgeClass: 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300 border-red-200 dark:border-red-800'
+        badgeClass: 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300 border-red-200 dark:border-red-800',
+        logoLight: operatorPath('robi.svg'),
+        logoDark: operatorPath('robi.svg')
       };
     case '019':
       return {
         name: 'Banglalink',
         short: 'BL',
-        badgeClass: 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+        badgeClass: 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+        logoLight: operatorPath('Banglalink.svg'),
+        logoDark: operatorPath('Banglalink.svg')
       };
     default:
       return {

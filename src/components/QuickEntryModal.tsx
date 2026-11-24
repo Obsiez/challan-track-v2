@@ -10,6 +10,8 @@ import { toast } from 'sonner';
 import { getPhoneticKey, matchesPhonetic, isPhoneticSearchEnabled } from '../lib/phonetics';
 import ContactNumberPickerModal from './ContactNumberPickerModal';
 import { cleanBangladeshiPhone } from '../lib/phoneUtils';
+import ModalPortal, { useModalScrollLock } from './ModalPortal';
+import { TagPickerBar, getTagDefaultDescription } from '../lib/tagSystem';
 
 interface QuickEntryModalProps {
   isOpen: boolean;
@@ -27,7 +29,8 @@ interface QuickEntryModalProps {
     amount: number, 
     description: string,
     date?: Date,
-    fallbackCustomerInfo?: { name: string; phone: string; accountType?: 'standard' | 'credit_card'; billingDay?: number }
+    fallbackCustomerInfo?: { name: string; phone: string; accountType?: 'standard' | 'credit_card'; billingDay?: number },
+    tag?: string
   ) => Promise<void>;
   preselectedCustomerId?: string;
   onViewCustomer?: (id: string, replace?: boolean) => void;
@@ -36,8 +39,12 @@ interface QuickEntryModalProps {
   setHighlightedTxId?: (id: string | null) => void;
 }
 
-export default function QuickEntryModal({
-  isOpen,
+export default function QuickEntryModal(props: QuickEntryModalProps) {
+  if (!props.isOpen) return null;
+  return <QuickEntryModalInner {...props} />;
+}
+
+function QuickEntryModalInner({
   onClose,
   customers,
   transactions,
@@ -46,7 +53,6 @@ export default function QuickEntryModal({
   preselectedCustomerId,
   onViewCustomer,
   lang,
-  highlightedTxId = null,
   setHighlightedTxId = () => {}
 }: QuickEntryModalProps) {
  const t = translations[lang];
@@ -56,7 +62,6 @@ export default function QuickEntryModal({
   const [type, setType] = useState<'due' | 'payment'>('due');
   const [duplicateTxWarning, setDuplicateTxWarning] = useState<Transaction | null>(null);
   const [hasShownDuplicateWarning, setHasShownDuplicateWarning] = useState(false);
-
 
  const [searchQuery, setSearchQuery] = useState('');
  const [searchBanglaInEnglish, setSearchBanglaInEnglish] = useState(() => isPhoneticSearchEnabled());
@@ -93,6 +98,7 @@ export default function QuickEntryModal({
  const [showAllCustomers, setShowAllCustomers] = useState(false);
   const [amountInput, setAmountInput] = useState('');
   const [description, setDescription] = useState('');
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -103,43 +109,37 @@ export default function QuickEntryModal({
     return found?.accountType === 'credit_card';
   }, [showAddNewCustomer, newAccountType, selectedCustomerId, customers]);
 
- // Frozen snapshot of customer IDs sorted by recency, captured when the modal opens.
- // Using a frozen order means live updatedAt changes (e.g. from a just-confirmed
- // transaction) don't rearrange the grid while the modal is still visible.
- const [frozenCustomerOrder, setFrozenCustomerOrder] = useState<string[]>([]);
-
- // Keep state in sync when preselectedCustomerId or open state changes
- React.useEffect(() => {
- if (isOpen) {
-   setSelectedCustomerId(preselectedCustomerId || '');
-   setErrorMsg('');
-   setAmountInput('');
-   setDescription('');
-   setSearchQuery('');
-   setShowAddNewCustomer(false);
-   setNewAccountType('standard');
-   setNewBillingDay('');
-   setShowAllCustomers(false);
-   // Snapshot the current recency-sorted order so it stays stable for this session
-   const sorted = [...customers].sort((a, b) => {
-     const getRecency = (c: Customer) => {
-       const d = c.updatedAt ?? c.createdAt;
-       return d ? new Date(d).getTime() : 0;
-     };
-     return getRecency(b) - getRecency(a);
+ // Frozen snapshot of customer ID -> rank captured once at modal mount (O(N log N) precomputed timestamps)
+ const [frozenCustomerRankMap] = useState<Map<string, number>>(() => {
+   const entries = customers.map((c) => {
+     const d = c.updatedAt ?? c.createdAt;
+     const ts = d instanceof Date ? d.getTime() : d ? new Date(d as any).getTime() : 0;
+     return { id: c.id, ts: Number.isNaN(ts) ? 0 : ts };
    });
-   setFrozenCustomerOrder(sorted.map(c => c.id));
- }
- }, [isOpen, preselectedCustomerId]);
+   entries.sort((a, b) => b.ts - a.ts);
+   const rankMap = new Map<string, number>();
+   entries.forEach((entry, idx) => rankMap.set(entry.id, idx));
+   return rankMap;
+ });
+
+ useModalScrollLock(true);
 
  React.useEffect(() => {
- if (isOpen) {
- document.body.style.overflow = 'hidden';
- } else {
- document.body.style.overflow = '';
- }
- return () => { document.body.style.overflow = ''; };
- }, [isOpen]);
+   const handleEsc = (e: KeyboardEvent) => {
+     if (e.key === 'Escape') {
+       if (pendingContactChoice) {
+         setPendingContactChoice(null);
+       } else if (duplicateTxWarning) {
+         setDuplicateTxWarning(null);
+       } else {
+         triggerHaptic('tick');
+         onClose();
+       }
+     }
+   };
+   window.addEventListener('keydown', handleEsc);
+   return () => window.removeEventListener('keydown', handleEsc);
+ }, [pendingContactChoice, duplicateTxWarning, onClose]);
 
   const centerNativeInput = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const input = e.currentTarget;
@@ -229,24 +229,43 @@ export default function QuickEntryModal({
  // Handle customer selection list — order is frozen to the snapshot taken at modal open.
  // This prevents a just-confirmed customer from visibly jumping to the top mid-session.
  const filteredCustomers = useMemo(() => {
-    const list = searchQuery.trim() === ''
+    const trimmed = searchQuery.trim();
+    const lower = trimmed.toLowerCase();
+    const list = trimmed === ''
       ? customers
       : customers.filter(c => {
-          return c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                 (c.phone && c.phone.includes(searchQuery)) ||
-                 (searchBanglaInEnglish && matchesPhonetic(c.name, searchQuery));
+          return c.name.toLowerCase().includes(lower) ||
+                 (c.phone && c.phone.includes(trimmed)) ||
+                 (searchBanglaInEnglish && matchesPhonetic(c.name, trimmed));
         });
    return [...list].sort((a, b) => {
-     const idxA = frozenCustomerOrder.indexOf(a.id);
-     const idxB = frozenCustomerOrder.indexOf(b.id);
-     // Known IDs sort by frozen position; any new ID (added mid-session) goes to the end
-     const posA = idxA === -1 ? Infinity : idxA;
-     const posB = idxB === -1 ? Infinity : idxB;
+     const posA = frozenCustomerRankMap.get(a.id) ?? Infinity;
+     const posB = frozenCustomerRankMap.get(b.id) ?? Infinity;
      return posA - posB;
    });
- }, [customers, searchQuery, frozenCustomerOrder, searchBanglaInEnglish]);
+ }, [customers, searchQuery, frozenCustomerRankMap, searchBanglaInEnglish]);
 
- const currentCustomer = customers.find(c => c.id === selectedCustomerId);
+ const currentCustomer = useMemo(
+   () => customers.find(c => c.id === selectedCustomerId),
+   [customers, selectedCustomerId]
+ );
+
+ const selectedCustomerTxs = useMemo(() => {
+   if (!selectedCustomerId) return [];
+   const inMem = transactions.filter(t => t.customerId === selectedCustomerId);
+   if (inMem.length > 0 || typeof localStorage === 'undefined') return inMem;
+   try {
+     const userId = currentCustomer?.userId;
+     if (!userId) return [];
+     const cached = localStorage.getItem(`easy_due_txs_${userId}_${selectedCustomerId}`);
+     if (cached) return JSON.parse(cached) as Transaction[];
+     const allStored = localStorage.getItem(`easy_due_transactions_${userId}`);
+     if (allStored) {
+       return (JSON.parse(allStored) as Transaction[]).filter((t) => t.customerId === selectedCustomerId);
+     }
+   } catch {}
+   return [];
+ }, [selectedCustomerId, transactions, currentCustomer]);
 
  const handleQuickAddAmount = (add: number) => {
  const cleaned = amountInput.replace(/,/g, '');
@@ -255,8 +274,8 @@ export default function QuickEntryModal({
  setAmountInput(formatIndianNumberString(newVal));
  };
 
-   const getDuplicate = () => {
-    if (!selectedCustomerId || !amountInput) return null;
+  const getDuplicate = React.useCallback(() => {
+    if (!selectedCustomerId || !amountInput || selectedCustomerTxs.length === 0) return null;
     const cleaned = amountInput.replace(/,/g, '');
     const amountVal = parseFloat(cleaned);
     if (isNaN(amountVal) || amountVal <= 0) return null;
@@ -270,34 +289,19 @@ export default function QuickEntryModal({
       return isNaN(parsed.getTime()) ? new Date() : parsed;
     };
 
-    let customerTxs = transactions.filter(t => t.customerId === selectedCustomerId);
-    if (customerTxs.length === 0 && typeof localStorage !== 'undefined') {
-      try {
-        const customer = customers.find(c => c.id === selectedCustomerId);
-        const userId = customer?.userId;
-        if (userId) {
-          const cached = localStorage.getItem(`easy_due_txs_${userId}_${selectedCustomerId}`);
-          if (cached) {
-            customerTxs = JSON.parse(cached);
-          } else {
-            const allStored = localStorage.getItem(`easy_due_transactions_${userId}`);
-            if (allStored) {
-              customerTxs = JSON.parse(allStored).filter((t: any) => t.customerId === selectedCustomerId);
-            }
-          }
-        }
-      } catch (e) {}
-    }
-
     const now = Date.now();
     const twentyFourHoursMs = 24 * 60 * 60 * 1000;
-    return customerTxs.find(t => {
+    return selectedCustomerTxs.find(t => {
+      if (t.type !== type || Math.abs(t.amount - amountVal) >= 0.01) return false;
       const tDate = parseDate(t.createdAt || t.date);
-      return t.type === type && 
-             Math.abs(t.amount - amountVal) < 0.01 && 
-             (now - tDate.getTime()) < twentyFourHoursMs;
+      return (now - tDate.getTime()) < twentyFourHoursMs;
     }) || null;
-  };
+  }, [selectedCustomerId, amountInput, selectedCustomerTxs, type]);
+
+  const activeRealtimeDuplicate = useMemo(() => {
+    if (isSubmitting) return null;
+    return getDuplicate();
+  }, [isSubmitting, getDuplicate]);
 
   const executeSave = async (bypassDuplicateCheck = false) => {
     setErrorMsg('');
@@ -386,24 +390,18 @@ export default function QuickEntryModal({
           } 
         : undefined;
 
-      await Promise.all([
-        addTransaction(custId, type, amountVal, description, new Date(), fallbackCustomer),
-        new Promise(resolve => setTimeout(resolve, 600))
-      ]);
+      const finalDescription = description.trim() || (selectedTag ? getTagDefaultDescription(selectedTag, lang) : '');
+
+      await addTransaction(
+        custId,
+        type,
+        amountVal,
+        finalDescription,
+        new Date(),
+        fallbackCustomer,
+        selectedTag || undefined
+      );
       
-      // Reset & Close
-      setType('due');
-      setSearchQuery('');
-      setSelectedCustomerId('');
-      setCustomerNameInput('');
-      setCustomerPhoneInput('');
-      setNewAccountType('standard');
-      setNewBillingDay('');
-      setShowAddNewCustomer(false);
-      setAmountInput('');
-      setDescription('');
-      setDuplicateTxWarning(null);
-      setHasShownDuplicateWarning(false);
       onClose();
       toast.success(lang === 'bn' ? 'হিসাব সফলভাবে যোগ হয়েছে' : 'Transaction saved successfully');
     } catch (err) {
@@ -419,70 +417,81 @@ export default function QuickEntryModal({
     await executeSave(false);
   };
 
- if (!isOpen) return null;
-
   return (
-    <div
-      className="fixed inset-0 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-y-auto hide-scrollbar"
-    >
-      <div 
-        className="animate-slide-up glass-modal w-full sm:max-w-xl rounded-t-3xl sm:rounded-2xl border overflow-hidden max-h-[92vh] flex flex-col"
+    <ModalPortal lockScroll={false}>
+      <div
+        className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden"
       >
+        <div
+          onClick={() => {
+            triggerHaptic('tick');
+            onClose();
+          }}
+          className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+        />
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-xl rounded-t-[2rem] sm:rounded-3xl border overflow-hidden max-h-[90dvh] flex flex-col shadow-2xl"
+        >
+          {/* Mobile Top Drag Handle */}
+          <div className="flex justify-center pt-3 pb-1 sm:hidden shrink-0">
+            <div className="w-10 h-1 rounded-full bg-slate-900/15 dark:bg-white/20 mx-auto" />
+          </div>
 
-        {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
-          <h3 className="text-base sm:text-lg font-black text-slate-950 dark:text-white flex items-center gap-2">
-            {t.quickEntryTitle}
-          </h3>
-          <button 
-            type="button"
-            onClick={() => {
-              triggerHaptic('medium');
-              onClose();
-            }}
-            className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
-            aria-label="Close"
-            id="close_modal_btn"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+          {/* Header */}
+          <div className="px-5 py-3.5 sm:py-4 border-b border-slate-900/[0.06] dark:border-white/[0.06] flex items-center justify-between shrink-0">
+            <h3 className="font-display text-lg font-bold text-slate-950 dark:text-white tracking-tight">
+              {t.quickEntryTitle}
+            </h3>
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('medium');
+                onClose();
+              }}
+              className="w-8 h-8 rounded-full bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-600 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer"
+              aria-label="Close"
+              id="close_modal_btn"
+            >
+              <X className="w-4 h-4 stroke-[1.25]" />
+            </button>
+          </div>
 
-        <form onSubmit={handleSave} className="flex-1 flex flex-col overflow-hidden">
-          
-          {/* Scrollable Form Fields */}
-          <div ref={formScrollRef} className="flex-1 overflow-y-auto hide-scrollbar p-5 space-y-5">
-            {/* 1. ENTRY TYPE SELECTION (IDENTICAL TO CREATE GOAL VISUALS, ADAPTS TO CREDIT CARD) */}
-            <div className="space-y-1.5">
-              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+          <form onSubmit={handleSave} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            {/* Scrollable Form Fields */}
+            <div ref={formScrollRef} className="flex-1 min-h-0 overflow-y-auto hide-scrollbar p-5 space-y-5">
+            {/* 1. Entry Type Selection */}
+            <div className="space-y-2">
+              <span className={lang === 'bn' ? 'text-[11px] font-bold tracking-normal text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>
                 {t.chooseType}
               </span>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-2.5">
                 <button
                   type="button"
                   onClick={() => {
                     triggerHaptic('single');
                     setType('due');
+                    setSelectedTag(null);
                   }}
-                  className={`py-4 px-3 rounded-xl flex flex-col items-center justify-center gap-1 border-2 transition-all cursor-pointer active:scale-[0.98] ${
+                  className={`py-3.5 px-3.5 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all cursor-pointer touch-press ${
                     type === 'due'
-                      ? 'bg-rose-600 border-rose-600 dark:border-rose-500 text-white shadow-xs font-extrabold'
-                      : 'bg-slate-50 hover:bg-slate-100 border-slate-300 hover:border-slate-400 text-slate-700 dark:bg-slate-900 dark:border-slate-700 dark:hover:border-slate-600 dark:text-slate-200 font-bold'
+                      ? 'bg-rose-600 border-2 border-rose-400 text-white shadow-lg shadow-rose-600/20'
+                      : 'bg-slate-900/[0.03] hover:bg-slate-900/[0.06] border border-slate-900/[0.08] text-slate-700 dark:bg-white/[0.04] dark:hover:bg-white/[0.08] dark:border-white/[0.08] dark:text-slate-200'
                   }`}
                   id="tab_give_due"
                 >
                   {isCreditCardContext ? (
-                    <CreditCard className="w-5 h-5 stroke-[2.5]" />
+                    <CreditCard className="w-4 h-4 stroke-[1.25]" />
                   ) : (
-                    <ArrowUpRight className="w-5 h-5 stroke-[2.5]" />
+                    <ArrowUpRight className="w-4 h-4 stroke-[1.25]" />
                   )}
-                  <span className="text-sm sm:text-base font-extrabold">
+                  <span className="text-sm font-bold">
                     {isCreditCardContext
                       ? (lang === 'bn' ? 'কার্ড বিল যোগ' : 'Add Card Bill')
                       : t.giveDue}
                   </span>
                   <span className={`text-[11px] text-center leading-tight ${
-                    type === 'due' ? 'text-white/90 font-semibold' : 'text-slate-500 dark:text-slate-400 font-medium'
+                    type === 'due' ? 'text-white/85' : 'text-slate-500 dark:text-slate-400'
                   }`}>
                     {isCreditCardContext
                       ? (lang === 'bn' ? 'কার্ড দিয়ে কেনাকাটা বা বিল খরচ' : 'Spent on credit card')
@@ -495,22 +504,23 @@ export default function QuickEntryModal({
                   onClick={() => {
                     triggerHaptic('single');
                     setType('payment');
+                    setSelectedTag(null);
                   }}
-                  className={`py-4 px-3 rounded-xl flex flex-col items-center justify-center gap-1 border-2 transition-all cursor-pointer active:scale-[0.98] ${
+                  className={`py-3.5 px-3.5 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all cursor-pointer touch-press ${
                     type === 'payment'
-                      ? 'bg-emerald-600 border-emerald-600 dark:border-emerald-500 text-white shadow-xs font-extrabold'
-                      : 'bg-slate-50 hover:bg-slate-100 border-slate-300 hover:border-slate-400 text-slate-700 dark:bg-slate-900 dark:border-slate-700 dark:hover:border-slate-600 dark:text-slate-200 font-bold'
+                      ? 'bg-emerald-600 border-2 border-emerald-400 text-white shadow-lg shadow-emerald-600/20'
+                      : 'bg-slate-900/[0.03] hover:bg-slate-900/[0.06] border border-slate-900/[0.08] text-slate-700 dark:bg-white/[0.04] dark:hover:bg-white/[0.08] dark:border-white/[0.08] dark:text-slate-200'
                   }`}
                   id="tab_get_payment"
                 >
-                  <ArrowDownLeft className="w-5 h-5 stroke-[2.5]" />
-                  <span className="text-sm sm:text-base font-extrabold">
+                  <ArrowDownLeft className="w-4 h-4 stroke-[1.25]" />
+                  <span className="text-sm font-bold">
                     {isCreditCardContext
                       ? (lang === 'bn' ? 'কার্ড বিল পরিশোধ' : 'Pay Card Bill')
                       : t.getPayment}
                   </span>
                   <span className={`text-[11px] text-center leading-tight ${
-                    type === 'payment' ? 'text-white/90 font-semibold' : 'text-slate-500 dark:text-slate-400 font-medium'
+                    type === 'payment' ? 'text-white/85' : 'text-slate-500 dark:text-slate-400'
                   }`}>
                     {isCreditCardContext
                       ? (lang === 'bn' ? 'কার্ডের বিল পরিশোধ করা হলো' : 'Paid toward card balance')
@@ -520,335 +530,364 @@ export default function QuickEntryModal({
               </div>
             </div>
 
-          {/* 2. CUSTOMER CHIP SELECTION OR INLINE ADD */}
-          <div className="space-y-2.5">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-[#757575] uppercase tracking-wider block">
-                {lang === 'bn' ? 'গ্রাহক নির্বাচন' : 'Customer Account'}
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowAddNewCustomer(!showAddNewCustomer)}
-                className="text-black dark:text-white font-bold text-xs flex items-center gap-1.5 bg-slate-50 dark:bg-slate-900/60 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-800/80 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                id="toggle_new_cust_btn"
-              >
-                {showAddNewCustomer ? (
-                  <span className="flex items-center gap-1">
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                    <span>{lang === 'bn' ? 'তালিকায় ফিরুন' : 'Back to List'}</span>
-                  </span>
-                ) : (
-                  <>
-                    <UserPlus className="w-3.5 h-3.5" />
-                    {lang === 'bn' ? 'নতুন গ্রাহক যোগ' : 'Add New Customer'}
-                  </>
-                )}
-              </button>
-            </div>
+            {/* 2. Customer Selection or Inline Add */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className={lang === 'bn' ? 'text-[11px] font-bold tracking-normal text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>
+                  {lang === 'bn' ? 'গ্রাহক নির্বাচন' : 'Customer Account'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowAddNewCustomer(!showAddNewCustomer)}
+                  className="text-slate-950 dark:text-white font-bold text-xs flex items-center gap-1.5 bg-slate-900/[0.04] hover:bg-slate-900/[0.08] dark:bg-white/[0.06] dark:hover:bg-white/[0.1] px-3 py-1.5 rounded-full cursor-pointer transition-colors"
+                  id="toggle_new_cust_btn"
+                >
+                  {showAddNewCustomer ? (
+                    <span className="flex items-center gap-1">
+                      <ChevronLeft className="w-3.5 h-3.5 stroke-[1.25]" />
+                      <span>{lang === 'bn' ? 'তালিকায় ফিরুন' : 'Back to List'}</span>
+                    </span>
+                  ) : (
+                    <>
+                      <UserPlus className="w-3.5 h-3.5 stroke-[1.25]" />
+                      <span>{lang === 'bn' ? 'নতুন গ্রাহক যোগ' : 'Add New Customer'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
 
-            {!showAddNewCustomer ? (
-              <div className="space-y-2.5">
-                {/* Select Customer search with bold input border and grayish hue */}
-                <div className="relative">
-                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder={lang === 'bn' ? 'গ্রাহক পছন্দ করতে খুঁজুন...' : 'Search customer...'}
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-12 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white font-bold text-sm focus:border-slate-950 dark:focus:border-white focus:outline-none transition-colors"
-                  />
-                  {searchQuery && (
+              {!showAddNewCustomer ? (
+                <div className="space-y-2.5">
+                  <div className="relative">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 stroke-[1.25]" />
+                    <input
+                      type="text"
+                      placeholder={lang === 'bn' ? 'গ্রাহক পছন্দ করতে খুঁজুন...' : 'Search customer...'}
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-10 pr-11 py-2.5 rounded-full border border-slate-900/[0.08] dark:border-white/[0.08] bg-slate-900/[0.03] dark:bg-white/[0.04] text-slate-950 dark:text-white font-semibold text-sm focus:border-slate-900/30 dark:focus:border-white/30 focus:outline-none transition-colors"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic('level3');
+                          setSearchQuery('');
+                        }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer"
+                        title={lang === 'bn' ? 'খালি করুন' : 'Clear search'}
+                        aria-label={lang === 'bn' ? 'খালি করুন' : 'Clear search'}
+                      >
+                        <Delete className="w-4 h-4 stroke-[1.25]" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="relative pt-0.5">
+                    <div className="grid grid-cols-2 gap-2">
+                      {(showAllCustomers ? filteredCustomers : filteredCustomers.slice(0, 6)).map(c => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => setSelectedCustomerId(selectedCustomerId === c.id ? '' : c.id)}
+                          className={`p-3 text-left rounded-2xl transition-all text-xs truncate flex items-center justify-between cursor-pointer touch-press ${
+                            selectedCustomerId === c.id
+                              ? 'bg-slate-950 text-white border-2 border-slate-950 font-bold dark:bg-white dark:text-slate-950 dark:border-white shadow-sm'
+                              : 'bg-slate-900/[0.03] dark:bg-white/[0.04] hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.08] border border-slate-900/[0.07] dark:border-white/[0.07] text-slate-900 dark:text-white font-medium'
+                          }`}
+                        >
+                          <span className="truncate flex items-center gap-1.5 min-w-0">
+                            {c.accountType === 'credit_card' && (
+                              <CreditCard className="w-3.5 h-3.5 shrink-0 opacity-75 stroke-[1.25]" />
+                            )}
+                            <span className="truncate">{c.name}</span>
+                          </span>
+                          {selectedCustomerId === c.id && <Check className="w-3.5 h-3.5 shrink-0 ml-1 stroke-[1.5]" />}
+                        </button>
+                      ))}
+
+                      {filteredCustomers.length === 0 && (
+                        <div className="col-span-2 w-full text-center py-4 bg-slate-900/[0.02] dark:bg-white/[0.02] rounded-2xl border border-dashed border-slate-900/[0.12] dark:border-white/[0.12] text-slate-500 text-xs">
+                          {lang === 'bn' ? 'কোনো গ্রাহক মেলেনি। উপরে "+ নতুন গ্রাহক যোগ" চাপুন।' : 'No customer matches. Click "+ Add New Customer" above.'}
+                        </div>
+                      )}
+                    </div>
+
+                    {filteredCustomers.length > 6 && (
+                      <div className="flex justify-end mt-2 pr-1">
+                        <button
+                          type="button"
+                          onClick={() => setShowAllCustomers(!showAllCustomers)}
+                          className="text-xs font-bold text-slate-950 dark:text-white hover:underline transition-colors flex items-center gap-1 cursor-pointer"
+                        >
+                          {showAllCustomers
+                            ? (lang === 'bn' ? 'কম দেখুন' : 'Show less')
+                            : (lang === 'bn' ? 'আরও দেখুন' : 'Show more')}
+                          <svg className={`w-3.5 h-3.5 transition-transform ${showAllCustomers ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.25} d="M19 9l-7 7-7-7" /></svg>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 bg-slate-900/[0.03] dark:bg-white/[0.04] rounded-2xl border border-slate-900/[0.07] dark:border-white/[0.08] space-y-3.5">
+                  <div className="relative grid grid-cols-2 p-1 rounded-full bg-slate-900/[0.05] dark:bg-white/[0.05] border border-slate-900/[0.08] dark:border-white/[0.09]">
+                    <div
+                      aria-hidden="true"
+                      className="pointer-events-none absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-slate-950 dark:bg-white shadow-sm will-change-transform transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+                      style={{
+                        transform: `translate3d(${newAccountType === 'credit_card' ? '100%' : '0%'}, 0, 0)`
+                      }}
+                    />
                     <button
                       type="button"
                       onClick={() => {
                         triggerHaptic('tick');
-                        setSearchQuery('');
+                        setNewAccountType('standard');
                       }}
-                      className="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-950 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-800/70 transition-colors cursor-pointer"
-                      title={lang === 'bn' ? 'খালি করুন' : 'Clear search'}
-                      aria-label={lang === 'bn' ? 'খালি করুন' : 'Clear search'}
+                      className={`relative z-10 py-2 px-3 rounded-full text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors duration-200 ${
+                        newAccountType === 'standard'
+                          ? 'text-white dark:text-slate-950'
+                          : 'text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
+                      }`}
                     >
-                      <Delete className="w-5 h-5" />
+                      <Users className="w-3.5 h-3.5 stroke-[1.25]" />
+                      <span className="truncate">{lang === 'bn' ? 'গ্রাহক খতিয়ান' : 'Customer Ledger'}</span>
                     </button>
-                  )}
-                </div>
-
-                {/* Customer Names Grid (Clickable Panels with Bold Borders) */}
-                <div className="relative pt-0.5">
-                  <div className="grid grid-cols-2 gap-2">
-                    {(showAllCustomers ? filteredCustomers : filteredCustomers.slice(0, 6)).map(c => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => setSelectedCustomerId(selectedCustomerId === c.id ? '' : c.id)}
-                        className={`p-2.5 text-left rounded-xl border-2 transition-all text-xs truncate flex items-center justify-between cursor-pointer ${
-                          selectedCustomerId === c.id
-                            ? 'bg-slate-950 text-white border-slate-950 font-bold dark:bg-white dark:text-slate-950 dark:border-white shadow-xs'
-                            : 'bg-slate-50 dark:bg-slate-900/60 hover:bg-slate-100 dark:hover:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-medium'
-                        }`}
-                      >
-                        <span className="truncate flex items-center gap-1.5 min-w-0">
-                          {c.accountType === 'credit_card' && (
-                            <CreditCard className="w-3.5 h-3.5 shrink-0 opacity-80" />
-                          )}
-                          <span className="truncate">{c.name}</span>
-                        </span>
-                        {selectedCustomerId === c.id && <Check className="w-3.5 h-3.5 shrink-0 ml-1" />}
-                      </button>
-                    ))}
-
-                    {filteredCustomers.length === 0 && (
-                      <div className="col-span-2 w-full text-center py-4 bg-slate-50 dark:bg-slate-900/60 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 text-slate-500 text-xs">
-                        {lang === 'bn' ? 'কোনো গ্রাহক মেলেনি। উপরে "+ নতুন গ্রাহক যোগ" চাপুন।' : 'No customer matches. Click "+ Add New Customer" above.'}
-                      </div>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic('tick');
+                        setNewAccountType('credit_card');
+                      }}
+                      className={`relative z-10 py-2 px-3 rounded-full text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors duration-200 ${
+                        newAccountType === 'credit_card'
+                          ? 'text-white dark:text-slate-950'
+                          : 'text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
+                      }`}
+                    >
+                      <CreditCard className="w-3.5 h-3.5 stroke-[1.25]" />
+                      <span className="truncate">{lang === 'bn' ? 'ক্রেডিট কার্ড' : 'Credit Card'}</span>
+                    </button>
                   </div>
 
-                  {filteredCustomers.length > 6 && (
-                    <div className="flex justify-end mt-2 pr-1">
-                      <button
-                        type="button"
-                        onClick={() => setShowAllCustomers(!showAllCustomers)}
-                        className="text-xs font-bold text-slate-950 dark:text-white hover:underline transition-colors flex items-center gap-1 cursor-pointer"
-                      >
-                        {showAllCustomers 
-                          ? (lang === 'bn' ? 'কম দেখুন' : 'Show less') 
-                          : (lang === 'bn' ? 'আরও দেখুন' : 'Show more')}
-                        <svg className={`w-3.5 h-3.5 transition-transform ${showAllCustomers ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" /></svg>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              /* INLINE NEW CUSTOMER FORM (WITH BOLD INPUT BORDERS & GRAYISH HUE) */
-              <div className="p-4 bg-slate-50/70 dark:bg-slate-900/40 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3.5">
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      triggerHaptic('tick');
-                      setNewAccountType('standard');
-                    }}
-                    className={`py-2 px-2.5 rounded-xl border-2 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
-                      newAccountType === 'standard'
-                        ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
-                        : 'bg-white dark:bg-[#0D121D] text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
-                    }`}
-                  >
-                    <Users className="w-3.5 h-3.5" />
-                    <span>{lang === 'bn' ? 'গ্রাহক খতিয়ান' : 'Customer Ledger'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      triggerHaptic('tick');
-                      setNewAccountType('credit_card');
-                    }}
-                    className={`py-2 px-2.5 rounded-xl border-2 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
-                      newAccountType === 'credit_card'
-                        ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
-                        : 'bg-white dark:bg-[#0D121D] text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
-                    }`}
-                  >
-                    <CreditCard className="w-3.5 h-3.5" />
-                    <span>{lang === 'bn' ? 'ক্রেডিট কার্ড' : 'Credit Card'}</span>
-                  </button>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    {newAccountType === 'credit_card'
-                      ? (lang === 'bn' ? 'কার্ড / হিসাবের নাম' : 'Card / Account Name')
-                      : t.customerName}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder={newAccountType === 'credit_card' ? 'e.g. City Bank Amex' : 'e.g. Wahid Zaman'}
-                    value={customerNameInput}
-                    onChange={(e) => setCustomerNameInput(e.target.value)}
-                    onFocus={centerNativeInput}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const phoneInput = e.currentTarget.form?.querySelector('input[type="tel"]') as HTMLInputElement | null;
-                        if (phoneInput) phoneInput.focus();
-                      }
-                    }}
-                    className="w-full px-3.5 py-2.5 border-2 border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white text-sm focus:border-slate-950 dark:focus:border-white outline-none font-bold transition-colors"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t.phoneNumber}</label>
-                  <div className="flex gap-2">
+                  <div className="space-y-1">
+                    <label className={lang === 'bn' ? 'text-[11px] font-bold tracking-normal text-slate-500 dark:text-slate-400 block overflow-hidden' : 'micro-mono-label font-semibold block overflow-hidden'}>
+                      <AnimatePresence mode="wait" initial={false}>
+                        <motion.span
+                          key={newAccountType}
+                          initial={{ opacity: 0, y: 3 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -3 }}
+                          transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
+                          className="inline-block"
+                        >
+                          {newAccountType === 'credit_card'
+                            ? (lang === 'bn' ? 'কার্ড / হিসাবের নাম' : 'Card / Account Name')
+                            : t.customerName}
+                        </motion.span>
+                      </AnimatePresence>
+                    </label>
                     <input
-                      type="tel"
-                      placeholder="e.g. 01712345678"
-                      value={customerPhoneInput}
-                      onChange={(e) => setCustomerPhoneInput(cleanBangladeshiPhone(e.target.value))}
+                      type="text"
+                      placeholder={newAccountType === 'credit_card' ? 'e.g. City Bank Amex' : 'e.g. Wahid Zaman'}
+                      value={customerNameInput}
+                      onChange={(e) => setCustomerNameInput(e.target.value)}
                       onFocus={centerNativeInput}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
-                          const amountInput = e.currentTarget.form?.querySelector('input[data-numpad="true"]') as HTMLInputElement | null;
-                          if (amountInput) amountInput.focus();
+                          const phoneInput = e.currentTarget.form?.querySelector('input[type="tel"]') as HTMLInputElement | null;
+                          if (phoneInput) phoneInput.focus();
                         }
                       }}
-                      className="flex-1 px-3.5 py-2.5 border-2 border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white text-sm focus:border-slate-950 dark:focus:border-white outline-none font-mono font-bold transition-colors"
+                      className="w-full px-3.5 py-2.5 border border-slate-900/[0.08] dark:border-white/[0.08] rounded-2xl bg-slate-900/[0.03] dark:bg-white/[0.04] text-slate-950 dark:text-white text-sm outline-none font-semibold transition-colors"
                     />
-                    <button
-                      type="button"
-                      onClick={handlePickContact}
-                      className="px-3 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-700 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors shrink-0 font-bold text-xs"
-                      title={lang === 'bn' ? 'কন্টাক্ট নির্বাচন করুন' : 'Pick Contact'}
-                    >
-                      <BookUser className="w-4 h-4" />
-                      <span className="hidden sm:inline">{lang === 'bn' ? 'কন্টাক্ট' : 'Contacts'}</span>
-                    </button>
                   </div>
+                  <div className="space-y-1">
+                    <label className={lang === 'bn' ? 'text-[11px] font-bold tracking-normal text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>{t.phoneNumber}</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="tel"
+                        placeholder="e.g. 01712345678"
+                        value={customerPhoneInput}
+                        onChange={(e) => setCustomerPhoneInput(cleanBangladeshiPhone(e.target.value))}
+                        onFocus={centerNativeInput}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const amountInputEl = e.currentTarget.form?.querySelector('input[data-numpad="true"]') as HTMLInputElement | null;
+                            if (amountInputEl) amountInputEl.focus();
+                          }
+                        }}
+                        className="flex-1 px-3.5 py-2.5 border border-slate-900/[0.08] dark:border-white/[0.08] rounded-2xl bg-slate-900/[0.03] dark:bg-white/[0.04] text-slate-950 dark:text-white text-sm outline-none font-mono font-semibold"
+                      />
+                      <button
+                        type="button"
+                        onClick={handlePickContact}
+                        className="px-3.5 bg-slate-900/[0.05] hover:bg-slate-900/[0.09] dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-slate-900 dark:text-white rounded-2xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors shrink-0 font-bold text-xs"
+                        title={lang === 'bn' ? 'কন্টাক্ট নির্বাচন করুন' : 'Pick Contact'}
+                      >
+                        <BookUser className="w-4 h-4 stroke-[1.25]" />
+                        <span className="hidden sm:inline">{lang === 'bn' ? 'কন্টাক্ট' : 'Contacts'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <AnimatePresence>
+                    {newAccountType === 'credit_card' && (
+                      <motion.div
+                        key="quick-entry-billing-day"
+                        initial={{ opacity: 0, y: -8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -8 }}
+                        className="flex items-center justify-between gap-2 pt-1"
+                      >
+                        <label className={`${lang === 'bn' ? 'text-[11px] font-bold tracking-normal text-slate-600 dark:text-slate-300' : 'micro-mono-label font-semibold'} flex items-center gap-1.5`}>
+                          <Calendar className="w-3.5 h-3.5 stroke-[1.25]" />
+                          <span>{lang === 'bn' ? 'বিলিং তারিখ (১-৩১)' : 'Statement Billing Day (1–31)'}</span>
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          data-numpad="true"
+                          placeholder={lang === 'bn' ? '১-৩১' : '1–31'}
+                          value={newBillingDay}
+                          onChange={(e) => {
+                            const clean = e.target.value.replace(/[^0-9]/g, '');
+                            if (!clean) {
+                              setNewBillingDay('');
+                              return;
+                            }
+                            setNewBillingDay(String(Math.min(31, Math.max(1, parseInt(clean, 10)))));
+                          }}
+                          className="w-20 px-2.5 py-1.5 text-center border border-slate-900/[0.08] dark:border-white/[0.08] rounded-xl bg-slate-900/[0.03] dark:bg-white/[0.04] text-slate-950 dark:text-white font-mono font-bold text-xs focus:outline-none"
+                        />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
+              )}
+            </div>
 
-                {newAccountType === 'credit_card' && (
-                  <div className="pt-1 flex items-center justify-between gap-2">
-                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5" />
-                      <span>{lang === 'bn' ? 'বিলিং তারিখ (১-৩১)' : 'Statement Billing Day (1–31)'}</span>
-                    </label>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      data-numpad="true"
-                      placeholder={lang === 'bn' ? '১-৩১' : '1–31'}
-                      value={newBillingDay}
-                      onChange={(e) => {
-                        const clean = e.target.value.replace(/[^0-9]/g, '');
-                        if (!clean) {
-                          setNewBillingDay('');
-                          return;
-                        }
-                        setNewBillingDay(String(Math.min(31, Math.max(1, parseInt(clean, 10)))));
-                      }}
-                      className="w-20 px-2.5 py-1.5 text-center border-2 border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-[#0D121D] text-slate-950 dark:text-white font-mono font-black text-xs focus:outline-none focus:border-slate-950 dark:focus:border-white"
-                    />
-                  </div>
-                )}
+            {/* 3. Monumental Amount Stage */}
+            <div className="space-y-2">
+              <span className={lang === 'bn' ? 'text-[11px] font-bold tracking-normal text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>
+                {t.amountLabel}
+              </span>
+              <div className="relative">
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[20px] sm:text-[22px] font-display font-medium text-slate-400 dark:text-slate-500 select-none pointer-events-none">
+                  ৳
+                </span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  data-numpad="true"
+                  placeholder="0"
+                  value={amountInput}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const clean = val.replace(/[^0-9.]/g, '');
+                    const dots = clean.split('.');
+                    let sanitized = clean;
+                    if (dots.length > 2) {
+                      sanitized = dots[0] + '.' + dots.slice(1).join('');
+                    }
+                    setAmountInput(formatIndianNumberString(sanitized));
+                  }}
+                  className="w-full pl-9 pr-4 py-2.5 sm:py-3 rounded-2xl border border-slate-900/[0.09] dark:border-white/[0.1] bg-slate-900/[0.03] dark:bg-white/[0.04] text-slate-950 dark:text-white font-display font-bold text-[22px] sm:text-[26px] tracking-tight tabular-nums focus:outline-none transition-colors"
+                  required
+                />
               </div>
-            )}
-          </div>
 
-          {/* 3. DUES OR TRANSACTION AMOUNT WITH BOLD BORDER & SUBTLE GRAYISH HUE */}
-          <div className="space-y-2">
-            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
-              {t.amountLabel}
-            </span>
-            <div className="relative">
-              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-2xl font-black text-slate-400 dark:text-slate-500 select-none pointer-events-none">
-                ৳
+              {activeRealtimeDuplicate && (
+                <p className="text-xs font-semibold text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 stroke-[1.25]" />
+                  {t.duplicateRealtimeWarning}
+                </p>
+              )}
+
+              {type === 'payment' && currentCustomer && (currentCustomer as any).outstandingDue > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic('single');
+                    const targetDue = (currentCustomer as any).outstandingDue;
+                    const isChecked = amountInput.replace(/,/g, '') === targetDue.toString();
+                    if (!isChecked) {
+                      setAmountInput(formatIndianNumberString(targetDue.toString()));
+                    } else {
+                      setAmountInput('');
+                    }
+                  }}
+                  className="w-full flex items-center text-left gap-2.5 mt-2 p-3 bg-slate-900/[0.03] dark:bg-white/[0.04] rounded-2xl border border-slate-900/[0.07] dark:border-white/[0.08] hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.07] cursor-pointer transition-colors select-none"
+                >
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 accent-emerald-600 rounded cursor-pointer pointer-events-none"
+                    checked={amountInput.replace(/,/g, '') === (currentCustomer as any).outstandingDue.toString()}
+                    readOnly
+                  />
+                  <span className="text-xs font-semibold text-slate-900 dark:text-white select-none">
+                    {(currentCustomer as any).accountType === 'credit_card'
+                      ? (lang === 'bn' ? 'সম্পূর্ণ কার্ড বিল পরিশোধ করুন' : 'Pay total card balance')
+                      : (lang === 'bn' ? 'সম্পূর্ণ বকেয়া পরিশোধ করুন' : 'Settle complete due')} (৳{formatNumber((currentCustomer as any).outstandingDue, lang)})
+                  </span>
+                </button>
+              )}
+
+              {/* Speedy Pill helpers */}
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {[50, 100, 500, 1000, 5000].map(val => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => handleQuickAddAmount(val)}
+                    className="px-3 py-1.5 bg-slate-900/[0.04] hover:bg-slate-900/[0.08] dark:bg-white/[0.06] dark:hover:bg-white/[0.11] text-slate-900 dark:text-white font-semibold rounded-full transition-colors text-xs cursor-pointer tabular-nums font-mono touch-press"
+                  >
+                    +{formatNumber(val, lang)}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setAmountInput('')}
+                  className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/15 text-rose-600 dark:text-rose-400 font-semibold rounded-full transition-colors text-xs cursor-pointer touch-press"
+                >
+                  {lang === 'bn' ? 'মুছুন' : 'Clear'}
+                </button>
+              </div>
+            </div>
+
+            {/* Tag Selection Bar */}
+            <TagPickerBar
+              type={type}
+              selectedTag={selectedTag}
+              onSelectTag={(tag) => setSelectedTag(tag)}
+              transactions={transactions}
+              lang={lang}
+            />
+
+            {/* 4. Optional Description */}
+            <div className="space-y-1.5">
+              <span className={lang === 'bn' ? 'text-[11px] font-bold tracking-normal text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>
+                {t.notes}
               </span>
               <input
                 type="text"
-                inputMode="decimal"
-                data-numpad="true"
-                placeholder="0"
-                value={amountInput}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  const clean = val.replace(/[^0-9.]/g, '');
-                  const dots = clean.split('.');
-                  let sanitized = clean;
-                  if (dots.length > 2) {
-                    sanitized = dots[0] + '.' + dots.slice(1).join('');
-                  }
-                  setAmountInput(formatIndianNumberString(sanitized));
-                }}
-                className="w-full pl-10 pr-4 py-3.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white font-black text-2xl tabular-nums font-mono focus:border-slate-950 dark:focus:border-white focus:outline-none transition-colors shadow-2xs"
-                required
+                placeholder={selectedTag ? getTagDefaultDescription(selectedTag, lang) : t.notesPlaceholder}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                onFocus={centerNativeInput}
+                className="w-full px-3.5 py-2.5 rounded-2xl border border-slate-900/[0.08] dark:border-white/[0.08] bg-slate-900/[0.03] dark:bg-white/[0.04] text-slate-950 dark:text-white font-medium text-sm focus:outline-none transition-colors"
               />
             </div>
-
-            {!isSubmitting && getDuplicate() && (
-              <p className="text-xs font-bold text-[#FFC043] dark:text-[#FFD479] mt-1 flex items-center gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                {t.duplicateRealtimeWarning}
-              </p>
-            )}
-
-            {type === 'payment' && currentCustomer && (currentCustomer as any).outstandingDue > 0 && (
-              <button 
-                type="button"
-                onClick={() => {
-                  triggerHaptic('single');
-                  const targetDue = (currentCustomer as any).outstandingDue;
-                  const isChecked = amountInput.replace(/,/g, '') === targetDue.toString();
-                  if (!isChecked) {
-                    setAmountInput(formatIndianNumberString(targetDue.toString()));
-                  } else {
-                    setAmountInput('');
-                  }
-                }}
-                className="w-full flex items-center text-left gap-2.5 mt-2 p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800/80 cursor-pointer transition-colors select-none shadow-2xs"
-              >
-                <input
-                  type="checkbox"
-                  className="w-4 h-4 accent-slate-950 dark:accent-white rounded cursor-pointer pointer-events-none"
-                  checked={amountInput.replace(/,/g, '') === (currentCustomer as any).outstandingDue.toString()}
-                  readOnly
-                />
-                <span className="text-xs font-bold text-slate-900 dark:text-white select-none">
-                  {(currentCustomer as any).accountType === 'credit_card'
-                    ? (lang === 'bn' ? 'সম্পূর্ণ কার্ড বিল পরিশোধ করুন' : 'Pay total card balance')
-                    : (lang === 'bn' ? 'সম্পূর্ণ বকেয়া পরিশোধ করুন' : 'Settle complete due')} (৳{formatNumber((currentCustomer as any).outstandingDue, lang)})
-                </span>
-              </button>
-            )}
-
-            {/* Speedy Pad helpers (Clickable panels with bold borders) */}
-            <div className="flex flex-wrap gap-1.5 pt-1">
-              {[50, 100, 500, 1000, 5000].map(val => (
-                <button
-                  key={val}
-                  type="button"
-                  onClick={() => handleQuickAddAmount(val)}
-                  className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-900 dark:text-white font-bold rounded-lg border-2 border-slate-300 dark:border-slate-700 transition-colors text-xs cursor-pointer tabular-nums font-mono shadow-2xs active:scale-95"
-                >
-                  +{formatNumber(val, lang)}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setAmountInput('')}
-                className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-900/40 text-rose-600 dark:text-rose-400 font-bold rounded-lg border-2 border-rose-300 dark:border-rose-900 transition-colors text-xs cursor-pointer active:scale-95"
-              >
-                {lang === 'bn' ? 'মুছুন' : 'Clear'}
-              </button>
-            </div>
           </div>
 
-          {/* 4. OPTIONAL DESCRIPTION WITH BOLD BORDER & SUBTLE GRAYISH HUE */}
-          <div className="space-y-1">
-            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
-              {t.notes}
-            </span>
-            <input
-              type="text"
-              placeholder={t.notesPlaceholder}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              onFocus={centerNativeInput}
-              className="w-full px-3.5 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white font-bold text-sm focus:border-slate-950 dark:focus:border-white focus:outline-none transition-colors"
-            />
-          </div>
-
-
-
-          </div>
-
-          {/* Error Message & Actions Submit sticky bottom navbar */}
-          <div className="p-4 sm:p-5 border-t border-slate-200 dark:border-slate-800/80 bg-white dark:bg-[#0D121D] shrink-0">
+          {/* Sticky Bottom Confirm */}
+          <div className="p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-5 border-t border-slate-900/[0.06] dark:border-white/[0.06] bg-white/50 dark:bg-black/25 shrink-0">
             {errorMsg && (
-              <div className="p-3 mb-3 bg-[#FFECEB] dark:bg-[#DC2626]/20 rounded-xl text-[#DC2626] dark:text-[#FF6B5B] font-semibold text-xs flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div className="p-3 mb-3 bg-rose-500/10 rounded-2xl text-rose-600 dark:text-rose-400 font-semibold text-xs flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 stroke-[1.25]" />
                 <span>{errorMsg}</span>
               </div>
             )}
@@ -857,10 +896,10 @@ export default function QuickEntryModal({
               ref={submitBtnRef}
               type="submit"
               disabled={isSubmitting}
-              className={`w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center transition-colors cursor-pointer select-none active:scale-[0.99] border-2 shadow-xs ${
-                type === 'due' 
-                  ? 'bg-[#DC2626] hover:bg-[#B81400] border-[#DC2626] text-white' 
-                  : 'bg-[#059669] hover:bg-[#03723C] border-[#059669] text-white'
+              className={`w-full py-3.5 rounded-full font-bold text-sm flex items-center justify-center transition-all cursor-pointer select-none touch-press shadow-lg ${
+                type === 'due'
+                  ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-600/20'
+                  : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
               } ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
               id="save_transaction_btn"
             >
@@ -874,108 +913,115 @@ export default function QuickEntryModal({
               )}
             </button>
           </div>
-
         </form>
       </div>
-  {/* Duplicate Entry Warning Modal */}
-  {duplicateTxWarning && (
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md">
-      <motion.div
-        initial={{ opacity: 0, y: 30 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 30 }}
-        className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border p-6 relative"
-      >
-        <div className="text-center mb-5">
-          <div className="w-12 h-12 bg-[#FFF8E6] dark:bg-amber-950/30 border border-[#FFC043]/40 rounded-xl flex items-center justify-center mx-auto mb-3">
-            <AlertTriangle className="w-6 h-6 text-[#7A4B00] dark:text-[#FFD479]" />
-          </div>
-          <h3 className="text-base font-bold text-slate-950 dark:text-white mb-1.5">
-            {t.duplicateWarningTitle}
-          </h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            {t.duplicateWarningDesc}
-          </p>
-          
-          {/* Details Card */}
-          <div className="bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800/80 rounded-xl p-3.5 text-left space-y-2 mt-4">
-            <div className="flex justify-between items-baseline">
-              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">{t.type}</span>
-              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
-                duplicateTxWarning.type === 'due' 
-                  ? 'bg-[#FFECEB] text-[#DC2626] dark:bg-[#DC2626]/20 dark:text-[#FF6B5B]' 
-                  : 'bg-[#E6F7EF] text-[#059669] dark:bg-[#059669]/20 dark:text-[#38D388]'
-              }`}>
-                {duplicateTxWarning.type === 'due' ? t.duePlus : t.paymentMinus}
-              </span>
-            </div>
-            <div className="flex justify-between items-baseline">
-              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">{t.amount}</span>
-              <span className={`text-sm font-black tabular-nums font-mono ${
-                duplicateTxWarning.type === 'due' ? 'text-[#DC2626]' : 'text-[#059669]'
-              }`}>
-                ৳ {formatNumber(duplicateTxWarning.amount, lang)}
-              </span>
-            </div>
-          </div>
-        </div>
-        <div className="flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              if (setHighlightedTxId) {
-                setHighlightedTxId(duplicateTxWarning.id);
-              }
-              setDuplicateTxWarning(null);
-              if (onViewCustomer) {
-                onViewCustomer(selectedCustomerId, true);
-              } else {
-                onClose();
-              }
-            }}
-            className="w-full py-3 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 border-2 border-slate-950 dark:border-white font-bold rounded-xl cursor-pointer text-xs transition-colors shadow-xs"
-          >
-            {t.viewExistingEntry}
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              setHasShownDuplicateWarning(true);
-              setDuplicateTxWarning(null);
-              await executeSave(true);
-            }}
-            className="w-full py-3 bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-700 font-bold rounded-xl cursor-pointer text-xs transition-colors shadow-2xs"
-          >
-            {t.addAnyway}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setDuplicateTxWarning(null);
-            }}
-            className="w-full py-2.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white font-bold cursor-pointer transition-colors"
-          >
-            {t.cancel}
-          </button>
-        </div>
-      </motion.div>
-    </div>
-  )}
 
-  {/* Modern Contact Phone Selector Modal */}
-  {pendingContactChoice && (
-    <ContactNumberPickerModal
-      isOpen={true}
-      contactName={pendingContactChoice.contactName}
-      numbers={pendingContactChoice.numbers}
-      onSelectNumber={(chosen) => {
-        pendingContactChoice.onSelect(chosen);
-        setPendingContactChoice(null);
-      }}
-      onClose={() => setPendingContactChoice(null)}
-      lang={lang}
-    />
-  )}
-    </div>
+      {/* Duplicate Entry Warning Modal */}
+      {duplicateTxWarning && (
+        <ModalPortal lockScroll={false}>
+          <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+            <div
+              onClick={() => setDuplicateTxWarning(null)}
+              className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+            />
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-sm rounded-t-[2rem] sm:rounded-3xl border p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pb-6 max-h-[90dvh] overflow-y-auto hide-scrollbar shadow-2xl"
+            >
+              <div className="flex justify-center pb-3 sm:hidden">
+                <div className="w-10 h-1 rounded-full bg-slate-900/15 dark:bg-white/20 mx-auto" />
+              </div>
+            <div className="text-center mb-5">
+              <div className="w-12 h-12 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto mb-3">
+                <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 stroke-[1.25]" />
+              </div>
+              <h3 className="font-display text-lg font-bold text-slate-950 dark:text-white mb-1.5">
+                {t.duplicateWarningTitle}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                {t.duplicateWarningDesc}
+              </p>
+
+              <div className="bg-slate-900/[0.03] dark:bg-white/[0.04] border border-slate-900/[0.07] dark:border-white/[0.08] rounded-2xl p-3.5 text-left space-y-2 mt-4">
+                <div className="flex justify-between items-baseline">
+                  <span className={lang === 'bn' ? 'text-[11px] font-bold tracking-normal text-slate-500 dark:text-slate-400' : 'micro-mono-label font-semibold'}>{t.type}</span>
+                  <span className={`text-[11px] font-bold ${
+                    duplicateTxWarning.type === 'due'
+                      ? 'text-rose-600 dark:text-rose-400'
+                      : 'text-emerald-600 dark:text-emerald-400'
+                  }`}>
+                    {duplicateTxWarning.type === 'due' ? t.duePlus : t.paymentMinus}
+                  </span>
+                </div>
+                <div className="flex justify-between items-baseline">
+                  <span className={lang === 'bn' ? 'text-[11px] font-bold tracking-normal text-slate-500 dark:text-slate-400' : 'micro-mono-label font-semibold'}>{t.amount}</span>
+                  <span className={`text-sm font-bold tabular-nums font-mono ${
+                    duplicateTxWarning.type === 'due' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
+                  }`}>
+                    ৳ {formatNumber(duplicateTxWarning.amount, lang)}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (setHighlightedTxId) {
+                    setHighlightedTxId(duplicateTxWarning.id);
+                  }
+                  setDuplicateTxWarning(null);
+                  if (onViewCustomer) {
+                    onViewCustomer(selectedCustomerId, true);
+                  } else {
+                    onClose();
+                  }
+                }}
+                className="w-full py-3 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-full cursor-pointer text-xs transition-colors touch-press"
+              >
+                {t.viewExistingEntry}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setHasShownDuplicateWarning(true);
+                  setDuplicateTxWarning(null);
+                  await executeSave(true);
+                }}
+                className="w-full py-3 bg-slate-900/[0.05] hover:bg-slate-900/[0.09] dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-slate-900 dark:text-white font-bold rounded-full cursor-pointer text-xs transition-colors"
+              >
+                {t.addAnyway}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDuplicateTxWarning(null);
+                }}
+                className="w-full py-2.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white font-bold cursor-pointer transition-colors"
+              >
+                {t.cancel}
+              </button>
+            </div>
+          </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {/* Modern Contact Phone Selector Modal */}
+      {pendingContactChoice && (
+        <ContactNumberPickerModal
+          isOpen={true}
+          contactName={pendingContactChoice.contactName}
+          numbers={pendingContactChoice.numbers}
+          onSelectNumber={(chosen) => {
+            pendingContactChoice.onSelect(chosen);
+            setPendingContactChoice(null);
+          }}
+          onClose={() => setPendingContactChoice(null)}
+          lang={lang}
+        />
+      )}
+      </div>
+    </ModalPortal>
   );
 }

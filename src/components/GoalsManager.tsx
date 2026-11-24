@@ -3,10 +3,16 @@ import { Customer, SavingGoal, GoalContribution, Reminder } from '../types';
 import { 
   Target, Calendar, Plus, Users, Trash2, CheckCircle2, ChevronRight, ChevronDown, CreditCard, X, AlertCircle, ReceiptText, AlertTriangle, PiggyBank, CalendarClock, RotateCcw, Goal, Percent, Calculator, Bell, BellRing, Info, Pencil, Check, User, Wallet, ArrowDownLeft, ArrowUpRight, Minus, Sprout 
 } from 'lucide-react';
-import { motion } from 'motion/react';
 import { triggerHaptic } from '../lib/haptics';
 import { translations, Language, formatNumber, formatIndianNumberString } from '../lib/translations';
 import { toast } from 'sonner';
+import { StaggerReveal, SpotlightCard, CircularGauge } from './MotionPrimitives';
+import ModalPortal, { useModalScrollLock } from './ModalPortal';
+import {
+  NativeTimePicker,
+  NativeOptionPicker,
+  NativeCustomerPicker
+} from './NativePickers';
 
 interface GoalsManagerProps {
   goals: SavingGoal[];
@@ -354,6 +360,69 @@ export default function GoalsManager({
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
+  // Body scroll lock while any GoalsManager popup is open
+  useModalScrollLock(
+    showCreateModal ||
+    !!selectedGoal ||
+    !!emiReminderGoal ||
+    showCancelConfirm ||
+    showDeleteConfirm ||
+    showReactivateConfirm ||
+    isEditingGoalTitle ||
+    !!editingContribution ||
+    !!deletingContribution
+  );
+
+  // Escape key dismissal prioritizing topmost nested modal
+  useEffect(() => {
+    const anyModalOpen =
+      showCreateModal ||
+      !!selectedGoal ||
+      !!emiReminderGoal ||
+      showCancelConfirm ||
+      showDeleteConfirm ||
+      showReactivateConfirm ||
+      isEditingGoalTitle ||
+      !!editingContribution ||
+      !!deletingContribution;
+    if (!anyModalOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (showDeleteConfirm) {
+        closeDeleteGoalConfirm();
+      } else if (showCancelConfirm) {
+        closeCancelGoalConfirm();
+      } else if (showReactivateConfirm) {
+        closeReactivateGoalConfirm();
+      } else if (emiReminderGoal) {
+        closeEmiReminderModal();
+      } else if (deletingContribution) {
+        closeDeleteContributionModal();
+      } else if (editingContribution) {
+        closeEditContributionModal();
+      } else if (isEditingGoalTitle) {
+        closeRenameGoal();
+      } else if (selectedGoal) {
+        closeGoalDetail();
+      } else if (showCreateModal) {
+        closeCreateGoalModal();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    showCreateModal,
+    selectedGoal,
+    emiReminderGoal,
+    showCancelConfirm,
+    showDeleteConfirm,
+    showReactivateConfirm,
+    isEditingGoalTitle,
+    editingContribution,
+    deletingContribution
+  ]);
+
   // Sync selectedGoal when goals list is updated
   useEffect(() => {
     if (selectedGoal) {
@@ -533,18 +602,6 @@ export default function GoalsManager({
     closeEmiReminderModal();
   };
 
-  // 1. Disable background scrolling when ANY modal is active
-  useEffect(() => {
-    if (showCreateModal || selectedGoal || showCancelConfirm || showDeleteConfirm || showReactivateConfirm || emiReminderGoal || editingContribution || deletingContribution || isEditingGoalTitle) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [showCreateModal, selectedGoal, showCancelConfirm, showDeleteConfirm, showReactivateConfirm, emiReminderGoal, editingContribution, deletingContribution, isEditingGoalTitle]);
-
   useEffect(() => {
     setIsEmiBreakdownOpen(false);
   }, [selectedGoal?.id]);
@@ -716,24 +773,21 @@ export default function GoalsManager({
       : 0;
 
     try {
-      const [res] = await Promise.all([
-        createGoal(
-          goalTitle.trim(),
-          finalTargetVal,
-          isPiggyBank ? 'flexible' : frequency,
-          isPiggyBank ? undefined : instVal,
-          effectiveGoalType,
-          selectedCustomerId || undefined,
-          linkedCust?.name,
-          finalNote || undefined,
-          effectiveGoalType === 'deposit' ? principalVal : undefined,
-          effectiveGoalType === 'deposit' && hasInterest ? parseFloat(interestRate) : undefined,
-          effectiveGoalType === 'deposit' && hasInterest ? interestAmt : 0,
-          effectiveGoalType === 'deposit' && frequency !== 'flexible' ? tenureNum : undefined,
-          effectiveIsOpenEnded
-        ),
-        new Promise(resolve => setTimeout(resolve, 600))
-      ]);
+      const res = await createGoal(
+        goalTitle.trim(),
+        finalTargetVal,
+        isPiggyBank ? 'flexible' : frequency,
+        isPiggyBank ? undefined : instVal,
+        effectiveGoalType,
+        selectedCustomerId || undefined,
+        linkedCust?.name,
+        finalNote || undefined,
+        effectiveGoalType === 'deposit' ? principalVal : undefined,
+        effectiveGoalType === 'deposit' && hasInterest ? parseFloat(interestRate) : undefined,
+        effectiveGoalType === 'deposit' && hasInterest ? interestAmt : 0,
+        effectiveGoalType === 'deposit' && frequency !== 'flexible' ? tenureNum : undefined,
+        effectiveIsOpenEnded
+      );
 
       if (res) {
         setGoalTitle('');
@@ -783,10 +837,13 @@ export default function GoalsManager({
 
     setIsSubmitting(true);
     try {
-      const [updated] = await Promise.all([
-        addGoalContribution(selectedGoal.id, amt, installmentNote, syncToLedger, contributionActionType),
-        new Promise(resolve => setTimeout(resolve, 600))
-      ]);
+      const updated = await addGoalContribution(
+        selectedGoal.id,
+        amt,
+        installmentNote,
+        syncToLedger,
+        contributionActionType
+      );
       
       let newSavedAmount = Number(selectedGoal.savedAmount) || 0;
       if (contributionActionType === 'withdrawal') {
@@ -840,60 +897,86 @@ export default function GoalsManager({
     openDeleteGoalConfirm();
   };
 
+  const glassLabelCls = lang === 'bn'
+    ? 'text-[11px] font-bold tracking-normal text-slate-500 dark:text-slate-400'
+    : 'micro-mono-label font-semibold';
+
+  const glassFieldCls =
+    'w-full px-3.5 py-2.5 rounded-2xl border border-slate-900/[0.08] dark:border-white/[0.08] bg-slate-900/[0.03] dark:bg-white/[0.04] text-slate-950 dark:text-white outline-none transition-colors';
+
   return (
-    <div className="space-y-5 no-select">
-      {/* HEADER SECTION */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <h2 className="text-xl font-bold text-black dark:text-white flex items-center gap-2">
-          <Goal className="w-5 h-5 stroke-[2]" />
-          <span>{t.goalsHeaderTitle}</span>
-          <span className="text-xs font-semibold text-[#757575]">
-            ({formatNumber(goals.length, lang)})
+    <div className="space-y-6 no-select">
+      {/* Open Editorial Header */}
+      <section className="pt-1 flex items-end justify-between gap-3">
+        <div>
+          <span className={glassLabelCls}>
+            {lang === 'bn' ? 'সঞ্চয় ও কিস্তি পরিকল্পনা' : 'Savings & Installments'}
           </span>
-        </h2>
+          <h2 className="font-display text-2xl sm:text-3xl font-bold text-slate-950 dark:text-white tracking-tight mt-0.5 flex items-baseline gap-2.5">
+            <span>{t.goalsHeaderTitle}</span>
+            <span className="text-xs font-mono font-medium text-slate-500 dark:text-slate-400">
+              {formatNumber(goals.length, lang)}
+            </span>
+          </h2>
+        </div>
 
         <button
           onClick={openCreateGoalModal}
-          className="px-4 py-2.5 bg-black hover:bg-[#262626] dark:bg-white dark:hover:bg-[#E2E2E2] text-white dark:text-black font-bold rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer text-xs shrink-0"
+          className="px-4 py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-full flex items-center justify-center gap-1.5 transition-colors cursor-pointer text-xs shrink-0 touch-press shadow-sm"
           id="create_goal_btn"
         >
-          <Plus className="w-4 h-4 stroke-[2.5]" />
-          {t.createGoal}
+          <Plus className="w-3.5 h-3.5 stroke-[1.5]" />
+          <span>{t.createGoal}</span>
         </button>
-      </div>
+      </section>
 
-      {/* FILTER TABS */}
-      <div className="flex w-full surface-subcard p-1 rounded-xl border border-slate-200/80 dark:border-slate-800">
+      {/* Sliding Segmented Pill Tabs (Pure GPU translate3d — zero layout projection overhead) */}
+      <div className="surface-subcard relative grid grid-cols-2 p-1 rounded-full border border-slate-900/[0.06] dark:border-white/[0.08]">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute top-1 bottom-1 left-1 rounded-full bg-slate-950 dark:bg-white border-2 border-slate-950 dark:border-white shadow-xs will-change-transform"
+          style={{
+            width: 'calc((100% - 8px) / 2)',
+            transform: filterTab === 'active' ? 'translate3d(0%, 0, 0)' : 'translate3d(100%, 0, 0)',
+            transition: 'transform 240ms cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
+        />
         <button
           onClick={() => { triggerHaptic('single'); setFilterTab('active'); }}
-          className={`flex-1 py-2 text-center text-xs font-bold rounded-lg transition-colors duration-150 cursor-pointer ${
+          className={`relative z-10 py-2 text-center text-xs font-bold rounded-full transition-colors cursor-pointer ${
             filterTab === 'active'
-              ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 shadow-xs'
-              : 'text-[#757575] hover:text-black dark:hover:text-white'
+              ? 'text-white dark:text-slate-950'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
           }`}
         >
-          {lang === 'bn' ? 'চলমান লক্ষ্যসমূহ' : 'Active Goals'} ({activeGoals.length})
+          <span>
+            {lang === 'bn' ? 'চলমান লক্ষ্যসমূহ' : 'Active'} ({formatNumber(activeGoals.length, lang)})
+          </span>
         </button>
         <button
           onClick={() => { triggerHaptic('single'); setFilterTab('history'); }}
-          className={`flex-1 py-2 text-center text-xs font-bold rounded-lg transition-colors duration-150 cursor-pointer ${
+          className={`relative z-10 py-2 text-center text-xs font-bold rounded-full transition-colors cursor-pointer ${
             filterTab === 'history'
-              ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 shadow-xs'
-              : 'text-[#757575] hover:text-black dark:hover:text-white'
+              ? 'text-white dark:text-slate-950'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
           }`}
         >
-          {lang === 'bn' ? 'আর্কাইভ খতিয়ান' : 'History'} ({historyGoals.length})
+          <span>
+            {lang === 'bn' ? 'আর্কাইভ খতিয়ান' : 'History'} ({formatNumber(historyGoals.length, lang)})
+          </span>
         </button>
       </div>
 
-      {/* GOALS GRID */}
+      {/* Goals Bento Grid */}
       {visibleGoals.length === 0 ? (
         <div
           key={`goals-empty-${filterTab}`}
-          className="surface-glass border border-slate-200 dark:border-slate-800 rounded-2xl p-10 text-center text-[#757575] flex flex-col items-center justify-center gap-2.5"
+          className="surface-glass border rounded-[28px] p-10 text-center text-slate-500 dark:text-slate-400 flex flex-col items-center justify-center gap-2.5"
         >
-          <Target className="w-10 h-10 stroke-[1.5]" />
-          <p className="font-bold text-sm text-black dark:text-white">{t.noGoals}</p>
+          <div className="w-12 h-12 rounded-full bg-slate-900/[0.04] dark:bg-white/[0.06] flex items-center justify-center">
+            <Target className="w-5 h-5 stroke-[1.25]" />
+          </div>
+          <p className="font-bold text-sm text-slate-950 dark:text-white">{t.noGoals}</p>
           <p className="text-xs max-w-xs">{lang === 'bn' ? 'ইএমআই বা সঞ্চয় লক্ষ্য তৈরি করতে উপরের বাটনে চাপ দিন।' : 'Create EMI installment plans or savings targets using the button above.'}</p>
         </div>
       ) : (
@@ -901,152 +984,158 @@ export default function GoalsManager({
           key={`goals-grid-${filterTab}`}
           className="grid grid-cols-1 md:grid-cols-2 gap-3.5"
         >
-          {visibleGoals.map(goal => {
+          {visibleGoals.map((goal, idx) => {
             const percent = Math.min(100, Math.round(((goal.savedAmount || 0) / (goal.targetAmount || 1)) * 100));
             const isSavings = goal.type === 'savings';
-            
-            return (
-              <div 
-                key={goal.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => openGoalDetail(goal)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    openGoalDetail(goal);
-                  }
-                }}
-                className="surface-glass-interactive border border-slate-200 dark:border-slate-800 p-4.5 rounded-2xl overflow-hidden transition-none cursor-pointer relative group flex flex-col justify-between min-h-[160px] touch-manipulation select-none focus:outline-none active:scale-[0.99]"
-              >
-                <div>
-                  {/* Title & Badge */}
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h3 className="text-base font-bold text-black dark:text-white truncate">
-                        {goal.title}
-                      </h3>
-                      {goal.customerName && (
-                        <p className="text-xs text-[#757575] font-semibold flex items-center gap-1 mt-0.5">
-                          <Users className="w-3.5 h-3.5 text-black dark:text-white" />
-                          {goal.customerName}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {goal.status === 'active' && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openEmiReminderModal(goal);
-                          }}
-                          className={`p-1.5 rounded-md transition-colors cursor-pointer ${
-                            reminders.some(r => r.goalId === goal.id && r.active)
-                              ? 'bg-black text-white dark:bg-white dark:text-black'
-                              : 'text-[#757575] hover:text-black dark:hover:text-white'
-                          }`}
-                          title={
-                            reminders.some(r => r.goalId === goal.id && r.active)
-                              ? (lang === 'bn' ? 'কিস্তির অ্যালার্ট সক্রিয় (৭ দিন আগে তাগাদা)' : 'EMI Alert Active (7-day advance reminder)')
-                              : (lang === 'bn' ? 'কিস্তির অ্যালার্ট সেট করুন' : 'Set EMI Reminder')
-                          }
-                        >
-                          {reminders.some(r => r.goalId === goal.id && r.active) ? (
-                            <BellRing className="w-3.5 h-3.5" />
+            const isFlexible = goal.isOpenEnded && (!goal.targetAmount || goal.targetAmount === 0);
+            const ringColor = goal.status === 'completed'
+              ? '#059669'
+              : isSavings
+                ? 'var(--accent-color)'
+                : '#E11D48';
+
+            const cardNode = (
+                <SpotlightCard
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openGoalDetail(goal)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      openGoalDetail(goal);
+                    }
+                  }}
+                  className="surface-glass-interactive border p-5 rounded-[26px] overflow-hidden cursor-pointer relative group flex flex-col justify-between min-h-[156px] touch-press select-none focus:outline-none h-full"
+                >
+                  <div className="flex items-start justify-between gap-3.5">
+                    <div className="flex items-start gap-3.5 min-w-0 flex-1">
+                      {/* Circular Progress Ring */}
+                      <div className="relative shrink-0 flex items-center justify-center">
+                        <CircularGauge
+                          percent={isFlexible ? 100 : percent}
+                          size={52}
+                          strokeWidth={4.5}
+                          strokeColor={ringColor}
+                        />
+                        <span className="absolute text-[10px] font-mono font-bold text-slate-950 dark:text-white tabular-nums">
+                          {isFlexible ? (
+                            <Sprout className="w-4 h-4 stroke-[1.25] text-emerald-600 dark:text-emerald-400" />
                           ) : (
-                            <Bell className="w-3.5 h-3.5" />
+                            `${percent}%`
                           )}
-                        </button>
-                      )}
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 flex items-center gap-1 border ${
-                        goal.isOpenEnded
-                          ? 'bg-[#E6F6F4] border-[#0D9488]/30 text-[#0F766E] dark:bg-[#0D9488]/20 dark:text-[#2DD4BF]'
-                          : isSavings
-                            ? 'bg-[#E6F7EF] border-[#059669]/30 text-[#059669] dark:bg-[#059669]/20 dark:text-[#38D388]' 
-                            : 'bg-[#FFECEB] border-[#DC2626]/30 text-[#DC2626] dark:bg-[#DC2626]/20 dark:text-[#FF6B5B]'
-                      }`}>
-                        {goal.isOpenEnded ? (
-                          <Sprout className="w-3 h-3" />
-                        ) : isSavings ? (
-                          <Target className="w-3 h-3" />
-                        ) : (
-                          <CalendarClock className="w-3 h-3" />
+                        </span>
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <h3 className="font-display text-base font-bold text-slate-950 dark:text-white truncate">
+                            {goal.title}
+                          </h3>
+                        </div>
+
+                        <p className={`text-[11px] font-medium mt-0.5 truncate ${
+                          goal.isOpenEnded
+                            ? 'text-teal-600 dark:text-teal-400'
+                            : isSavings
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : 'text-rose-600 dark:text-rose-400'
+                        }`}>
+                          {goal.isOpenEnded
+                            ? (lang === 'bn' ? 'উন্মুক্ত সঞ্চয়' : 'Flexible Savings')
+                            : (isSavings ? t.savings : t.deposit)}
+                          {' · '}
+                          <span className="text-slate-500 dark:text-slate-400">
+                            {goal.installmentAmount ? `৳${formatNumber(goal.installmentAmount, lang)} ` : ''}
+                            {goal.frequency === 'daily' && t.daily}
+                            {goal.frequency === 'weekly' && t.weekly}
+                            {goal.frequency === 'monthly' && t.monthly}
+                            {goal.frequency === 'flexible' && t.flexible}
+                          </span>
+                        </p>
+
+                        {goal.customerName && (
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium flex items-center gap-1 mt-1 truncate">
+                            <User className="w-3 h-3 stroke-[1.25] shrink-0" />
+                            <span className="truncate">{goal.customerName}</span>
+                          </p>
                         )}
-                        {goal.isOpenEnded ? (lang === 'bn' ? 'উন্মুক্ত সঞ্চয়' : 'Flexible Savings') : (isSavings ? t.savings : t.deposit)}
-                      </span>
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Installment / Flexible details */}
-                  <div className="flex items-center gap-1.5 mt-3 text-xs font-medium text-[#757575]">
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>
-                      {goal.installmentAmount ? `৳${formatNumber(goal.installmentAmount, lang)}` : ''}{' '}
-                      {goal.frequency === 'daily' && t.daily}
-                      {goal.frequency === 'weekly' && t.weekly}
-                      {goal.frequency === 'monthly' && t.monthly}
-                      {goal.frequency === 'flexible' && t.flexible}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Progress bar or Flexible Balance */}
-                {goal.isOpenEnded && (!goal.targetAmount || goal.targetAmount === 0) ? (
-                  <div className="mt-4 space-y-1.5">
-                    <div className="flex items-center justify-between text-xs font-mono font-bold">
-                      <span className="text-black dark:text-white text-base font-black">
-                        ৳{formatNumber(goal.savedAmount || 0, lang)}
-                      </span>
-                      <span className="text-[#757575] font-sans text-[11px]">
-                        {formatNumber(goal.contributions?.length || 0, lang)} {lang === 'bn' ? 'টি লেনদেন' : 'records'}
-                      </span>
-                    </div>
-                    <div className="w-full h-1.5 bg-[#EEEEEE] dark:bg-[#262626] rounded-xs overflow-hidden">
-                      <div
-                        className={`h-full rounded-xs transition-all duration-300 w-full ${
-                          goal.status === 'completed' ? 'bg-[#059669]' : 'bg-black dark:bg-white'
+                    {goal.status === 'active' && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEmiReminderModal(goal);
+                        }}
+                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
+                          reminders.some(r => r.goalId === goal.id && r.active)
+                            ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950'
+                            : 'bg-slate-900/[0.04] dark:bg-white/[0.06] text-slate-500 hover:text-slate-950 dark:hover:text-white'
                         }`}
-                      />
-                    </div>
+                        title={
+                          reminders.some(r => r.goalId === goal.id && r.active)
+                            ? (lang === 'bn' ? 'কিস্তির অ্যালার্ট সক্রিয় (৭ দিন আগে তাগাদা)' : 'EMI Alert Active (7-day advance reminder)')
+                            : (lang === 'bn' ? 'কিস্তির অ্যালার্ট সেট করুন' : 'Set EMI Reminder')
+                        }
+                      >
+                        {reminders.some(r => r.goalId === goal.id && r.active) ? (
+                          <BellRing className="w-3.5 h-3.5 stroke-[1.25]" />
+                        ) : (
+                          <Bell className="w-3.5 h-3.5 stroke-[1.25]" />
+                        )}
+                      </button>
+                    )}
                   </div>
-                ) : (
-                  <div className="mt-4 space-y-1.5">
-                    <div className="flex items-center justify-between text-xs font-mono font-bold">
-                      <span className="text-black dark:text-white">
-                        ৳{formatNumber(goal.savedAmount || 0, lang)} / ৳{formatNumber(goal.targetAmount, lang)}
-                      </span>
-                      <span className="text-[#757575]">{percent}%</span>
-                    </div>
-                    
-                    <div className="w-full h-1.5 bg-[#EEEEEE] dark:bg-[#262626] rounded-xs overflow-hidden">
-                      <div 
-                        className={`h-full rounded-xs transition-all duration-300 ${
-                          goal.status === 'completed' 
-                            ? 'bg-[#059669]' 
-                            : isSavings ? 'bg-black dark:bg-white' : 'bg-[#DC2626]'
-                        }`}
-                        style={{ width: `${percent}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
 
-                {/* Status indicator overlay for finished */}
-                {goal.status !== 'active' && (
-                  <div className="absolute inset-0 bg-white/75 dark:bg-[#09090B]/70 rounded-[15px] flex items-center justify-center pointer-events-none">
-                    <span className="px-3 py-1 rounded-md font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 border border-black/10 dark:border-slate-700/80 bg-white dark:bg-[#0F1623] text-black dark:text-white">
-                      {goal.status === 'completed' ? (
-                        <>
-                          <CheckCircle2 className="w-3.5 h-3.5 text-[#059669]" />
-                          {lang === 'bn' ? 'সম্পন্ন' : 'Completed'}
-                        </>
-                      ) : (
-                        lang === 'bn' ? 'বাতিল' : 'Cancelled'
-                      )}
-                    </span>
+                  {/* Bottom Monetary Ratio */}
+                  <div className="mt-4 pt-3 border-t border-slate-900/[0.06] dark:border-white/[0.06] flex items-baseline justify-between gap-2">
+                    {isFlexible ? (
+                      <>
+                        <span className="font-display text-xl font-bold text-slate-950 dark:text-white tabular-nums tracking-tight">
+                          ৳{formatNumber(goal.savedAmount || 0, lang)}
+                        </span>
+                        <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                          {formatNumber(goal.contributions?.length || 0, lang)} {lang === 'bn' ? 'টি লেনদেন' : 'entries'}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-display text-xl font-bold text-slate-950 dark:text-white tabular-nums tracking-tight">
+                          ৳{formatNumber(goal.savedAmount || 0, lang)}
+                        </span>
+                        <span className="text-xs font-mono text-slate-500 dark:text-slate-400 tabular-nums">
+                          / ৳{formatNumber(goal.targetAmount, lang)}
+                        </span>
+                      </>
+                    )}
                   </div>
-                )}
+
+                  {goal.status !== 'active' && (
+                    <div className="absolute inset-0 bg-white/70 dark:bg-black/65 backdrop-blur-[2px] rounded-[26px] flex items-center justify-center pointer-events-none">
+                      <span className="px-4 py-1.5 rounded-full font-bold text-xs flex items-center gap-1.5 glass-modal border text-slate-950 dark:text-white shadow-sm">
+                        {goal.status === 'completed' ? (
+                          <>
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 stroke-[1.5]" />
+                            <span>{lang === 'bn' ? 'সম্পন্ন' : 'Completed'}</span>
+                          </>
+                        ) : (
+                          <span>{lang === 'bn' ? 'বাতিল' : 'Cancelled'}</span>
+                        )}
+                      </span>
+                    </div>
+                  )}
+                </SpotlightCard>
+            );
+
+            return idx < 6 ? (
+              <StaggerReveal key={goal.id} index={idx} staggerMs={20}>
+                {cardNode}
+              </StaggerReveal>
+            ) : (
+              <div key={goal.id} className="customer-card-cv">
+                {cardNode}
               </div>
             );
           })}
@@ -1055,95 +1144,89 @@ export default function GoalsManager({
 
       {/* ── CREATE GOAL MODAL ── */}
       {showCreateModal && (
-        <div
-          className="fixed inset-0 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-y-auto hide-scrollbar"
-        >
-          <div className="absolute inset-0" onClick={closeCreateGoalModal} />
-          
-          <div
-            className="animate-slide-up glass-modal w-full sm:max-w-xl rounded-t-3xl sm:rounded-2xl border shadow-2xl overflow-hidden max-h-[92vh] flex flex-col relative z-10"
-          >
+        <ModalPortal lockScroll={false}>
+          <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+            <div className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur" onClick={closeCreateGoalModal} />
 
-            {/* Header */}
-            <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-950 dark:text-white">
-                {t.createGoal}
-              </h3>
-              <button 
-                type="button"
-                onClick={() => {
-                  triggerHaptic('medium');
-                  closeCreateGoalModal();
-                }}
-                className="p-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
-                aria-label="Close"
-                id="close_goal_modal_btn"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="animate-slide-up glass-modal w-full sm:max-w-xl rounded-t-[2rem] sm:rounded-3xl border shadow-2xl overflow-hidden max-h-[90dvh] flex flex-col relative z-10"
+            >
+              <div className="flex justify-center pt-3 pb-1 sm:hidden shrink-0">
+                <div className="w-10 h-1 rounded-full bg-slate-900/15 dark:bg-white/20 mx-auto" />
+              </div>
 
-            <form onSubmit={handleCreateGoal} className="flex-1 flex flex-col overflow-hidden">
-              <div ref={createGoalScrollRef} className="flex-1 overflow-y-auto hide-scrollbar p-5 space-y-5">
-                
-                {/* 1. Goal Type Selection (EMI / Installment first, Savings Goal second) */}
+              <div className="px-5 py-3.5 sm:py-4 border-b border-slate-900/[0.06] dark:border-white/[0.06] flex items-center justify-between shrink-0">
+                <h3 className="font-display text-lg font-bold text-slate-950 dark:text-white tracking-tight">
+                  {t.createGoal}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic('medium');
+                    closeCreateGoalModal();
+                  }}
+                  className="w-8 h-8 rounded-full bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-600 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer"
+                  aria-label="Close"
+                  id="close_goal_modal_btn"
+                >
+                  <X className="w-4 h-4 stroke-[1.25]" />
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateGoal} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                <div ref={createGoalScrollRef} className="flex-1 min-h-0 overflow-y-auto hide-scrollbar p-5 space-y-5">
+                {/* 1. Goal Type Selection */}
                 <div className="space-y-2.5">
-                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                  <span className={`${glassLabelCls} block`}>
                     {t.goalType}
                   </span>
-                  <div className="grid grid-cols-2 gap-3">
-                    {/* Option 1: EMI / Installment */}
+                  <div className="grid grid-cols-2 gap-2.5">
                     <button
                       type="button"
-                      onClick={() => { 
-                        triggerHaptic('single'); 
+                      onClick={() => {
+                        triggerHaptic('single');
                         setGoalType('deposit');
                         setFrequency('monthly');
                       }}
-                      className={`py-4 px-3 rounded-xl flex flex-col items-center justify-center gap-1 border-2 transition-all cursor-pointer active:scale-[0.98] text-center ${
+                      className={`py-3.5 px-3.5 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all cursor-pointer touch-press text-center ${
                         goalType === 'deposit'
-                          ? 'bg-rose-600 border-rose-600 dark:border-rose-500 text-white shadow-xs font-extrabold'
-                          : 'bg-slate-50 hover:bg-slate-100 border-slate-300 hover:border-slate-400 text-slate-700 dark:bg-slate-900 dark:border-slate-700 dark:hover:border-slate-600 dark:text-slate-200 font-bold'
+                          ? 'bg-rose-600 border-2 border-rose-500 text-white shadow-lg shadow-rose-600/20'
+                          : 'border bg-slate-900/[0.03] hover:bg-slate-900/[0.06] border-slate-900/[0.08] text-slate-700 dark:bg-white/[0.04] dark:hover:bg-white/[0.08] dark:border-white/[0.08] dark:text-slate-200'
                       }`}
                     >
-                      <CalendarClock className="w-5 h-5 stroke-[2.5]" />
-                      <span className="text-sm sm:text-base font-extrabold">
-                        {t.deposit}
-                      </span>
+                      <CalendarClock className="w-4 h-4 stroke-[1.25]" />
+                      <span className="text-sm font-bold">{t.deposit}</span>
                       <span className={`text-[11px] leading-tight ${
-                        goalType === 'deposit' ? 'text-white/90 font-semibold' : 'text-slate-500 dark:text-slate-400 font-medium'
+                        goalType === 'deposit' ? 'text-white/85' : 'text-slate-500 dark:text-slate-400'
                       }`}>
                         {lang === 'bn' ? 'লোন বা পণ্যের কিস্তি পরিশোধ' : 'Loan or item installments'}
                       </span>
                     </button>
 
-                    {/* Option 2: Savings Goal */}
                     <button
                       type="button"
-                      onClick={() => { 
-                        triggerHaptic('single'); 
+                      onClick={() => {
+                        triggerHaptic('single');
                         setGoalType('savings');
                         setFrequency(isOpenEndedSavings ? 'flexible' : 'monthly');
                       }}
-                      className={`py-4 px-3 rounded-xl flex flex-col items-center justify-center gap-1 border-2 transition-all cursor-pointer active:scale-[0.98] text-center ${
+                      className={`py-3.5 px-3.5 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all cursor-pointer touch-press text-center ${
                         goalType === 'savings'
-                          ? 'bg-emerald-600 border-emerald-600 dark:border-emerald-500 text-white shadow-xs font-extrabold'
-                          : 'bg-slate-50 hover:bg-slate-100 border-slate-300 hover:border-slate-400 text-slate-700 dark:bg-slate-900 dark:border-slate-700 dark:hover:border-slate-600 dark:text-slate-200 font-bold'
+                          ? 'bg-emerald-600 border-2 border-emerald-500 text-white shadow-lg shadow-emerald-600/20'
+                          : 'border bg-slate-900/[0.03] hover:bg-slate-900/[0.06] border-slate-900/[0.08] text-slate-700 dark:bg-white/[0.04] dark:hover:bg-white/[0.08] dark:border-white/[0.08] dark:text-slate-200'
                       }`}
                     >
-                      <Target className="w-5 h-5 stroke-[2.5]" />
-                      <span className="text-sm sm:text-base font-extrabold">
-                        {t.savings}
-                      </span>
+                      <Target className="w-4 h-4 stroke-[1.25]" />
+                      <span className="text-sm font-bold">{t.savings}</span>
                       <span className={`text-[11px] leading-tight ${
-                        goalType === 'savings' ? 'text-white/90 font-semibold' : 'text-slate-500 dark:text-slate-400 font-medium'
+                        goalType === 'savings' ? 'text-white/85' : 'text-slate-500 dark:text-slate-400'
                       }`}>
                         {lang === 'bn' ? 'ভবিষ্যতের জন্য টাকা জমান' : 'Save money for the future'}
                       </span>
                     </button>
                   </div>
 
-                  {/* Flexible Savings Toggle Option (Available under Savings Goal) */}
                   {goalType === 'savings' && (
                     <button
                       type="button"
@@ -1164,13 +1247,13 @@ export default function GoalsManager({
                           return next;
                         });
                       }}
-                      className={`w-full p-3 rounded-xl border-2 flex items-center justify-between gap-3 text-left transition-all cursor-pointer select-none ${
+                      className={`w-full p-3.5 rounded-2xl flex items-center justify-between gap-3 text-left transition-all cursor-pointer select-none ${
                         isOpenEndedSavings
-                          ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-500 dark:border-emerald-600'
-                          : 'bg-slate-50 dark:bg-slate-900/60 border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
+                          ? 'bg-emerald-500/10 border-2 border-emerald-500/60'
+                          : 'border bg-slate-900/[0.03] dark:bg-white/[0.04] border-slate-900/[0.07] dark:border-white/[0.08]'
                       }`}
                     >
-                      <span className="text-xs sm:text-sm font-extrabold text-slate-950 dark:text-white truncate">
+                      <span className="text-xs sm:text-sm font-bold text-slate-950 dark:text-white truncate">
                         {lang === 'bn' ? 'উন্মুক্ত সঞ্চয়' : 'Flexible Savings'}
                       </span>
 
@@ -1188,8 +1271,8 @@ export default function GoalsManager({
                 </div>
 
                 {/* 2. Title Input */}
-                <div className="space-y-1">
-                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                <div className="space-y-1.5">
+                  <span className={`${glassLabelCls} block`}>
                     {t.goalTitle} *
                   </span>
                   <input
@@ -1214,14 +1297,14 @@ export default function GoalsManager({
                         }
                       }
                     }}
-                    className="w-full px-3.5 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white font-bold text-sm focus:border-slate-950 dark:focus:border-white outline-none"
+                    className={`${glassFieldCls} font-semibold text-sm`}
                   />
                 </div>
 
-                {/* 3. Target Amount (Disabled when Flexible Savings / Piggy Bank toggle is enabled) */}
+                {/* 3. Target Amount */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className={`text-[11px] font-bold uppercase tracking-wider block ${
+                    <span className={`${lang === 'bn' ? 'text-[11px] font-bold tracking-normal' : 'micro-mono-label font-semibold'} block ${
                       goalType === 'savings' && isOpenEndedSavings
                         ? 'text-slate-400 dark:text-slate-500'
                         : 'text-slate-500 dark:text-slate-400'
@@ -1234,13 +1317,13 @@ export default function GoalsManager({
                       }
                     </span>
                     {goalType === 'savings' && isOpenEndedSavings && (
-                      <span className="text-[10px] font-mono font-semibold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
+                      <span className="text-[10px] font-mono font-semibold text-slate-500 dark:text-slate-400">
                         {lang === 'bn' ? 'নিষ্ক্রিয় (উন্মুক্ত সঞ্চয়)' : 'Disabled (Open-Ended)'}
                       </span>
                     )}
                   </div>
                   <div className="relative">
-                    <span className={`absolute left-3.5 top-1/2 -translate-y-1/2 text-2xl font-black select-none pointer-events-none ${
+                    <span className={`absolute left-3.5 top-1/2 -translate-y-1/2 text-[20px] sm:text-[22px] font-display font-medium select-none pointer-events-none ${
                       goalType === 'savings' && isOpenEndedSavings
                         ? 'text-slate-300 dark:text-slate-700'
                         : 'text-slate-400 dark:text-slate-500'
@@ -1256,15 +1339,15 @@ export default function GoalsManager({
                       placeholder={goalType === 'savings' && isOpenEndedSavings ? (lang === 'bn' ? 'প্রযোজ্য নয়' : 'No limit') : '0'}
                       value={goalType === 'savings' && isOpenEndedSavings ? '' : targetAmount}
                       onChange={(e) => handleAmountChange(e.target.value, setTargetAmount)}
-                      className={`w-full pl-10 pr-4 py-3.5 rounded-xl border-2 font-black text-2xl tabular-nums font-mono outline-none transition-colors ${
+                      className={`w-full pl-9 pr-4 py-2.5 sm:py-3 rounded-2xl border font-display font-bold text-[22px] sm:text-[26px] tracking-tight tabular-nums outline-none transition-colors ${
                         goalType === 'savings' && isOpenEndedSavings
-                          ? 'border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900/40 text-slate-400 dark:text-slate-600 cursor-not-allowed opacity-60'
-                          : 'border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white focus:border-slate-950 dark:focus:border-white'
+                          ? 'border-slate-900/[0.05] dark:border-white/[0.05] bg-slate-900/[0.02] dark:bg-white/[0.02] text-slate-400 dark:text-slate-600 cursor-not-allowed opacity-60'
+                          : 'border-slate-900/[0.09] dark:border-white/[0.1] bg-slate-900/[0.03] dark:bg-white/[0.04] text-slate-950 dark:text-white'
                       }`}
                     />
                   </div>
 
-                  {/* Speedy Pad helpers */}
+                  {/* Speedy Pad Pills */}
                   <div className={`flex flex-wrap gap-1.5 pt-1 ${
                     goalType === 'savings' && isOpenEndedSavings ? 'opacity-40 pointer-events-none select-none' : ''
                   }`}>
@@ -1278,7 +1361,7 @@ export default function GoalsManager({
                           const cur = parseAmount(targetAmount);
                           setTargetAmount(formatIndianNumberString(String(cur + val)));
                         }}
-                        className="px-2.5 py-1.5 bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-bold rounded-lg transition-colors text-xs cursor-pointer tabular-nums font-mono disabled:cursor-not-allowed"
+                        className="px-3 py-1.5 bg-slate-900/[0.04] hover:bg-slate-900/[0.08] dark:bg-white/[0.06] dark:hover:bg-white/[0.11] text-slate-900 dark:text-white font-semibold rounded-full transition-colors text-xs cursor-pointer tabular-nums font-mono disabled:cursor-not-allowed touch-press"
                       >
                         +{formatNumber(val, lang)}
                       </button>
@@ -1290,57 +1373,55 @@ export default function GoalsManager({
                         triggerHaptic('tick');
                         setTargetAmount('');
                       }}
-                      className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 border-2 border-rose-300 dark:border-rose-900 text-rose-600 dark:text-rose-400 font-bold rounded-lg transition-colors text-xs cursor-pointer disabled:cursor-not-allowed"
+                      className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/15 text-rose-600 dark:text-rose-400 font-semibold rounded-full transition-colors text-xs cursor-pointer disabled:cursor-not-allowed touch-press"
                     >
                       {lang === 'bn' ? 'মুছুন' : 'Clear'}
                     </button>
                   </div>
                 </div>
 
-                {/* Flexible Savings Info Notice (When toggle is enabled) */}
                 {goalType === 'savings' && isOpenEndedSavings && (
-                  <div className="p-3.5 bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-900/50 rounded-xl flex items-start gap-2.5 text-xs text-emerald-900 dark:text-emerald-200 leading-relaxed">
-                    <Info className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                  <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-start gap-2.5 text-xs text-emerald-900 dark:text-emerald-200 leading-relaxed">
+                    <Info className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5 stroke-[1.25]" />
                     <span>
-                      {lang === 'bn' 
-                        ? 'উন্মুক্ত সঞ্চয়ে কোনো নির্দিষ্ট কিস্তি বা মেয়াদের বাধ্যবাধকতা নেই। আপনি যেকোনো সময় যেকোনো পরিমাণ টাকা জমা করতে ও প্রয়োজনে উত্তোলন করতে পারবেন।' 
+                      {lang === 'bn'
+                        ? 'উন্মুক্ত সঞ্চয়ে কোনো নির্দিষ্ট কিস্তি বা মেয়াদের বাধ্যবাধকতা নেই। আপনি যেকোনো সময় যেকোনো পরিমাণ টাকা জমা করতে ও প্রয়োজনে উত্তোলন করতে পারবেন।'
                         : 'Flexible Savings has no rigid installments or deadlines. You can deposit and withdraw arbitrary amounts anytime you like.'}
                     </span>
                   </div>
                 )}
 
-                {/* 4. EMI CUSTOM SETUP: TENURE & INTEREST RATE */}
+                {/* 4. EMI Custom Setup */}
                 {goalType === 'deposit' && (
-                  <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl space-y-3.5">
-                    <div className="flex items-center gap-2 border-b border-slate-200/80 dark:border-slate-800 pb-2">
-                      <Calculator className="w-4 h-4 text-slate-900 dark:text-white" />
-                      <span className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white">
+                  <div className="p-4 bg-slate-900/[0.03] dark:bg-white/[0.04] border border-slate-900/[0.07] dark:border-white/[0.08] rounded-2xl space-y-3.5">
+                    <div className="flex items-center gap-2 border-b border-slate-900/[0.06] dark:border-white/[0.06] pb-2">
+                      <Calculator className="w-4 h-4 text-slate-900 dark:text-white stroke-[1.25]" />
+                      <span className={`${lang === 'bn' ? 'text-xs font-bold tracking-normal' : 'micro-mono-label font-semibold'} text-slate-900 dark:text-white`}>
                         {lang === 'bn' ? 'ইএমআই ক্যালকুলেটর ও কিস্তির হিসাব' : 'EMI & Tenure Auto-Calculator'}
                       </span>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                      {/* Frequency */}
                       <div className="space-y-1">
-                        <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
-                          {t.frequency}
-                        </span>
-                        <select
+                        <span className={`${glassLabelCls} block`}>{t.frequency}</span>
+                        <NativeOptionPicker
                           value={frequency}
-                          onChange={(e: any) => setFrequency(e.target.value)}
-                          className="w-full px-3 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-slate-950 dark:text-white font-bold text-xs outline-none cursor-pointer"
-                        >
-                          <option value="monthly">{t.monthly}</option>
-                          <option value="weekly">{t.weekly}</option>
-                          <option value="daily">{t.daily}</option>
-                          <option value="flexible">{t.flexible}</option>
-                        </select>
+                          onChange={(val) => setFrequency(val as any)}
+                          lang={lang}
+                          title={t.frequency}
+                          options={[
+                            { value: 'monthly', label: t.monthly },
+                            { value: 'weekly', label: t.weekly },
+                            { value: 'daily', label: t.daily },
+                            { value: 'flexible', label: t.flexible }
+                          ]}
+                          triggerClassName={`${glassFieldCls} font-bold text-xs cursor-pointer flex items-center justify-between gap-2 text-left touch-press`}
+                        />
                       </div>
 
-                      {/* Tenure if not flexible */}
                       {frequency !== 'flexible' && (
                         <div className="space-y-1">
-                          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                          <span className={`${glassLabelCls} block`}>
                             {frequency === 'monthly' && (lang === 'bn' ? 'মেয়াদ (মাস)' : 'Tenure (Months)')}
                             {frequency === 'weekly' && (lang === 'bn' ? 'মেয়াদ (সপ্তাহ)' : 'Tenure (Weeks)')}
                             {frequency === 'daily' && (lang === 'bn' ? 'মেয়াদ (দিন)' : 'Tenure (Days)')}
@@ -1353,13 +1434,12 @@ export default function GoalsManager({
                             value={tenure}
                             onChange={(e) => setTenure(e.target.value.replace(/[^0-9]/g, ''))}
                             placeholder="6"
-                            className="w-full px-3 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-slate-950 dark:text-white font-mono font-bold text-xs outline-none"
+                            className={`${glassFieldCls} font-mono font-bold text-xs`}
                           />
                         </div>
                       )}
                     </div>
 
-                    {/* Quick Tenure Preset Chips */}
                     {frequency !== 'flexible' && (
                       <div className="flex flex-wrap gap-1.5 pt-0.5">
                         {frequency === 'monthly' && [3, 6, 12, 18, 24].map(n => (
@@ -1367,10 +1447,10 @@ export default function GoalsManager({
                             key={n}
                             type="button"
                             onClick={() => { triggerHaptic('single'); setTenure(String(n)); }}
-                            className={`px-2.5 py-1 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer font-mono ${
+                            className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer font-mono ${
                               tenure === String(n)
-                                ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
-                                : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/70 text-slate-900 dark:text-white'
+                                ? 'bg-slate-950 text-white border-2 border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
+                                : 'border bg-transparent border-slate-900/[0.08] dark:border-white/[0.1] text-slate-900 dark:text-white'
                             }`}
                           >
                             {formatNumber(n, lang)} {lang === 'bn' ? 'মাস' : 'Mo'}
@@ -1381,10 +1461,10 @@ export default function GoalsManager({
                             key={n}
                             type="button"
                             onClick={() => { triggerHaptic('single'); setTenure(String(n)); }}
-                            className={`px-2.5 py-1 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer font-mono ${
+                            className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer font-mono ${
                               tenure === String(n)
-                                ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
-                                : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/70 text-slate-900 dark:text-white'
+                                ? 'bg-slate-950 text-white border-2 border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
+                                : 'border bg-transparent border-slate-900/[0.08] dark:border-white/[0.1] text-slate-900 dark:text-white'
                             }`}
                           >
                             {formatNumber(n, lang)} {lang === 'bn' ? 'সপ্তাহ' : 'Wk'}
@@ -1395,10 +1475,10 @@ export default function GoalsManager({
                             key={n}
                             type="button"
                             onClick={() => { triggerHaptic('single'); setTenure(String(n)); }}
-                            className={`px-2.5 py-1 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer font-mono ${
+                            className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer font-mono ${
                               tenure === String(n)
-                                ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
-                                : 'bg-white dark:bg-[#0D121D] border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/70 text-slate-900 dark:text-white'
+                                ? 'bg-slate-950 text-white border-2 border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
+                                : 'border bg-transparent border-slate-900/[0.08] dark:border-white/[0.1] text-slate-900 dark:text-white'
                             }`}
                           >
                             {formatNumber(n, lang)} {lang === 'bn' ? 'দিন' : 'Days'}
@@ -1407,8 +1487,7 @@ export default function GoalsManager({
                       </div>
                     )}
 
-                    {/* Interest / Additional Fee Checkmark */}
-                    <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800 space-y-2.5">
+                    <div className="pt-2 border-t border-slate-900/[0.06] dark:border-white/[0.06] space-y-2.5">
                       <div className="flex items-center gap-2">
                         <input
                           type="checkbox"
@@ -1423,15 +1502,15 @@ export default function GoalsManager({
                       </div>
 
                       {hasInterest && (
-                        <div className="space-y-2 p-3 bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800 rounded-xl animate-reveal">
+                        <div className="space-y-2 p-3 bg-slate-900/[0.02] dark:bg-white/[0.03] border border-slate-900/[0.06] dark:border-white/[0.06] rounded-2xl animate-reveal">
                           <div className="flex items-center justify-between">
-                            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                            <span className={glassLabelCls}>
                               {lang === 'bn' ? 'বার্ষিক সুদের হার / কাস্টম ফি (%)' : 'Custom Interest / Fee Rate (% p.a.)'}
                             </span>
                             <span className="text-xs font-mono font-bold text-slate-900 dark:text-white">{interestRate || '0'}%</span>
                           </div>
                           <div className="relative">
-                            <Percent className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                            <Percent className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 stroke-[1.25]" />
                             <input
                               type="text"
                               inputMode="decimal"
@@ -1445,20 +1524,19 @@ export default function GoalsManager({
                                 setInterestRate(sanitized);
                               }}
                               placeholder={lang === 'bn' ? 'যেমন: ১১.৫৯' : 'e.g. 11.59'}
-                              className="w-full pl-8 pr-3 py-2 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white font-mono font-bold text-xs outline-none"
+                              className="w-full pl-8 pr-3 py-2 rounded-xl border border-slate-900/[0.08] dark:border-white/[0.08] bg-slate-900/[0.03] dark:bg-white/[0.04] text-slate-950 dark:text-white font-mono font-bold text-xs outline-none"
                             />
                           </div>
-                          {/* Quick interest chips */}
                           <div className="flex flex-wrap gap-1.5 pt-1">
                             {[5, 10, 11.5, 12, 15, 20].map(r => (
                               <button
                                 key={r}
                                 type="button"
                                 onClick={() => { triggerHaptic('single'); setInterestRate(String(r)); }}
-                                className={`px-2 py-0.5 rounded-md border-2 text-xs font-mono font-bold transition-all cursor-pointer ${
+                                className={`px-2.5 py-1 rounded-full text-xs font-mono font-bold transition-all cursor-pointer ${
                                   interestRate === String(r)
-                                    ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
-                                    : 'bg-slate-50 dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white'
+                                    ? 'bg-slate-950 text-white border-2 border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
+                                    : 'border bg-transparent border-slate-900/[0.08] dark:border-white/[0.1] text-slate-900 dark:text-white'
                                 }`}
                               >
                                 {r}%
@@ -1469,9 +1547,8 @@ export default function GoalsManager({
                       )}
                     </div>
 
-                    {/* Auto Calculated Live Preview Banner */}
                     {emiPreview && (
-                      <div className="p-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 rounded-xl space-y-1.5 font-mono">
+                      <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 rounded-2xl space-y-1.5 font-mono">
                         <div className="flex justify-between items-center text-xs font-semibold text-slate-900 dark:text-white">
                           <span>{lang === 'bn' ? 'মূল আসল' : 'Principal'}: ৳{formatNumber(emiPreview.principal, lang)}</span>
                           {emiPreview.interest > 0 && (
@@ -1480,8 +1557,8 @@ export default function GoalsManager({
                             </span>
                           )}
                         </div>
-                        <div className="flex justify-between items-baseline border-t border-rose-200/80 dark:border-rose-900/50 pt-1.5">
-                          <span className="text-xs font-bold text-slate-900 dark:text-white uppercase">
+                        <div className="flex justify-between items-baseline border-t border-rose-500/15 pt-1.5">
+                          <span className={`text-xs font-bold text-slate-900 dark:text-white ${lang === 'bn' ? 'tracking-normal' : 'uppercase'}`}>
                             {lang === 'bn' ? 'স্বয়ংক্রিয় কিস্তি' : 'Auto Installment'}:
                           </span>
                           <span className="text-sm font-black text-rose-600 dark:text-rose-400">
@@ -1493,15 +1570,12 @@ export default function GoalsManager({
                   </div>
                 )}
 
-                {/* Savings Installment & Frequency Grid (Only for Target Savings Goal when Piggy Bank toggle is OFF) */}
                 {goalType === 'savings' && !isOpenEndedSavings && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                     <div className="space-y-1">
-                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
-                        {t.installmentAmount}
-                      </span>
+                      <span className={`${glassLabelCls} block`}>{t.installmentAmount}</span>
                       <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400 select-none pointer-events-none">
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400 select-none pointer-events-none">
                           ৳
                         </span>
                         <input
@@ -1511,53 +1585,49 @@ export default function GoalsManager({
                           placeholder="0"
                           value={installmentAmount}
                           onChange={(e) => handleAmountChange(e.target.value, setInstallmentAmount)}
-                          className="w-full pl-8 pr-3 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white font-mono font-bold text-sm outline-none"
+                          className="w-full pl-8 pr-3 py-2.5 rounded-2xl border border-slate-900/[0.08] dark:border-white/[0.08] bg-slate-900/[0.03] dark:bg-white/[0.04] text-slate-950 dark:text-white font-mono font-bold text-sm outline-none"
                         />
                       </div>
                     </div>
 
                     <div className="space-y-1">
-                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
-                        {t.frequency}
-                      </span>
-                      <select
+                      <span className={`${glassLabelCls} block`}>{t.frequency}</span>
+                      <NativeOptionPicker
                         value={frequency}
-                        onChange={(e: any) => setFrequency(e.target.value)}
-                        className="w-full px-3 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white font-bold text-xs outline-none cursor-pointer"
-                      >
-                        <option value="monthly">{t.monthly}</option>
-                        <option value="weekly">{t.weekly}</option>
-                        <option value="daily">{t.daily}</option>
-                        <option value="flexible">{t.flexible}</option>
-                      </select>
+                        onChange={(val) => setFrequency(val as any)}
+                        lang={lang}
+                        title={t.frequency}
+                        options={[
+                          { value: 'monthly', label: t.monthly },
+                          { value: 'weekly', label: t.weekly },
+                          { value: 'daily', label: t.daily },
+                          { value: 'flexible', label: t.flexible }
+                        ]}
+                        triggerClassName={`${glassFieldCls} font-bold text-xs cursor-pointer flex items-center justify-between gap-2 text-left touch-press`}
+                      />
                     </div>
                   </div>
                 )}
 
                 {/* 5. Link Customer */}
                 <div className="space-y-1">
-                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
-                    {t.linkCustomer}
-                  </span>
-                  <select
+                  <span className={`${glassLabelCls} block`}>{t.linkCustomer}</span>
+                  <NativeCustomerPicker
+                    customers={customers}
                     value={selectedCustomerId}
-                    onChange={(e) => setSelectedCustomerId(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white font-medium text-xs outline-none cursor-pointer"
-                  >
-                    <option value="">{lang === 'bn' ? 'কোনো নির্দিষ্ট গ্রাহক নয় (ব্যক্তিগত লক্ষ্য)' : 'None (Personal Goal)'}</option>
-                    {customers.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} {c.phone ? `(${c.phone})` : ''} — ৳{formatNumber(c.outstandingDue, lang)}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setSelectedCustomerId}
+                    lang={lang}
+                    title={t.linkCustomer}
+                    placeholder={lang === 'bn' ? 'কোনো নির্দিষ্ট গ্রাহক নয় (ব্যক্তিগত লক্ষ্য)' : 'None (Personal Goal)'}
+                    allowNone
+                    noneLabel={lang === 'bn' ? 'কোনো নির্দিষ্ট গ্রাহক নয় (ব্যক্তিগত লক্ষ্য)' : 'None (Personal Goal)'}
+                    triggerClassName={`${glassFieldCls} font-medium text-xs cursor-pointer flex items-center justify-between gap-2 text-left touch-press`}
+                  />
                 </div>
 
-                {/* 6. Optional Description / Notes */}
+                {/* 6. Notes */}
                 <div className="space-y-1">
-                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
-                    {t.notes}
-                  </span>
+                  <span className={`${glassLabelCls} block`}>{t.notes}</span>
                   <textarea
                     rows={1}
                     placeholder={lang === 'bn' ? 'অতিরিক্ত কোনো মন্তব্য বা শর্ত (ঐচ্ছিক)' : 'Additional notes or remarks (Optional)'}
@@ -1567,17 +1637,15 @@ export default function GoalsManager({
                       e.target.style.height = 'auto';
                       e.target.style.height = `${Math.max(42, e.target.scrollHeight)}px`;
                     }}
-                    className="w-full min-h-[42px] px-3.5 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white bg-slate-50 dark:bg-slate-900 text-slate-950 dark:text-white outline-none text-xs resize-none overflow-hidden leading-relaxed transition-colors"
+                    className={`${glassFieldCls} min-h-[42px] text-xs resize-none overflow-hidden leading-relaxed`}
                   />
                 </div>
-
               </div>
 
-              {/* 3. Sticky Bottom Actions */}
-              <div className="p-4 sm:p-5 border-t border-slate-100 dark:border-slate-800/80 bg-white dark:bg-[#0D121D] shrink-0">
+              <div className="p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-5 border-t border-slate-900/[0.06] dark:border-white/[0.06] bg-white/60 dark:bg-black/30 backdrop-blur-xl shrink-0">
                 {formError && (
-                  <div className="p-3 mb-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 rounded-xl text-rose-600 dark:text-rose-400 font-semibold text-xs flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <div className="p-3 mb-3 bg-rose-500/10 rounded-2xl text-rose-600 dark:text-rose-400 font-semibold text-xs flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 stroke-[1.25]" />
                     <span>{formError}</span>
                   </div>
                 )}
@@ -1585,10 +1653,10 @@ export default function GoalsManager({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className={`w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center transition-all cursor-pointer select-none active:scale-[0.99] border-2 border-transparent shadow-xs ${
+                  className={`w-full py-3.5 rounded-full font-bold text-sm flex items-center justify-center transition-all cursor-pointer select-none touch-press shadow-lg ${
                     goalType === 'deposit'
-                      ? 'bg-rose-600 hover:bg-rose-700 text-white'
-                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                      ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-600/20'
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
                   } ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
                 >
                   {isSubmitting ? (
@@ -1605,23 +1673,29 @@ export default function GoalsManager({
               </div>
             </form>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
       {/* ── GOAL DETAIL VIEW MODAL ── */}
       {selectedGoal && (
-        <div 
-          key={selectedGoal.id}
-          className="fixed inset-0 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 no-select"
-        >
-          <div className="absolute inset-0" onClick={closeGoalDetail} />
-
+        <ModalPortal lockScroll={false}>
           <div
-            className="glass-modal w-full sm:max-w-xl rounded-t-2xl sm:rounded-2xl border shadow-2xl overflow-hidden max-h-[90vh] flex flex-col relative z-10"
+            key={selectedGoal.id}
+            className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden"
           >
-            
+            <div className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur" onClick={closeGoalDetail} />
+
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="animate-slide-up glass-modal w-full sm:max-w-xl rounded-t-[2rem] sm:rounded-3xl border shadow-2xl overflow-hidden max-h-[90dvh] flex flex-col relative z-10"
+            >
+              <div className="flex justify-center pt-3 pb-1 sm:hidden shrink-0">
+                <div className="w-10 h-1 rounded-full bg-slate-900/15 dark:bg-white/20 mx-auto" />
+              </div>
+
             {/* Header */}
-            <div className="px-5 py-4 sm:px-6 border-b border-slate-200/70 dark:border-white/[0.08] bg-slate-50/50 dark:bg-white/[0.02] shrink-0">
+            <div className="px-5 py-3.5 sm:px-6 border-b border-slate-900/[0.06] dark:border-white/[0.06] shrink-0">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1 flex items-center">
                   <button
@@ -1633,79 +1707,77 @@ export default function GoalsManager({
                     className="text-left min-w-0 flex-1 group cursor-pointer focus:outline-none"
                     title={lang === 'bn' ? 'শিরোনাম পরিবর্তন করতে ট্যাপ করুন' : 'Tap to rename goal'}
                   >
-                    <h3 className="text-lg sm:text-xl font-bold text-slate-950 dark:text-white group-hover:opacity-75 transition-opacity truncate">
+                    <h3 className="font-display text-xl font-bold text-slate-950 dark:text-white group-hover:opacity-75 transition-opacity truncate">
                       {selectedGoal.title}
                     </h3>
                   </button>
                 </div>
-                
-                <div className="flex items-center gap-2 shrink-0">
+
+                <div className="flex items-center gap-1.5 shrink-0">
                   {selectedGoal.status === 'active' && (
                     <button
                       type="button"
                       onClick={() => openEmiReminderModal(selectedGoal)}
-                      className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors cursor-pointer border-2 ${
+                      className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
                         reminders.some(r => r.goalId === selectedGoal.id && r.active)
-                          ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
-                          : 'bg-white dark:bg-[#0D121D] hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700'
+                          ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950'
+                          : 'bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-600 dark:text-slate-300'
                       }`}
                       title={lang === 'bn' ? 'কিস্তির নোটিফিকেশন রিমাইন্ডার' : 'EMI Notification Reminder'}
                     >
                       {reminders.some(r => r.goalId === selectedGoal.id && r.active) ? (
-                        <BellRing className="w-4 h-4" />
+                        <BellRing className="w-4 h-4 stroke-[1.25]" />
                       ) : (
-                        <Bell className="w-4 h-4" />
+                        <Bell className="w-4 h-4 stroke-[1.25]" />
                       )}
                     </button>
                   )}
                   <button
                     onClick={openDeleteGoalConfirm}
-                    className="w-9 h-9 bg-white hover:bg-rose-50 dark:bg-[#0D121D] dark:hover:bg-rose-950/30 rounded-xl text-slate-600 hover:text-rose-600 dark:text-slate-300 dark:hover:text-rose-400 flex items-center justify-center transition-colors cursor-pointer border-2 border-slate-300 dark:border-slate-700 hover:border-rose-500 dark:hover:border-rose-500"
+                    className="w-9 h-9 bg-slate-900/[0.05] hover:bg-rose-500/15 dark:bg-white/[0.08] dark:hover:bg-rose-500/20 rounded-full text-slate-600 hover:text-rose-600 dark:text-slate-300 dark:hover:text-rose-400 flex items-center justify-center transition-colors cursor-pointer"
                     title={lang === 'bn' ? 'মুছে ফেলুন' : 'Delete Goal'}
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-4 h-4 stroke-[1.25]" />
                   </button>
-                  <button 
+                  <button
                     onClick={() => {
                       triggerHaptic('medium');
                       closeGoalDetail();
                     }}
-                    className="w-9 h-9 bg-white hover:bg-slate-100 dark:bg-[#0D121D] dark:hover:bg-slate-800 rounded-xl text-slate-600 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer border-2 border-slate-300 dark:border-slate-700"
+                    className="w-9 h-9 bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] rounded-full text-slate-600 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer"
                     aria-label="Close"
                   >
-                    <X className="w-4 h-4" />
+                    <X className="w-4 h-4 stroke-[1.25]" />
                   </button>
                 </div>
               </div>
             </div>
 
             {/* Scrollable Modal Content */}
-            <div className="flex-1 min-h-0 overflow-y-auto hide-scrollbar p-4 sm:p-5 pb-6 space-y-4">
-              
-              {/* Financial Progress & Overview Card */}
-              <div className="surface-subcard border rounded-xl p-4 space-y-3">
+            <div className="flex-1 min-h-0 overflow-y-auto hide-scrollbar p-4 sm:p-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pb-6 space-y-4">
+              {/* Financial Progress & Overview */}
+              <div className="surface-subcard border rounded-2xl p-4 space-y-3.5">
                 {selectedGoal.isOpenEnded && (!selectedGoal.targetAmount || selectedGoal.targetAmount === 0) ? (
                   <>
-                    {/* 3 Main Numbers for Open-Ended Piggy Bank */}
-                    <div className="grid grid-cols-3 gap-2 text-center">
-                      <div className="p-2.5 bg-white/80 dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.08] rounded-lg">
-                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                    <div className="grid grid-cols-3 divide-x divide-slate-900/[0.07] dark:divide-white/[0.07] text-center">
+                      <div className="px-2">
+                        <span className={lang === 'bn' ? 'text-[10px] font-bold tracking-normal text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>
                           {lang === 'bn' ? 'ব্যালেন্স' : 'Balance'}
                         </span>
                         <span className="text-sm sm:text-base font-bold font-mono text-emerald-600 dark:text-emerald-400 mt-0.5 block truncate">
                           ৳{formatNumber(selectedGoal.savedAmount || 0, lang)}
                         </span>
                       </div>
-                      <div className="p-2.5 bg-white/80 dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.08] rounded-lg">
-                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                      <div className="px-2">
+                        <span className={lang === 'bn' ? 'text-[10px] font-bold tracking-normal text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>
                           {lang === 'bn' ? 'মোট জমা' : 'Total In'}
                         </span>
                         <span className="text-sm sm:text-base font-bold font-mono text-emerald-600 dark:text-emerald-400 mt-0.5 block truncate">
                           +৳{formatNumber((selectedGoal.contributions || []).filter(c => c.type !== 'withdrawal').reduce((sum, c) => sum + (c.amount || 0), 0), lang)}
                         </span>
                       </div>
-                      <div className="p-2.5 bg-white/80 dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.08] rounded-lg">
-                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                      <div className="px-2">
+                        <span className={lang === 'bn' ? 'text-[10px] font-bold tracking-normal text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>
                           {lang === 'bn' ? 'মোট উত্তোলন' : 'Total Out'}
                         </span>
                         <span className="text-sm sm:text-base font-bold font-mono text-rose-600 dark:text-rose-400 mt-0.5 block truncate">
@@ -1714,8 +1786,8 @@ export default function GoalsManager({
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between text-xs font-bold pt-0.5">
-                      <span className="text-slate-600 dark:text-slate-300 text-[11px] font-sans font-medium">
+                    <div className="flex items-center justify-between text-xs font-semibold pt-2 border-t border-slate-900/[0.06] dark:border-white/[0.06]">
+                      <span className="text-slate-600 dark:text-slate-300 text-[11px]">
                         {lang === 'bn' ? 'উন্মুক্ত সঞ্চয়' : 'Flexible savings'}
                       </span>
                       <span className="text-slate-500 dark:text-slate-400 text-[11px] font-mono">
@@ -1725,74 +1797,89 @@ export default function GoalsManager({
                   </>
                 ) : (
                   <>
-                    {/* 3 Main Numbers for Fixed Target Goal */}
-                    <div className="grid grid-cols-3 gap-2 text-center">
-                      <div className="p-2.5 bg-white/80 dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.08] rounded-lg">
-                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                    <div className="grid grid-cols-3 divide-x divide-slate-900/[0.07] dark:divide-white/[0.07] text-center">
+                      <div className="px-2">
+                        <span className={lang === 'bn' ? 'text-[10px] font-bold tracking-normal text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>
                           {lang === 'bn' ? 'টার্গেট' : 'Target'}
                         </span>
                         <span className="text-sm sm:text-base font-bold font-mono text-slate-950 dark:text-white mt-0.5 block truncate">৳{formatNumber(selectedGoal.targetAmount, lang)}</span>
                       </div>
-                      <div className="p-2.5 bg-white/80 dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.08] rounded-lg">
-                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                      <div className="px-2">
+                        <span className={lang === 'bn' ? 'text-[10px] font-bold tracking-normal text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>
                           {lang === 'bn' ? 'জমা' : 'Saved'}
                         </span>
                         <span className="text-sm sm:text-base font-bold font-mono text-emerald-600 dark:text-emerald-400 mt-0.5 block truncate">৳{formatNumber(selectedGoal.savedAmount || 0, lang)}</span>
                       </div>
-                      <div className="p-2.5 bg-white/80 dark:bg-white/[0.04] border border-slate-200/80 dark:border-white/[0.08] rounded-lg">
-                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">{t.remaining}</span>
+                      <div className="px-2">
+                        <span className={lang === 'bn' ? 'text-[10px] font-bold tracking-normal text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>{t.remaining}</span>
                         <span className="text-sm sm:text-base font-bold font-mono text-rose-600 dark:text-rose-400 mt-0.5 block truncate">৳{formatNumber(Math.max(0, selectedGoal.targetAmount - (selectedGoal.savedAmount || 0)), lang)}</span>
                       </div>
                     </div>
 
-                    {/* Progress Bar & Status */}
-                    <div className="space-y-1.5">
+                    <div className="space-y-1.5 pt-2 border-t border-slate-900/[0.06] dark:border-white/[0.06]">
                       <div className="flex items-center justify-between text-xs font-bold">
-                        <div className="flex items-center gap-2">
-                          <span className="text-slate-600 dark:text-slate-300 text-[11px] sm:text-xs font-mono">
-                            {Math.min(100, Math.round(((selectedGoal.savedAmount || 0) / (selectedGoal.targetAmount || 1)) * 100))}% {lang === 'bn' ? 'সম্পন্ন' : 'achieved'}
-                          </span>
+                        <span className="text-slate-600 dark:text-slate-300 text-[11px] font-mono">
+                          {Math.min(100, Math.round(((selectedGoal.savedAmount || 0) / (selectedGoal.targetAmount || 1)) * 100))}% {lang === 'bn' ? 'সম্পন্ন' : 'achieved'}
                           {selectedGoal.status !== 'active' && (
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-white">
-                              {selectedGoal.status === 'completed' ? (lang === 'bn' ? 'সম্পন্ন' : 'Completed') : (lang === 'bn' ? 'বাতিল' : 'Cancelled')}
+                            <span className="text-slate-400 ml-1.5">
+                              · {selectedGoal.status === 'completed' ? (lang === 'bn' ? 'সম্পন্ন' : 'Completed') : (lang === 'bn' ? 'বাতিল' : 'Cancelled')}
                             </span>
                           )}
-                        </div>
+                        </span>
                         {selectedGoal.installmentAmount && selectedGoal.installmentAmount > 0 && (
                           <span className="text-slate-600 dark:text-slate-300 text-[11px] font-bold font-mono">
                             ৳{formatNumber(selectedGoal.installmentAmount, lang)} / {selectedGoal.frequency === 'daily' ? t.daily : selectedGoal.frequency === 'weekly' ? t.weekly : selectedGoal.frequency === 'monthly' ? t.monthly : t.flexible}
                           </span>
                         )}
                       </div>
-                      <div className="w-full h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
-                        <div 
-                          className={`h-full transition-all duration-500 ${
-                            selectedGoal.status === 'completed' 
-                              ? 'bg-emerald-600' 
-                              : selectedGoal.type === 'savings' ? 'bg-emerald-600' : 'bg-rose-600'
-                          }`}
-                          style={{ width: `${Math.min(100, Math.round(((selectedGoal.savedAmount || 0) / (selectedGoal.targetAmount || 1)) * 100))}%` }}
-                        />
+                      <div className="w-full h-3.5 rounded-full bg-slate-900/[0.05] dark:bg-white/[0.055] border border-slate-900/[0.06] dark:border-white/[0.07] p-[1.5px] flex items-center overflow-hidden shadow-[inset_0_1px_2px_rgba(15,23,42,0.06)] dark:shadow-[inset_0_1px_2px_rgba(0,0,0,0.4)]">
+                        {(() => {
+                          const pctVal = Math.min(100, Math.round(((selectedGoal.savedAmount || 0) / (selectedGoal.targetAmount || 1)) * 100));
+                          if (pctVal <= 0) return null;
+                          const isCompleted = selectedGoal.status === 'completed';
+                          const isSavings = selectedGoal.type === 'savings';
+                          const barGradient = isCompleted
+                            ? 'linear-gradient(90deg, rgba(110, 231, 183, 0.90) 0%, rgba(16, 185, 129, 0.84) 50%, rgba(13, 148, 136, 0.72) 100%)'
+                            : isSavings
+                              ? 'linear-gradient(90deg, color-mix(in srgb, var(--accent-color) 65%, white) 0%, var(--accent-color) 52%, color-mix(in srgb, var(--accent-color) 82%, black) 100%)'
+                              : 'linear-gradient(90deg, rgba(253, 164, 175, 0.90) 0%, rgba(244, 63, 94, 0.84) 48%, rgba(190, 18, 60, 0.72) 100%)';
+                          const barGlow = isCompleted
+                            ? '0 0 12px rgba(16, 185, 129, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.65)'
+                            : isSavings
+                              ? '0 0 12px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.65)'
+                              : '0 0 12px rgba(244, 63, 94, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.65)';
+                          return (
+                            <div
+                              className="h-full rounded-full relative overflow-hidden dash-anim-bar-x transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
+                              style={{
+                                width: `${pctVal}%`,
+                                background: barGradient,
+                                boxShadow: barGlow
+                              }}
+                            >
+                              <span aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-75 glass-bar-etch" />
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   </>
                 )}
 
-                {/* Customer & Editable Description/Notes Section */}
-                <div className="pt-2.5 border-t border-slate-200/80 dark:border-slate-800 space-y-2">
+                {/* Customer & Editable Notes */}
+                <div className="pt-2.5 border-t border-slate-900/[0.06] dark:border-white/[0.06] space-y-2">
                   {selectedGoal.customerName && (
                     <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300">
                       <span className="font-bold flex items-center gap-1.5 text-xs">
-                        <User className="w-3.5 h-3.5 text-slate-500" />
+                        <User className="w-3.5 h-3.5 text-slate-500 stroke-[1.25]" />
                         <span className="text-slate-900 dark:text-white">{selectedGoal.customerName}</span>
                       </span>
                     </div>
                   )}
 
-                  {/* Description / Notes Area (Empty if user didn't fill it, editable after opening goal) */}
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                      <span className={lang === 'bn' ? 'text-[10px] font-bold tracking-normal text-slate-500 dark:text-slate-400' : 'micro-mono-label font-semibold'}>
                         {t.notes}
                       </span>
                       {!isEditingGoalNotes && (
@@ -1803,10 +1890,10 @@ export default function GoalsManager({
                             setEditedGoalNotes(cleanSelectedGoalNotes);
                             setIsEditingGoalNotes(true);
                           }}
-                          className="p-1 px-2 rounded-lg text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white bg-white dark:bg-[#0D121D] hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center gap-1 cursor-pointer transition-colors"
+                          className="px-2.5 py-1 rounded-full text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white bg-slate-900/[0.04] dark:bg-white/[0.06] flex items-center gap-1 cursor-pointer transition-colors"
                           title={lang === 'bn' ? 'নোট সম্পাদনা করুন' : 'Edit Notes'}
                         >
-                          <Pencil className="w-3 h-3" />
+                          <Pencil className="w-3 h-3 stroke-[1.25]" />
                           <span>{lang === 'bn' ? 'সম্পাদনা' : 'Edit'}</span>
                         </button>
                       )}
@@ -1830,20 +1917,20 @@ export default function GoalsManager({
                           }}
                           placeholder=""
                           autoFocus
-                          className="w-full min-h-[54px] px-3 py-2 bg-white dark:bg-[#0D121D] border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white rounded-xl text-xs font-medium text-slate-950 dark:text-white outline-none resize-none overflow-hidden leading-relaxed transition-colors block"
+                          className={`${glassFieldCls} min-h-[54px] text-xs font-medium resize-none overflow-hidden leading-relaxed block`}
                         />
                         <div className="flex items-center justify-end gap-2">
                           <button
                             type="button"
                             onClick={() => setIsEditingGoalNotes(false)}
-                            className="px-3 py-1.5 bg-white dark:bg-[#0D121D] hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 text-xs cursor-pointer transition-colors"
+                            className="px-3.5 py-1.5 bg-slate-900/[0.05] dark:bg-white/[0.07] text-slate-700 dark:text-slate-300 font-bold rounded-full text-xs cursor-pointer transition-colors"
                           >
                             {lang === 'bn' ? 'বাতিল' : 'Cancel'}
                           </button>
                           <button
                             type="submit"
                             disabled={isSavingGoalNotes}
-                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl border-2 border-transparent text-xs cursor-pointer transition-colors"
+                            className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-full text-xs cursor-pointer transition-colors"
                           >
                             {lang === 'bn' ? 'সেভ' : 'Save'}
                           </button>
@@ -1856,86 +1943,85 @@ export default function GoalsManager({
                           setEditedGoalNotes(cleanSelectedGoalNotes);
                           setIsEditingGoalNotes(true);
                         }}
-                        className="w-full min-h-[36px] px-3 py-2 bg-white dark:bg-[#0D121D] border border-slate-200/80 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 rounded-lg text-xs text-slate-800 dark:text-slate-200 cursor-pointer transition-colors whitespace-pre-wrap break-words leading-relaxed"
+                        className="w-full min-h-[36px] px-3 py-2 bg-slate-900/[0.02] dark:bg-white/[0.03] border border-slate-900/[0.06] dark:border-white/[0.06] rounded-xl text-xs text-slate-800 dark:text-slate-200 cursor-pointer transition-colors whitespace-pre-wrap break-words leading-relaxed"
                         title={lang === 'bn' ? 'নোট লিখতে বা পরিবর্তন করতে ট্যাপ করুন' : 'Tap to add or edit description/notes'}
                       >
-                        {cleanSelectedGoalNotes}
+                        {cleanSelectedGoalNotes || (lang === 'bn' ? 'নোট লিখতে ট্যাপ করুন...' : 'Tap to add note...')}
                       </div>
                     )}
                   </div>
                 </div>
               </div>
 
-              {/* EMI & Loan Details Card */}
+              {/* EMI & Loan Details Collapsible */}
               {selectedGoalEmiDetails && (
-                <div className="surface-subcard rounded-xl border overflow-hidden">
+                <div className="surface-subcard rounded-2xl border overflow-hidden">
                   <button
                     type="button"
                     onClick={() => {
                       triggerHaptic('single');
                       setIsEmiBreakdownOpen(prev => !prev);
                     }}
-                    className="w-full p-3.5 flex items-center justify-between text-left hover:bg-slate-100/80 dark:hover:bg-white/[0.04] transition-colors cursor-pointer"
+                    className="w-full p-3.5 flex items-center justify-between text-left hover:bg-slate-900/[0.03] dark:hover:bg-white/[0.04] transition-colors cursor-pointer"
                   >
                     <div className="flex items-center gap-2 min-w-0">
-                      <CreditCard className="w-4 h-4 text-slate-900 dark:text-white shrink-0" />
+                      <CreditCard className="w-4 h-4 text-slate-900 dark:text-white shrink-0 stroke-[1.25]" />
                       <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
                         {lang === 'bn' ? 'ইএমআই ও ঋণ বিবরণী' : 'EMI & Loan Breakdown'}
+                        {selectedGoalEmiDetails.tenure && (
+                          <span className="font-normal text-slate-500 dark:text-slate-400 ml-1.5">
+                            · {formatNumber(selectedGoalEmiDetails.tenure, lang)} {selectedGoalEmiDetails.tenureUnit}
+                          </span>
+                        )}
                       </span>
-                      {selectedGoalEmiDetails.tenure && (
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-200 dark:bg-slate-800 text-slate-900 dark:text-white shrink-0">
-                          {formatNumber(selectedGoalEmiDetails.tenure, lang)} {selectedGoalEmiDetails.tenureUnit}
-                        </span>
-                      )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-2">
-                      <span className="text-[11px] font-bold font-mono text-slate-600 dark:text-slate-300">
+                      <span className="text-xs font-bold font-mono text-slate-600 dark:text-slate-300">
                         ৳{formatNumber(selectedGoalEmiDetails.principal, lang)}
                       </span>
-                      <ChevronDown 
-                        className={`w-4 h-4 text-slate-500 transition-transform duration-200 ${
+                      <ChevronDown
+                        className={`w-4 h-4 text-slate-500 transition-transform duration-200 stroke-[1.25] ${
                           isEmiBreakdownOpen ? 'rotate-180 text-slate-900 dark:text-white' : ''
-                        }`} 
+                        }`}
                       />
                     </div>
                   </button>
 
-                  {/* Collapsible Content */}
                   {isEmiBreakdownOpen && (
-                    <div className="px-3 pb-3 pt-1 border-t border-slate-200/80 dark:border-slate-800">
-                      <div className="grid grid-cols-2 gap-2 pt-1">
-                        <div className="bg-white/80 dark:bg-white/[0.04] p-2.5 rounded-lg border border-slate-200/80 dark:border-white/[0.08]">
-                          <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">
-                            {lang === 'bn' ? 'মূল পরিমাণ (Principal)' : 'Principal Amount'}
+                    <div className="px-3.5 pb-3.5 pt-2 border-t border-slate-900/[0.06] dark:border-white/[0.06]">
+                      <div className="grid grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <span className={lang === 'bn' ? 'text-[10px] font-bold tracking-normal text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>
+                            {lang === 'bn' ? 'মূল পরিমাণ' : 'Principal Amount'}
                           </span>
                           <span className="text-xs font-bold font-mono text-slate-900 dark:text-white mt-0.5 block">
                             ৳{formatNumber(selectedGoalEmiDetails.principal, lang)}
                           </span>
                         </div>
 
-                        <div className="bg-white/80 dark:bg-white/[0.04] p-2.5 rounded-lg border border-slate-200/80 dark:border-white/[0.08]">
-                          <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">
-                            {lang === 'bn' ? 'মুনাফা / ফি (Fee)' : 'Interest / Fee'}
+                        <div>
+                          <span className={lang === 'bn' ? 'text-[10px] font-bold tracking-normal text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>
+                            {lang === 'bn' ? 'মুনাফা / ফি' : 'Interest / Fee'}
                           </span>
                           <span className="text-xs font-bold font-mono text-rose-600 dark:text-rose-400 mt-0.5 block">
-                            {selectedGoalEmiDetails.interestAmount > 0 
-                              ? `+৳${formatNumber(selectedGoalEmiDetails.interestAmount, lang)}${selectedGoalEmiDetails.interestRate ? ` (${selectedGoalEmiDetails.interestRate}%)` : ''}` 
+                            {selectedGoalEmiDetails.interestAmount > 0
+                              ? `+৳${formatNumber(selectedGoalEmiDetails.interestAmount, lang)}${selectedGoalEmiDetails.interestRate ? ` (${selectedGoalEmiDetails.interestRate}%)` : ''}`
                               : (lang === 'bn' ? '০% (ফি প্রযোজ্য নয়)' : '0% (No Fee)')}
                           </span>
                         </div>
 
-                        <div className="bg-white/80 dark:bg-white/[0.04] p-2.5 rounded-lg border border-slate-200/80 dark:border-white/[0.08]">
-                          <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">
-                            {lang === 'bn' ? 'প্রতি কিস্তি (Per Installment)' : 'Installment Rate'}
+                        <div>
+                          <span className={lang === 'bn' ? 'text-[10px] font-bold tracking-normal text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>
+                            {lang === 'bn' ? 'প্রতি কিস্তি' : 'Installment Rate'}
                           </span>
                           <span className="text-xs font-bold font-mono text-emerald-600 dark:text-emerald-400 mt-0.5 block">
                             ৳{formatNumber(selectedGoal.installmentAmount || Math.ceil(selectedGoal.targetAmount / (selectedGoalEmiDetails.tenure || 1)), lang)}
                           </span>
                         </div>
 
-                        <div className="bg-white/80 dark:bg-white/[0.04] p-2.5 rounded-lg border border-slate-200/80 dark:border-white/[0.08]">
-                          <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">
-                            {lang === 'bn' ? 'মোট প্রদেয় (Total Payable)' : 'Total Payable'}
+                        <div>
+                          <span className={lang === 'bn' ? 'text-[10px] font-bold tracking-normal text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>
+                            {lang === 'bn' ? 'মোট প্রদেয়' : 'Total Payable'}
                           </span>
                           <span className="text-xs font-bold font-mono text-slate-900 dark:text-white mt-0.5 block">
                             ৳{formatNumber(selectedGoal.targetAmount, lang)}
@@ -1947,13 +2033,12 @@ export default function GoalsManager({
                 </div>
               )}
 
-              {/* INSTALLMENT & WITHDRAWAL FORM SECTION */}
+              {/* Installment & Withdrawal Form Section */}
               {selectedGoal.status === 'active' && (
                 <div className="pt-1">
                   {!showInstallmentForm ? (
                     selectedGoal.isOpenEnded ? (
-                      /* Flexible Savings Dual Action Buttons: Deposit & Withdraw */
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-2 gap-2.5">
                         <button
                           type="button"
                           onClick={() => {
@@ -1961,9 +2046,9 @@ export default function GoalsManager({
                             setContributionActionType('deposit');
                             setShowInstallmentForm(true);
                           }}
-                          className="py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl border-2 border-emerald-600 transition-colors flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm active:scale-95 shadow-xs"
+                          className="py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-full transition-colors flex items-center justify-center gap-1.5 cursor-pointer text-xs sm:text-sm touch-press shadow-md shadow-emerald-600/20"
                         >
-                          <Plus className="w-4 h-4 stroke-[2.5]" />
+                          <Plus className="w-4 h-4 stroke-[1.5]" />
                           <span>{lang === 'bn' ? 'টাকা জমা' : 'Deposit'}</span>
                         </button>
 
@@ -1974,59 +2059,58 @@ export default function GoalsManager({
                             setContributionActionType('withdrawal');
                             setShowInstallmentForm(true);
                           }}
-                          className="py-3 px-4 bg-white dark:bg-[#0D121D] hover:bg-rose-50 dark:hover:bg-rose-950/30 text-rose-600 dark:text-rose-400 font-bold rounded-xl border-2 border-rose-300 dark:border-rose-900/60 hover:border-rose-500 transition-colors flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm active:scale-95 shadow-xs"
+                          className="py-3 px-4 bg-rose-500/10 hover:bg-rose-500/15 text-rose-600 dark:text-rose-400 font-bold rounded-full transition-colors flex items-center justify-center gap-1.5 cursor-pointer text-xs sm:text-sm touch-press"
                         >
-                          <Minus className="w-4 h-4 stroke-[2.5]" />
+                          <Minus className="w-4 h-4 stroke-[1.5]" />
                           <span>{lang === 'bn' ? 'টাকা উত্তোলন' : 'Withdraw'}</span>
                         </button>
                       </div>
                     ) : (
-                      /* Standard Single Add Installment Button */
                       <button
-                        onClick={() => { 
-                          triggerHaptic('single'); 
+                        onClick={() => {
+                          triggerHaptic('single');
                           setContributionActionType('deposit');
-                          setShowInstallmentForm(true); 
+                          setShowInstallmentForm(true);
                         }}
-                        className="w-full py-3 px-4 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-xl border-2 border-slate-950 dark:border-white transition-colors flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm"
+                        className="w-full py-3.5 px-4 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-full transition-colors flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm touch-press shadow-sm"
                       >
-                        <Plus className="w-4 h-4 stroke-[2.5]" />
+                        <Plus className="w-4 h-4 stroke-[1.5]" />
                         <span>{t.addInstallment}</span>
                       </button>
                     )
                   ) : (
-                    <form onSubmit={handleAddContribution} className="space-y-4 bg-slate-50 dark:bg-slate-900/60 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
-                      <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-slate-800 pb-2">
+                    <form onSubmit={handleAddContribution} className="space-y-4 bg-slate-900/[0.03] dark:bg-white/[0.04] p-4 rounded-2xl border border-slate-900/[0.07] dark:border-white/[0.08]">
+                      <div className="flex items-center justify-between border-b border-slate-900/[0.06] dark:border-white/[0.06] pb-2.5">
                         <span className="font-bold text-sm text-slate-950 dark:text-white flex items-center gap-2">
                           {contributionActionType === 'withdrawal' ? (
                             <>
-                              <ArrowUpRight className="w-4 h-4 text-rose-500 stroke-[2.5]" />
+                              <ArrowUpRight className="w-4 h-4 text-rose-500 stroke-[1.25]" />
                               <span>{lang === 'bn' ? 'উন্মুক্ত সঞ্চয় থেকে টাকা উত্তোলন' : 'Withdraw from Flexible Savings'}</span>
                             </>
                           ) : (
                             <>
-                              <ArrowDownLeft className="w-4 h-4 text-emerald-500 stroke-[2.5]" />
+                              <ArrowDownLeft className="w-4 h-4 text-emerald-500 stroke-[1.25]" />
                               <span>{selectedGoal.isOpenEnded ? (lang === 'bn' ? 'উন্মুক্ত সঞ্চয়ে টাকা জমা' : 'Deposit into Flexible Savings') : t.addInstallment}</span>
                             </>
                           )}
                         </span>
-                        <button 
+                        <button
                           type="button"
                           onClick={() => setShowInstallmentForm(false)}
-                          className="p-1.5 text-slate-500 hover:text-slate-950 dark:hover:text-white rounded-lg border-2 border-slate-300 dark:border-slate-700 cursor-pointer transition-colors"
+                          className="w-7 h-7 rounded-full bg-slate-900/[0.05] dark:bg-white/[0.08] text-slate-500 hover:text-slate-950 dark:hover:text-white flex items-center justify-center cursor-pointer transition-colors"
                         >
-                          <X className="w-4 h-4" />
+                          <X className="w-3.5 h-3.5 stroke-[1.25]" />
                         </button>
                       </div>
 
                       <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                          {contributionActionType === 'withdrawal' 
-                            ? (lang === 'bn' ? 'উত্তোলনের পরিমাণ *' : 'Withdrawal Amount *') 
+                        <label className={`${glassLabelCls} block`}>
+                          {contributionActionType === 'withdrawal'
+                            ? (lang === 'bn' ? 'উত্তোলনের পরিমাণ *' : 'Withdrawal Amount *')
                             : `${t.amountPaid} *`}
                         </label>
                         <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-400 select-none pointer-events-none">
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-lg font-display font-light text-slate-400 select-none pointer-events-none">
                             ৳
                           </span>
                           <input
@@ -2039,7 +2123,7 @@ export default function GoalsManager({
                             placeholder="0"
                             value={installmentInput}
                             onChange={(e) => handleAmountChange(e.target.value, setInstallmentInput)}
-                            className="w-full pl-9 pr-4 py-2.5 bg-white dark:bg-[#0D121D] border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white rounded-xl font-bold font-mono text-lg text-slate-950 dark:text-white focus:outline-none transition-colors"
+                            className="w-full pl-9 pr-4 py-3 bg-slate-900/[0.03] dark:bg-white/[0.04] border border-slate-900/[0.09] dark:border-white/[0.1] rounded-2xl font-display font-bold text-xl text-slate-950 dark:text-white focus:outline-none transition-colors"
                           />
                         </div>
 
@@ -2079,7 +2163,7 @@ export default function GoalsManager({
                                 const cur = parseAmount(installmentInput);
                                 setInstallmentInput(formatIndianNumberString(String(cur + val)));
                               }}
-                              className="px-2.5 py-1 bg-white dark:bg-[#0D121D] hover:bg-slate-50 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-mono font-bold rounded-lg transition-colors text-xs cursor-pointer"
+                              className="px-3 py-1 bg-slate-900/[0.04] hover:bg-slate-900/[0.08] dark:bg-white/[0.06] dark:hover:bg-white/[0.11] text-slate-900 dark:text-white font-mono font-semibold rounded-full transition-colors text-xs cursor-pointer touch-press"
                             >
                               +{formatNumber(val, lang)}
                             </button>
@@ -2090,7 +2174,7 @@ export default function GoalsManager({
                               triggerHaptic('tick');
                               setInstallmentInput('');
                             }}
-                            className="px-2.5 py-1 bg-rose-50 dark:bg-rose-950/30 border-2 border-rose-300 dark:border-rose-900 text-rose-600 dark:text-rose-400 font-bold rounded-lg transition-colors text-xs cursor-pointer"
+                            className="px-3 py-1 bg-rose-500/10 text-rose-600 dark:text-rose-400 font-semibold rounded-full transition-colors text-xs cursor-pointer touch-press"
                           >
                             {lang === 'bn' ? 'মুছুন' : 'Clear'}
                           </button>
@@ -2098,7 +2182,7 @@ export default function GoalsManager({
                       </div>
 
                       <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                        <label className={`${glassLabelCls} block`}>
                           {lang === 'bn' ? 'নোট / বিবরণ (ঐচ্ছিক)' : 'Note / Description (Optional)'}
                         </label>
                         <input
@@ -2110,7 +2194,7 @@ export default function GoalsManager({
                           }
                           value={installmentNote}
                           onChange={(e) => setInstallmentNote(e.target.value)}
-                          className="w-full px-3.5 py-2.5 bg-white dark:bg-[#0D121D] border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white rounded-xl font-bold text-sm text-slate-950 dark:text-white focus:outline-none transition-colors"
+                          className={`${glassFieldCls} font-medium text-sm`}
                         />
                       </div>
 
@@ -2123,9 +2207,9 @@ export default function GoalsManager({
                             onChange={(e) => setSyncToLedger(e.target.checked)}
                             className="w-4 h-4 accent-emerald-600 rounded cursor-pointer mt-0.5"
                           />
-                          <label htmlFor="ledger_sync_checkbox" className="text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer selection-none leading-normal">
-                            {contributionActionType === 'withdrawal' 
-                              ? (lang === 'bn' ? `গ্রাহকের খতিয়ানে বাকি/প্রদান হিসেবে যুক্ত করুন` : `Record as Due/Withdrawal in Customer's Ledger`)
+                          <label htmlFor="ledger_sync_checkbox" className="text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer select-none leading-normal">
+                            {contributionActionType === 'withdrawal'
+                              ? (lang === 'bn' ? 'গ্রাহকের খতিয়ানে বাকি/প্রদান হিসেবে যুক্ত করুন' : "Record as Due/Withdrawal in Customer's Ledger")
                               : `${t.recordTxInLedger} (${selectedGoal.customerName || (lang === 'bn' ? 'গ্রাহকের খাতা' : "Customer's Ledger")})`}
                           </label>
                         </div>
@@ -2134,7 +2218,7 @@ export default function GoalsManager({
                       <button
                         type="submit"
                         disabled={isSubmitting}
-                        className={`w-full py-2.5 font-bold rounded-xl border-2 border-transparent transition-colors cursor-pointer text-xs flex items-center justify-center gap-2 ${
+                        className={`w-full py-3 font-bold rounded-full transition-colors cursor-pointer text-xs flex items-center justify-center gap-2 touch-press ${
                           contributionActionType === 'withdrawal'
                             ? 'bg-rose-600 hover:bg-rose-700 text-white'
                             : 'bg-emerald-600 hover:bg-emerald-700 text-white'
@@ -2156,19 +2240,19 @@ export default function GoalsManager({
                 </div>
               )}
 
-              {/* CONTRIBUTION & WITHDRAWAL LOGS TIMELINE */}
-              <div className="space-y-3">
-                <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
-                  {selectedGoal.isOpenEnded 
-                    ? (lang === 'bn' ? 'জমা ও উত্তোলনের বিবরণী' : 'Savings & Withdrawal Ledger') 
+              {/* Contribution Timeline */}
+              <div className="space-y-2.5">
+                <span className={`${glassLabelCls} block`}>
+                  {selectedGoal.isOpenEnded
+                    ? (lang === 'bn' ? 'জমা ও উত্তোলনের বিবরণী' : 'Savings & Withdrawal Ledger')
                     : (lang === 'bn' ? 'জমার বিবরণী' : 'Contribution Ledger')} ({selectedGoal.contributions?.length || 0})
                 </span>
 
-                <div className="surface-subcard border rounded-xl overflow-hidden">
-                  <div className="max-h-[220px] overflow-y-auto divide-y divide-slate-200/70 dark:divide-slate-800/80">
+                <div className="surface-subcard border rounded-2xl overflow-hidden">
+                  <div className="max-h-[220px] overflow-y-auto divide-y divide-slate-900/[0.06] dark:divide-white/[0.06]">
                     {(!selectedGoal.contributions || selectedGoal.contributions.length === 0) ? (
-                      <div className="p-6 text-center text-xs font-bold text-slate-500 dark:text-slate-400 flex flex-col items-center gap-1.5">
-                        <ReceiptText className="w-8 h-8 stroke-[1.5] text-slate-400" />
+                      <div className="p-6 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 flex flex-col items-center gap-1.5">
+                        <ReceiptText className="w-7 h-7 stroke-[1.25] text-slate-400" />
                         {lang === 'bn' ? 'কোন জমা বা উত্তোলনের রেকর্ড পাওয়া যায়নি' : 'No records logged yet'}
                       </div>
                     ) : (
@@ -2176,49 +2260,49 @@ export default function GoalsManager({
                         const contribKey = c.id || c.date || index;
                         const isWithdrawal = c.type === 'withdrawal';
                         return (
-                          <div key={contribKey} className="p-3 sm:py-3 sm:px-3.5 flex items-center justify-between gap-3 text-xs hover:bg-slate-100/80 dark:hover:bg-slate-800/50 transition-colors">
+                          <div key={contribKey} className="p-3 sm:px-3.5 flex items-center justify-between gap-3 text-xs hover:bg-slate-900/[0.03] dark:hover:bg-white/[0.04] transition-colors">
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-1.5">
                                 {isWithdrawal ? (
-                                  <ArrowUpRight className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400 stroke-[2.5] shrink-0" />
+                                  <ArrowUpRight className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400 stroke-[1.25] shrink-0" />
                                 ) : (
-                                  <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 stroke-[2.5] shrink-0" />
+                                  <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 stroke-[1.25] shrink-0" />
                                 )}
-                                <span className="font-bold text-slate-900 dark:text-white truncate text-xs sm:text-sm">
+                                <span className="font-semibold text-slate-900 dark:text-white truncate text-xs sm:text-sm">
                                   {c.note || (isWithdrawal ? (lang === 'bn' ? 'টাকা উত্তোলন' : 'Withdrawal') : (lang === 'bn' ? 'কিস্তি জমা' : 'Deposit Added'))}
                                 </span>
                               </div>
-                              <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
-                                {new Date(c.date).toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' })}{' • '}{new Date(c.date).toLocaleTimeString(lang === 'bn' ? 'bn-BD' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                {new Date(c.date).toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · {new Date(c.date).toLocaleTimeString(lang === 'bn' ? 'bn-BD' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
                               </div>
                             </div>
-                            <div className="flex items-center gap-2.5 shrink-0">
-                              <span className={`font-bold font-mono text-sm sm:text-base flex items-center gap-0.5 ${
-                                isWithdrawal 
-                                  ? 'text-rose-600 dark:text-rose-400' 
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className={`font-bold font-mono text-sm flex items-center gap-0.5 ${
+                                isWithdrawal
+                                  ? 'text-rose-600 dark:text-rose-400'
                                   : 'text-emerald-600 dark:text-emerald-400'
                               }`}>
-                                {isWithdrawal ? `- ৳${formatNumber(c.amount, lang)}` : `+ ৳${formatNumber(c.amount, lang)}`}
+                                {isWithdrawal ? `-৳${formatNumber(c.amount, lang)}` : `+৳${formatNumber(c.amount, lang)}`}
                               </span>
-                              <div className="flex items-center gap-1 pl-2 border-l border-slate-200 dark:border-slate-800">
+                              <div className="flex items-center gap-0.5 pl-1.5 border-l border-slate-900/[0.07] dark:border-white/[0.08]">
                                 {editGoalContribution && (
                                   <button
                                     type="button"
                                     onClick={() => openEditContributionModal(c)}
-                                    className="p-1.5 text-slate-500 hover:text-slate-950 dark:hover:text-white hover:bg-slate-200/70 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                                    className="w-7 h-7 rounded-full text-slate-400 hover:text-slate-950 dark:hover:text-white hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.08] flex items-center justify-center transition-colors cursor-pointer"
                                     title={lang === 'bn' ? 'সম্পাদনা করুন' : 'Edit'}
                                   >
-                                    <Pencil className="w-3.5 h-3.5" />
+                                    <Pencil className="w-3.5 h-3.5 stroke-[1.25]" />
                                   </button>
                                 )}
                                 {deleteGoalContribution && (
                                   <button
                                     type="button"
                                     onClick={() => openDeleteContributionModal(c)}
-                                    className="p-1.5 text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg transition-colors cursor-pointer"
+                                    className="w-7 h-7 rounded-full text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-500/10 flex items-center justify-center transition-colors cursor-pointer"
                                     title={lang === 'bn' ? 'মুছে ফেলুন' : 'Delete'}
                                   >
-                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <Trash2 className="w-3.5 h-3.5 stroke-[1.25]" />
                                   </button>
                                 )}
                               </div>
@@ -2231,7 +2315,6 @@ export default function GoalsManager({
                 </div>
               </div>
 
-              {/* Status Actions */}
               {selectedGoal.status === 'active' ? (
                 <div className="flex justify-center pt-2">
                   <button
@@ -2249,50 +2332,56 @@ export default function GoalsManager({
                     onClick={openReactivateGoalConfirm}
                     className="text-xs font-bold text-slate-900 dark:text-white cursor-pointer hover:underline flex items-center gap-1.5"
                   >
-                    <RotateCcw className="w-3.5 h-3.5" />
+                    <RotateCcw className="w-3.5 h-3.5 stroke-[1.25]" />
                     <span>{lang === 'bn' ? 'লক্ষ্যটি পুনরায় চালু করুন' : 'Reactivate this Goal'}</span>
                   </button>
                 </div>
               )}
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
-      {/* ── 1 & 2. CUSTOM REACTIVATION CONFIRMATION POPUP ── */}
+      {/* ── REACTIVATION CONFIRMATION POPUP ── */}
       {showReactivateConfirm && selectedGoal && (
-        <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
-          onClick={closeReactivateGoalConfirm}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border shadow-2xl p-6"
-          >
-            <div className="text-center mb-6">
-              <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-center mx-auto mb-3">
-                <RotateCcw className="w-6 h-6 text-slate-900 dark:text-white" />
+        <ModalPortal lockScroll={false}>
+          <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+            <div
+              className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+              onClick={closeReactivateGoalConfirm}
+            />
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-sm rounded-t-[2rem] sm:rounded-3xl border shadow-2xl p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pb-6 max-h-[90dvh] overflow-y-auto hide-scrollbar"
+            >
+              <div className="flex justify-center pb-3 sm:hidden">
+                <div className="w-10 h-1 rounded-full bg-slate-900/15 dark:bg-white/20 mx-auto" />
               </div>
-              <h3 className="text-base font-extrabold text-slate-950 dark:text-white mb-1.5">
+            <div className="text-center mb-6">
+              <div className="w-12 h-12 bg-slate-900/[0.05] dark:bg-white/[0.08] rounded-full flex items-center justify-center mx-auto mb-3">
+                <RotateCcw className="w-5 h-5 text-slate-900 dark:text-white stroke-[1.25]" />
+              </div>
+              <h3 className="font-display text-lg font-bold text-slate-950 dark:text-white mb-1.5">
                 {lang === 'bn' ? 'লক্ষ্য পুনরায় চালুকরণ' : 'Reactivate Goal'}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                {lang === 'bn' 
-                  ? 'আপনি কি নিশ্চিত এই লক্ষ্যটি পুনরায় চলমান তালিকায় ফিরিয়ে নিতে চান?' 
+                {lang === 'bn'
+                  ? 'আপনি কি নিশ্চিত এই লক্ষ্যটি পুনরায় চলমান তালিকায় ফিরিয়ে নিতে চান?'
                   : 'Are you sure you want to restore this goal back to your active list?'}
               </p>
-              
-              <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 text-left space-y-2 mt-4 text-xs">
+
+              <div className="bg-slate-900/[0.03] dark:bg-white/[0.04] border border-slate-900/[0.07] dark:border-white/[0.08] rounded-2xl p-3.5 text-left space-y-2 mt-4 text-xs">
                 <div className="flex justify-between items-baseline">
-                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'লক্ষ্য' : 'Goal'}</span>
+                  <span className={glassLabelCls}>{lang === 'bn' ? 'লক্ষ্য' : 'Goal'}</span>
                   <span className="font-bold text-slate-900 dark:text-white truncate max-w-[180px]">{selectedGoal.title}</span>
                 </div>
                 <div className="flex justify-between items-baseline">
-                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'লক্ষ্যমাত্রা' : 'Target'}</span>
+                  <span className={glassLabelCls}>{lang === 'bn' ? 'লক্ষ্যমাত্রা' : 'Target'}</span>
                   <span className="font-bold font-mono text-slate-900 dark:text-white">৳ {formatNumber(selectedGoal.targetAmount, lang)}</span>
                 </div>
                 <div className="flex justify-between items-baseline">
-                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'জমা হয়েছে' : 'Saved'}</span>
+                  <span className={glassLabelCls}>{lang === 'bn' ? 'জমা হয়েছে' : 'Saved'}</span>
                   <span className="font-bold font-mono text-emerald-600 dark:text-emerald-400">৳ {formatNumber(selectedGoal.savedAmount || 0, lang)}</span>
                 </div>
               </div>
@@ -2308,52 +2397,58 @@ export default function GoalsManager({
                   closeReactivateGoalConfirm();
                   toast.success(lang === 'bn' ? 'লক্ষ্যটি সফলভাবে পুনরায় চালু করা হয়েছে' : 'Goal reactivated successfully');
                 }}
-                className="w-full py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-xl border-2 border-slate-950 dark:border-white cursor-pointer transition-colors text-xs"
+                className="w-full py-3 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-full cursor-pointer transition-colors text-xs touch-press"
               >
                 {lang === 'bn' ? 'হ্যাঁ, পুনরায় চালু করুন' : 'Yes, Reactivate Goal'}
               </button>
               <button
                 type="button"
                 onClick={closeReactivateGoalConfirm}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer transition-colors text-xs"
+                className="w-full py-3 bg-slate-900/[0.05] hover:bg-slate-900/[0.09] dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-slate-800 dark:text-slate-200 font-bold rounded-full cursor-pointer transition-colors text-xs"
               >
                 {lang === 'bn' ? 'বাতিল' : 'Cancel'}
               </button>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
-      {/* ── 2. CUSTOM CANCEL CONFIRMATION POPUP ── */}
+      {/* ── CANCEL CONFIRMATION POPUP ── */}
       {showCancelConfirm && selectedGoal && (
-        <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
-          onClick={closeCancelGoalConfirm}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border shadow-2xl p-6"
-          >
-            <div className="text-center mb-6">
-              <div className="w-12 h-12 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3">
-                <AlertTriangle className="w-6 h-6 text-rose-600 dark:text-rose-400" />
+        <ModalPortal lockScroll={false}>
+          <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+            <div
+              className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+              onClick={closeCancelGoalConfirm}
+            />
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-sm rounded-t-[2rem] sm:rounded-3xl border shadow-2xl p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pb-6 max-h-[90dvh] overflow-y-auto hide-scrollbar"
+            >
+              <div className="flex justify-center pb-3 sm:hidden">
+                <div className="w-10 h-1 rounded-full bg-slate-900/15 dark:bg-white/20 mx-auto" />
               </div>
-              <h3 className="text-base font-extrabold text-slate-950 dark:text-white mb-1.5">
+            <div className="text-center mb-6">
+              <div className="w-12 h-12 bg-rose-500/10 rounded-full flex items-center justify-center mx-auto mb-3">
+                <AlertTriangle className="w-5 h-5 text-rose-600 dark:text-rose-400 stroke-[1.25]" />
+              </div>
+              <h3 className="font-display text-lg font-bold text-slate-950 dark:text-white mb-1.5">
                 {lang === 'bn' ? 'লক্ষ্য বাতিল নিশ্চিতকরণ' : 'Confirm Goal Cancellation'}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                {lang === 'bn' 
-                  ? 'আপনি কি নিশ্চিতভাবে এই লক্ষ্যটি বাতিল করতে চান? এটি আর্কাইভে সংরক্ষিত থাকবে।' 
+                {lang === 'bn'
+                  ? 'আপনি কি নিশ্চিতভাবে এই লক্ষ্যটি বাতিল করতে চান? এটি আর্কাইভে সংরক্ষিত থাকবে।'
                   : 'Are you sure you want to cancel this goal? It will be moved to History.'}
               </p>
-              
-              <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 text-left space-y-2 mt-4 text-xs">
+
+              <div className="bg-slate-900/[0.03] dark:bg-white/[0.04] border border-slate-900/[0.07] dark:border-white/[0.08] rounded-2xl p-3.5 text-left space-y-2 mt-4 text-xs">
                 <div className="flex justify-between items-baseline">
-                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'লক্ষ্য' : 'Goal'}</span>
+                  <span className={glassLabelCls}>{lang === 'bn' ? 'লক্ষ্য' : 'Goal'}</span>
                   <span className="font-bold text-slate-900 dark:text-white truncate max-w-[180px]">{selectedGoal.title}</span>
                 </div>
                 <div className="flex justify-between items-baseline">
-                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'লক্ষ্যমাত্রা' : 'Target'}</span>
+                  <span className={glassLabelCls}>{lang === 'bn' ? 'লক্ষ্যমাত্রা' : 'Target'}</span>
                   <span className="font-bold font-mono text-slate-900 dark:text-white">৳ {formatNumber(selectedGoal.targetAmount, lang)}</span>
                 </div>
               </div>
@@ -2369,52 +2464,58 @@ export default function GoalsManager({
                   closeGoalDetail();
                   toast.success(lang === 'bn' ? 'লক্ষ্যটি বাতিল করা হয়েছে' : 'Goal cancelled');
                 }}
-                className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent cursor-pointer transition-colors text-xs"
+                className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-full cursor-pointer transition-colors text-xs touch-press"
               >
                 {lang === 'bn' ? 'হ্যাঁ, বাতিল করুন' : 'Yes, Cancel Goal'}
               </button>
               <button
                 type="button"
                 onClick={closeCancelGoalConfirm}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer transition-colors text-xs"
+                className="w-full py-3 bg-slate-900/[0.05] hover:bg-slate-900/[0.09] dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-slate-800 dark:text-slate-200 font-bold rounded-full cursor-pointer transition-colors text-xs"
               >
                 {lang === 'bn' ? 'না, ফেরত যান' : 'No, Go Back'}
               </button>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
-      {/* ── 2. CUSTOM DELETE CONFIRMATION POPUP ── */}
+      {/* ── DELETE CONFIRMATION POPUP ── */}
       {showDeleteConfirm && selectedGoal && (
-        <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
-          onClick={closeDeleteGoalConfirm}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border shadow-2xl p-6"
-          >
-            <div className="text-center mb-6">
-              <div className="w-12 h-12 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3">
-                <Trash2 className="w-6 h-6 text-rose-600 dark:text-rose-400" />
+        <ModalPortal lockScroll={false}>
+          <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+            <div
+              className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+              onClick={closeDeleteGoalConfirm}
+            />
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-sm rounded-t-[2rem] sm:rounded-3xl border shadow-2xl p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pb-6 max-h-[90dvh] overflow-y-auto hide-scrollbar"
+            >
+              <div className="flex justify-center pb-3 sm:hidden">
+                <div className="w-10 h-1 rounded-full bg-slate-900/15 dark:bg-white/20 mx-auto" />
               </div>
-              <h3 className="text-base font-extrabold text-slate-950 dark:text-white mb-1.5">
+            <div className="text-center mb-6">
+              <div className="w-12 h-12 bg-rose-500/10 rounded-full flex items-center justify-center mx-auto mb-3">
+                <Trash2 className="w-5 h-5 text-rose-600 dark:text-rose-400 stroke-[1.25]" />
+              </div>
+              <h3 className="font-display text-lg font-bold text-slate-950 dark:text-white mb-1.5">
                 {lang === 'bn' ? 'লক্ষ্য স্থায়ীভাবে মুছুন' : 'Delete Goal Permanently'}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                {lang === 'bn' 
-                  ? 'আপনি কি নিশ্চিত এই লক্ষ্যটি চিরতরে মুছে ফেলতে চান? এর কিস্তির সকল তথ্য চিরতরে মুছে যাবে।' 
+                {lang === 'bn'
+                  ? 'আপনি কি নিশ্চিত এই লক্ষ্যটি চিরতরে মুছে ফেলতে চান? এর কিস্তির সকল তথ্য চিরতরে মুছে যাবে।'
                   : 'Are you sure you want to delete this goal permanently? All contribution records will be permanently lost.'}
               </p>
-              
-              <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 text-left space-y-2 mt-4 text-xs">
+
+              <div className="bg-slate-900/[0.03] dark:bg-white/[0.04] border border-slate-900/[0.07] dark:border-white/[0.08] rounded-2xl p-3.5 text-left space-y-2 mt-4 text-xs">
                 <div className="flex justify-between items-baseline">
-                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'লক্ষ্য' : 'Goal'}</span>
+                  <span className={glassLabelCls}>{lang === 'bn' ? 'লক্ষ্য' : 'Goal'}</span>
                   <span className="font-bold text-slate-900 dark:text-white truncate max-w-[180px]">{selectedGoal.title}</span>
                 </div>
                 <div className="flex justify-between items-baseline">
-                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'লক্ষ্যমাত্রা' : 'Target'}</span>
+                  <span className={glassLabelCls}>{lang === 'bn' ? 'লক্ষ্যমাত্রা' : 'Target'}</span>
                   <span className="font-bold font-mono text-slate-900 dark:text-white">৳ {formatNumber(selectedGoal.targetAmount, lang)}</span>
                 </div>
               </div>
@@ -2430,56 +2531,57 @@ export default function GoalsManager({
                   closeGoalDetail();
                   toast.success(lang === 'bn' ? 'লক্ষ্যটি মুছে ফেলা হয়েছে' : 'Goal deleted successfully');
                 }}
-                className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent cursor-pointer transition-colors text-xs"
+                className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-full cursor-pointer transition-colors text-xs touch-press"
               >
                 {lang === 'bn' ? 'হ্যাঁ, স্থায়ীভাবে মুছুন' : 'Yes, Delete Permanently'}
               </button>
               <button
                 type="button"
                 onClick={closeDeleteGoalConfirm}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl border-2 border-slate-300 dark:border-slate-700 cursor-pointer transition-colors text-xs"
+                className="w-full py-3 bg-slate-900/[0.05] hover:bg-slate-900/[0.09] dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-slate-800 dark:text-slate-200 font-bold rounded-full cursor-pointer transition-colors text-xs"
               >
                 {lang === 'bn' ? 'বাতিল' : 'Cancel'}
               </button>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
       {/* ── EMI NOTIFICATION REMINDER MODAL ── */}
       {emiReminderGoal && (
-        <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md overflow-hidden"
-          onClick={closeEmiReminderModal}
-        >
-          <div className="absolute inset-0" onClick={closeEmiReminderModal} />
+        <ModalPortal lockScroll={false}>
+          <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+            <div className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur" onClick={closeEmiReminderModal} />
 
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="glass-modal w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border shadow-2xl overflow-hidden max-h-[92vh] flex flex-col relative z-10"
-          >
-            {/* Header */}
-            <div className="p-4 border-b border-slate-200/70 dark:border-white/[0.08] flex items-center justify-between bg-slate-50/50 dark:bg-white/[0.02]">
-              <div>
-                <h3 className="text-base font-bold text-slate-950 dark:text-white leading-tight">
-                  {lang === 'bn' ? 'কিস্তি রিমাইন্ডার' : 'Monthly EMI Reminder'}
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium truncate max-w-[240px] mt-0.5">
-                  {emiReminderGoal.title}
-                </p>
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="animate-slide-up glass-modal w-full sm:max-w-md rounded-t-[2rem] sm:rounded-3xl border shadow-2xl overflow-hidden max-h-[90dvh] flex flex-col relative z-10"
+            >
+              <div className="flex justify-center pt-3 pb-1 sm:hidden shrink-0">
+                <div className="w-10 h-1 rounded-full bg-slate-900/15 dark:bg-white/20 mx-auto" />
               </div>
-              <button
-                onClick={closeEmiReminderModal}
-                className="p-1.5 bg-white dark:bg-[#0D121D] hover:bg-slate-100 dark:hover:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg text-slate-500 dark:text-slate-400 transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
 
-            {/* Modal Body */}
-            <div className="p-4 space-y-4 overflow-y-auto hide-scrollbar">
-              <div className="p-3 bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs text-slate-600 dark:text-slate-300 font-medium flex items-start gap-2.5 leading-relaxed">
-                <Info className="w-4 h-4 shrink-0 text-slate-900 dark:text-white mt-0.5" />
+              <div className="px-5 py-3.5 border-b border-slate-900/[0.06] dark:border-white/[0.06] flex items-center justify-between shrink-0">
+                <div>
+                  <h3 className="font-display text-lg font-bold text-slate-950 dark:text-white leading-tight">
+                    {lang === 'bn' ? 'কিস্তি রিমাইন্ডার' : 'Monthly EMI Reminder'}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-medium truncate max-w-[240px] mt-0.5">
+                    {emiReminderGoal.title}
+                  </p>
+                </div>
+                <button
+                  onClick={closeEmiReminderModal}
+                  className="w-8 h-8 rounded-full bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-500 dark:text-slate-400 flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4 stroke-[1.25]" />
+                </button>
+              </div>
+
+              <div className="flex-1 min-h-0 p-5 space-y-4 overflow-y-auto hide-scrollbar">
+              <div className="p-3.5 bg-slate-900/[0.03] dark:bg-white/[0.04] border border-slate-900/[0.06] dark:border-white/[0.06] rounded-2xl text-xs text-slate-600 dark:text-slate-300 font-medium flex items-start gap-2.5 leading-relaxed">
+                <Info className="w-4 h-4 shrink-0 text-slate-900 dark:text-white mt-0.5 stroke-[1.25]" />
                 <span>
                   {lang === 'bn'
                     ? 'প্রতি মাসে আপনার কিস্তির নির্ধারিত তারিখের ৭ দিন আগে থেকে প্রতিদিন নোটিফিকেশন অ্যালার্ট পাঠানো হবে যাতে সময়মতো কিস্তি পরিশোধ করা যায়।'
@@ -2487,10 +2589,9 @@ export default function GoalsManager({
                 </span>
               </div>
 
-              {/* Goal Snapshot */}
-              <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 p-3.5 rounded-xl flex items-center justify-between gap-3">
+              <div className="bg-slate-900/[0.03] dark:bg-white/[0.04] border border-slate-900/[0.07] dark:border-white/[0.08] p-3.5 rounded-2xl flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <span className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400 block">
+                  <span className={`${glassLabelCls} block`}>
                     {lang === 'bn' ? 'কিস্তির পরিমাণ' : 'Installment Amount'}
                   </span>
                   <span className="text-base font-bold font-mono text-slate-950 dark:text-white">
@@ -2498,7 +2599,7 @@ export default function GoalsManager({
                   </span>
                 </div>
                 <div className="text-right">
-                  <span className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400 block">
+                  <span className={`${glassLabelCls} block`}>
                     {lang === 'bn' ? 'ধরন' : 'Type'}
                   </span>
                   <span className="text-xs font-bold text-slate-900 dark:text-white uppercase">
@@ -2507,46 +2608,43 @@ export default function GoalsManager({
                 </div>
               </div>
 
-              {/* Day of Month Selector */}
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1.5">
-                  <CalendarClock className="w-3.5 h-3.5 text-slate-900 dark:text-white" />
+                <label className={`${glassLabelCls} flex items-center gap-1.5`}>
+                  <CalendarClock className="w-3.5 h-3.5 text-slate-900 dark:text-white stroke-[1.25]" />
                   {lang === 'bn' ? 'প্রতি মাসের কিস্তির তারিখ' : 'Day of Month for EMI'} *
                 </label>
-                <select
+                <NativeOptionPicker
                   value={emiDueDay}
-                  onChange={(e) => setEmiDueDay(Number(e.target.value))}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white rounded-xl text-slate-950 dark:text-white text-sm font-bold focus:outline-none transition-colors cursor-pointer"
-                >
-                  {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
-                    <option 
-                      key={day} 
-                      value={day}
-                      className="bg-white dark:bg-[#0D121D] text-slate-950 dark:text-white font-bold"
-                    >
-                      {lang === 'bn' ? `প্রতি মাসের ${formatNumber(day, 'bn')} তারিখ` : `Day ${day} of every month`}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setEmiDueDay}
+                  lang={lang}
+                  title={lang === 'bn' ? 'প্রতি মাসের কিস্তির তারিখ' : 'Day of Month for EMI'}
+                  gridColumns={7}
+                  options={Array.from({ length: 31 }, (_, i) => i + 1).map(day => ({
+                    value: day,
+                    label: lang === 'bn' ? `প্রতি মাসের ${formatNumber(day, 'bn')} তারিখ` : `Day ${day} of every month`,
+                    compactLabel: formatNumber(day, lang)
+                  }))}
+                  triggerClassName={`${glassFieldCls} text-sm font-bold cursor-pointer flex items-center justify-between gap-2 text-left touch-press`}
+                />
               </div>
 
-              {/* Daily Alert Time */}
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1.5">
-                  <Bell className="w-3.5 h-3.5 text-slate-900 dark:text-white" />
+                <label className={`${glassLabelCls} flex items-center gap-1.5`}>
+                  <Bell className="w-3.5 h-3.5 text-slate-900 dark:text-white stroke-[1.25]" />
                   {lang === 'bn' ? 'নোটিফিকেশন অ্যালার্টের সময়' : 'Notification Alert Time'}
                 </label>
-                <input
-                  type="time"
+                <NativeTimePicker
                   value={emiAlertTime}
-                  onChange={(e) => setEmiAlertTime(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white rounded-xl text-slate-950 dark:text-white text-sm font-bold focus:outline-none transition-colors"
+                  onChange={setEmiAlertTime}
+                  lang={lang}
+                  title={lang === 'bn' ? 'নোটিফিকেশন অ্যালার্টের সময়' : 'Notification Alert Time'}
+                  triggerClassName={`${glassFieldCls} text-sm font-mono font-bold flex items-center justify-between gap-2 cursor-pointer text-left touch-press`}
                 />
               </div>
 
               {reminders.some(r => r.goalId === emiReminderGoal.id && r.active) && (
-                <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/60 rounded-xl text-xs text-slate-900 dark:text-white font-bold flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-xs text-slate-900 dark:text-white font-bold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 stroke-[1.25]" />
                   <span>
                     {lang === 'bn'
                       ? 'এই কিস্তির রিমাইন্ডার বর্তমানে সক্রিয় রয়েছে।'
@@ -2556,15 +2654,14 @@ export default function GoalsManager({
               )}
             </div>
 
-            {/* Actions */}
-            <div className="p-4 border-t border-slate-200/70 dark:border-white/[0.08] bg-white/60 dark:bg-white/[0.02] space-y-2">
+            <div className="p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-5 border-t border-slate-900/[0.06] dark:border-white/[0.06] bg-white/60 dark:bg-black/30 backdrop-blur-xl space-y-2 shrink-0">
               <button
                 type="button"
                 disabled={isSavingEmiReminder}
                 onClick={handleSaveEmiReminder}
-                className="w-full py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-xl border-2 border-slate-950 dark:border-white text-xs cursor-pointer transition-colors flex items-center justify-center gap-2"
+                className="w-full py-3 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-full text-xs cursor-pointer transition-colors flex items-center justify-center gap-2 touch-press"
               >
-                <Bell className="w-4 h-4" />
+                <Bell className="w-4 h-4 stroke-[1.25]" />
                 {reminders.some(r => r.goalId === emiReminderGoal.id && r.active)
                   ? (lang === 'bn' ? 'রিমাইন্ডার আপডেট করুন' : 'Update EMI Reminder')
                   : (lang === 'bn' ? 'কিস্তির অ্যালার্ট চালু করুন' : 'Enable EMI Reminder')}
@@ -2574,7 +2671,7 @@ export default function GoalsManager({
                 <button
                   type="button"
                   onClick={handleRemoveEmiReminder}
-                  className="w-full py-2.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-900/40 border-2 border-rose-300 dark:border-rose-800 text-rose-600 dark:text-rose-400 font-bold rounded-xl text-xs cursor-pointer transition-colors"
+                  className="w-full py-3 bg-rose-500/10 hover:bg-rose-500/15 text-rose-600 dark:text-rose-400 font-bold rounded-full text-xs cursor-pointer transition-colors"
                 >
                   {lang === 'bn' ? 'রিমাইন্ডার বন্ধ করুন' : 'Turn Off Reminder'}
                 </button>
@@ -2583,29 +2680,35 @@ export default function GoalsManager({
               <button
                 type="button"
                 onClick={closeEmiReminderModal}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer transition-colors"
+                className="w-full py-3 bg-slate-900/[0.05] hover:bg-slate-900/[0.09] dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-slate-800 dark:text-slate-200 font-bold rounded-full text-xs cursor-pointer transition-colors"
               >
                 {lang === 'bn' ? 'বাতিল' : 'Cancel'}
               </button>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
       {/* ── EDIT CONTRIBUTION MODAL ── */}
       {editingContribution && selectedGoal && (
-        <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
-          onClick={closeEditContributionModal}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="glass-modal w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border shadow-2xl p-5 relative"
-          >
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800/80 mb-4">
+        <ModalPortal lockScroll={false}>
+          <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+            <div
+              className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+              onClick={closeEditContributionModal}
+            />
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-md rounded-t-[2rem] sm:rounded-3xl border shadow-2xl p-5 sm:p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pb-6 max-h-[90dvh] overflow-y-auto hide-scrollbar"
+            >
+              <div className="flex justify-center pb-3 sm:hidden">
+                <div className="w-10 h-1 rounded-full bg-slate-900/15 dark:bg-white/20 mx-auto" />
+              </div>
+            <div className="flex items-center justify-between pb-3 border-b border-slate-900/[0.06] dark:border-white/[0.06] mb-4">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg flex items-center justify-center text-slate-900 dark:text-white">
-                  <Pencil className="w-4 h-4" />
+                <div className="w-8 h-8 bg-slate-900/[0.05] dark:bg-white/[0.08] rounded-full flex items-center justify-center text-slate-900 dark:text-white">
+                  <Pencil className="w-3.5 h-3.5 stroke-[1.25]" />
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-950 dark:text-white">
@@ -2619,15 +2722,15 @@ export default function GoalsManager({
               <button
                 type="button"
                 onClick={closeEditContributionModal}
-                className="p-1.5 text-slate-500 hover:text-slate-950 dark:hover:text-white rounded-lg border-2 border-slate-300 dark:border-slate-700 transition-colors cursor-pointer"
+                className="w-8 h-8 rounded-full bg-slate-900/[0.05] dark:bg-white/[0.08] text-slate-500 hover:text-slate-950 dark:hover:text-white flex items-center justify-center transition-colors cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <X className="w-4 h-4 stroke-[1.25]" />
               </button>
             </div>
 
             <form onSubmit={handleSaveEditContribution} className="space-y-3.5">
               <div>
-                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block mb-1">
+                <label className={`${glassLabelCls} block mb-1.5`}>
                   {lang === 'bn' ? 'জমার পরিমাণ (৳)' : 'Deposit Amount (৳)'} *
                 </label>
                 <input
@@ -2638,13 +2741,13 @@ export default function GoalsManager({
                   value={editContribAmount}
                   onChange={(e) => handleAmountChange(e.target.value, setEditContribAmount)}
                   placeholder="0.00"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white rounded-xl text-slate-950 dark:text-white text-base font-mono font-bold focus:outline-none transition-colors"
+                  className={`${glassFieldCls} text-base font-mono font-bold`}
                   autoFocus
                 />
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block mb-1">
+                <label className={`${glassLabelCls} block mb-1.5`}>
                   {lang === 'bn' ? 'বিবরণ / নোট' : 'Note / Description'}
                 </label>
                 <input
@@ -2652,22 +2755,22 @@ export default function GoalsManager({
                   value={editContribNote}
                   onChange={(e) => setEditContribNote(e.target.value)}
                   placeholder={lang === 'bn' ? 'যেমন: ১ম কিস্তি' : 'e.g. 1st installment'}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white rounded-xl text-slate-950 dark:text-white text-sm font-medium focus:outline-none transition-colors"
+                  className={`${glassFieldCls} text-sm font-medium`}
                 />
               </div>
 
-              <div className="flex gap-2.5 pt-1">
+              <div className="flex gap-2.5 pt-2">
                 <button
                   type="button"
                   onClick={closeEditContributionModal}
-                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer transition-colors"
+                  className="flex-1 py-3 bg-slate-900/[0.05] hover:bg-slate-900/[0.09] dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-slate-800 dark:text-slate-200 font-bold rounded-full text-xs cursor-pointer transition-colors"
                 >
                   {lang === 'bn' ? 'বাতিল' : 'Cancel'}
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingEditContrib}
-                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl border-2 border-transparent text-xs cursor-pointer transition-colors flex items-center justify-center gap-2"
+                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-full text-xs cursor-pointer transition-colors flex items-center justify-center gap-2 touch-press"
                 >
                   {isSavingEditContrib ? (
                     <span className="flex items-center gap-2">
@@ -2681,39 +2784,45 @@ export default function GoalsManager({
               </div>
             </form>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
       {/* ── DELETE CONTRIBUTION CONFIRMATION MODAL ── */}
       {deletingContribution && selectedGoal && (
-        <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
-          onClick={closeDeleteContributionModal}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="glass-modal w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border shadow-2xl p-5"
-          >
-            <div className="text-center mb-5">
-              <div className="w-12 h-12 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-center justify-center mx-auto mb-3">
-                <Trash2 className="w-6 h-6 text-rose-600 dark:text-rose-400" />
+        <ModalPortal lockScroll={false}>
+          <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+            <div
+              className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+              onClick={closeDeleteContributionModal}
+            />
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-sm rounded-t-[2rem] sm:rounded-3xl border shadow-2xl p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pb-6 max-h-[90dvh] overflow-y-auto hide-scrollbar"
+            >
+              <div className="flex justify-center pb-3 sm:hidden">
+                <div className="w-10 h-1 rounded-full bg-slate-900/15 dark:bg-white/20 mx-auto" />
               </div>
-              <h3 className="text-base font-extrabold text-slate-950 dark:text-white mb-1">
+            <div className="text-center mb-5">
+              <div className="w-12 h-12 bg-rose-500/10 rounded-full flex items-center justify-center mx-auto mb-3">
+                <Trash2 className="w-5 h-5 text-rose-600 dark:text-rose-400 stroke-[1.25]" />
+              </div>
+              <h3 className="font-display text-lg font-bold text-slate-950 dark:text-white mb-1">
                 {lang === 'bn' ? 'জমা মুছে ফেলুন' : 'Delete Contribution'}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                {lang === 'bn' 
-                  ? 'আপনি কি নিশ্চিত এই জমার রেকর্ডটি মুছে ফেলতে চান? এটি লক্ষ্যের মোট জমা থেকে বাদ দেওয়া হবে।' 
+                {lang === 'bn'
+                  ? 'আপনি কি নিশ্চিত এই জমার রেকর্ডটি মুছে ফেলতে চান? এটি লক্ষ্যের মোট জমা থেকে বাদ দেওয়া হবে।'
                   : 'Are you sure you want to delete this contribution? It will be deducted from your total saved amount.'}
               </p>
-              
-              <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 text-left space-y-1.5 mt-3 text-xs">
+
+              <div className="bg-slate-900/[0.03] dark:bg-white/[0.04] border border-slate-900/[0.07] dark:border-white/[0.08] rounded-2xl p-3.5 text-left space-y-1.5 mt-3 text-xs">
                 <div className="flex justify-between items-baseline">
-                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'পরিমাণ' : 'Amount'}</span>
+                  <span className={glassLabelCls}>{lang === 'bn' ? 'পরিমাণ' : 'Amount'}</span>
                   <span className="text-sm font-bold font-mono text-rose-600 dark:text-rose-400">৳ {formatNumber(deletingContribution.amount, lang)}</span>
                 </div>
                 <div className="flex justify-between items-baseline">
-                  <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">{lang === 'bn' ? 'বিবরণ' : 'Note'}</span>
+                  <span className={glassLabelCls}>{lang === 'bn' ? 'বিবরণ' : 'Note'}</span>
                   <span className="font-medium text-slate-900 dark:text-white truncate max-w-[180px]">
                     {deletingContribution.note || (lang === 'bn' ? 'কিস্তি জমা' : 'Installment Added')}
                   </span>
@@ -2726,7 +2835,7 @@ export default function GoalsManager({
                 type="button"
                 disabled={isDeletingContrib}
                 onClick={handleConfirmDeleteContribution}
-                className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl border-2 border-transparent text-xs cursor-pointer transition-colors flex items-center justify-center gap-2"
+                className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-full text-xs cursor-pointer transition-colors flex items-center justify-center gap-2 touch-press"
               >
                 {isDeletingContrib ? (
                   <span className="flex items-center gap-2">
@@ -2741,29 +2850,35 @@ export default function GoalsManager({
               <button
                 type="button"
                 onClick={closeDeleteContributionModal}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer transition-colors"
+                className="w-full py-3 bg-slate-900/[0.05] hover:bg-slate-900/[0.09] dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-slate-800 dark:text-slate-200 font-bold rounded-full text-xs cursor-pointer transition-colors"
               >
                 {lang === 'bn' ? 'বাতিল' : 'Cancel'}
               </button>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
       {/* ── RENAME GOAL POPUP MODAL ── */}
       {isEditingGoalTitle && selectedGoal && (
-        <div 
-          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
-          onClick={closeRenameGoal}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="glass-modal w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border shadow-2xl p-5 relative"
-          >
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800/80 mb-4">
+        <ModalPortal lockScroll={false}>
+          <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+            <div
+              className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+              onClick={closeRenameGoal}
+            />
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-md rounded-t-[2rem] sm:rounded-3xl border shadow-2xl p-5 sm:p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pb-6 max-h-[90dvh] overflow-y-auto hide-scrollbar"
+            >
+              <div className="flex justify-center pb-3 sm:hidden">
+                <div className="w-10 h-1 rounded-full bg-slate-900/15 dark:bg-white/20 mx-auto" />
+              </div>
+            <div className="flex items-center justify-between pb-3 border-b border-slate-900/[0.06] dark:border-white/[0.06] mb-4">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg flex items-center justify-center text-slate-900 dark:text-white">
-                  <Pencil className="w-4 h-4" />
+                <div className="w-8 h-8 bg-slate-900/[0.05] dark:bg-white/[0.08] rounded-full flex items-center justify-center text-slate-900 dark:text-white">
+                  <Pencil className="w-3.5 h-3.5 stroke-[1.25]" />
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-950 dark:text-white">
@@ -2777,15 +2892,15 @@ export default function GoalsManager({
               <button
                 type="button"
                 onClick={closeRenameGoal}
-                className="p-1.5 text-slate-500 hover:text-slate-950 dark:hover:text-white rounded-lg border-2 border-slate-300 dark:border-slate-700 transition-colors cursor-pointer"
+                className="w-8 h-8 rounded-full bg-slate-900/[0.05] dark:bg-white/[0.08] text-slate-500 hover:text-slate-950 dark:hover:text-white flex items-center justify-center transition-colors cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <X className="w-4 h-4 stroke-[1.25]" />
               </button>
             </div>
 
             <form onSubmit={handleSaveGoalTitle} className="space-y-3.5">
               <div>
-                <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block mb-1">
+                <label className={`${glassLabelCls} block mb-1.5`}>
                   {lang === 'bn' ? 'নতুন শিরোনাম' : 'Goal Title'} *
                 </label>
                 <input
@@ -2795,23 +2910,23 @@ export default function GoalsManager({
                   value={editedGoalTitle}
                   onChange={(e) => setEditedGoalTitle(e.target.value)}
                   placeholder={lang === 'bn' ? 'লক্ষ্যের নতুন নাম লিখুন' : 'Enter new goal title'}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 focus:border-slate-950 dark:focus:border-white rounded-xl text-slate-950 dark:text-white text-base font-bold focus:outline-none transition-colors"
+                  className={`${glassFieldCls} text-base font-bold`}
                   autoFocus
                 />
               </div>
 
-              <div className="flex gap-2.5 pt-1">
+              <div className="flex gap-2.5 pt-2">
                 <button
                   type="button"
                   onClick={closeRenameGoal}
-                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer transition-colors"
+                  className="flex-1 py-3 bg-slate-900/[0.05] hover:bg-slate-900/[0.09] dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-slate-800 dark:text-slate-200 font-bold rounded-full text-xs cursor-pointer transition-colors"
                 >
                   {lang === 'bn' ? 'বাতিল' : 'Cancel'}
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingGoalTitle}
-                  className="flex-1 py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-xl border-2 border-slate-950 dark:border-white text-xs cursor-pointer transition-colors flex items-center justify-center gap-2"
+                  className="flex-1 py-3 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-full text-xs cursor-pointer transition-colors flex items-center justify-center gap-2 touch-press"
                 >
                   {isSavingGoalTitle ? (
                     <span className="flex items-center gap-2">
@@ -2825,7 +2940,8 @@ export default function GoalsManager({
               </div>
             </form>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
     </div>
   );

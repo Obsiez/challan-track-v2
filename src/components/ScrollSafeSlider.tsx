@@ -22,10 +22,13 @@ export default function ScrollSafeSlider({
   const trackRef = useRef<HTMLDivElement>(null);
   const fillRef = useRef<HTMLDivElement>(null);
   const thumbRef = useRef<HTMLDivElement>(null);
-  const lastScrollTimeRef = useRef<number>(0);
   const valueRef = useRef<number>(value);
   const rafRef = useRef<number | null>(null);
+  const pendingValueRef = useRef<number | null>(null);
   const isDraggingRef = useRef<boolean>(false);
+  const mouseDownRef = useRef<boolean>(false);
+  const touchHandledRef = useRef<boolean>(false);
+  const lastTouchEndAtRef = useRef<number>(0);
 
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -60,34 +63,34 @@ export default function ScrollSafeSlider({
   }, []);
 
   const emitChange = useCallback(
-    (nextVal: number) => {
-      if (nextVal === valueRef.current) return;
+    (nextVal: number, flushImmediate = false) => {
       valueRef.current = nextVal;
       setVisualPercent(nextVal);
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
-      }
-      rafRef.current = requestAnimationFrame(() => {
-        rafRef.current = null;
+
+      if (flushImmediate) {
+        if (rafRef.current !== null) {
+          cancelAnimationFrame(rafRef.current);
+          rafRef.current = null;
+        }
+        pendingValueRef.current = null;
         onChangeRef.current(nextVal);
-      });
+        return;
+      }
+
+      pendingValueRef.current = nextVal;
+      if (rafRef.current === null) {
+        rafRef.current = requestAnimationFrame(() => {
+          rafRef.current = null;
+          if (pendingValueRef.current !== null) {
+            const valToEmit = pendingValueRef.current;
+            pendingValueRef.current = null;
+            onChangeRef.current(valToEmit);
+          }
+        });
+      }
     },
     [setVisualPercent]
   );
-
-  const touchStateRef = useRef<{
-    active: boolean;
-    startX: number;
-    startY: number;
-    mode: 'undecided' | 'horizontal' | 'vertical';
-  }>({
-    active: false,
-    startX: 0,
-    startY: 0,
-    mode: 'undecided',
-  });
-
-  const mouseDownRef = useRef<boolean>(false);
 
   const computeValueFromClientX = useCallback(
     (clientX: number): number => {
@@ -103,11 +106,31 @@ export default function ScrollSafeSlider({
     [min, max, step]
   );
 
-  // Track any page or container scroll so touches midway through scrolling never activate the slider
+  const touchStateRef = useRef<{
+    active: boolean;
+    startX: number;
+    startY: number;
+    lastX: number;
+    startTime: number;
+    maxDist: number;
+    scrolledDuringTouch: boolean;
+    mode: 'undecided' | 'horizontal' | 'vertical';
+  }>({
+    active: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    startTime: 0,
+    maxDist: 0,
+    scrolledDuringTouch: false,
+    mode: 'undecided',
+  });
+
+  // Track active scroll ONLY while a touch gesture is in progress so prior scrolls never block clicks/taps
   useEffect(() => {
     const handleScroll = () => {
-      lastScrollTimeRef.current = performance.now();
       if (touchStateRef.current.active && touchStateRef.current.mode !== 'horizontal') {
+        touchStateRef.current.scrolledDuringTouch = true;
         touchStateRef.current.mode = 'vertical';
         isDraggingRef.current = false;
       }
@@ -118,16 +141,152 @@ export default function ScrollSafeSlider({
     };
   }, []);
 
-  // Mouse drag listeners for desktop
+  // Native non-passive touch listeners: instant taps, smooth horizontal scrubbing, unblocked vertical scroll
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el) return;
+
+    const setThumbActive = (active: boolean) => {
+      if (!thumbRef.current) return;
+      thumbRef.current.style.transform = active
+        ? 'translate3d(-50%, -50%, 0) scale(1.22)'
+        : 'translate3d(-50%, -50%, 0) scale(1)';
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) {
+        touchStateRef.current.active = false;
+        touchStateRef.current.mode = 'vertical';
+        isDraggingRef.current = false;
+        setThumbActive(false);
+        return;
+      }
+
+      const t = e.touches[0];
+      touchHandledRef.current = false;
+      touchStateRef.current = {
+        active: true,
+        startX: t.clientX,
+        startY: t.clientY,
+        lastX: t.clientX,
+        startTime: performance.now(),
+        maxDist: 0,
+        scrolledDuringTouch: false,
+        mode: 'undecided',
+      };
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      const state = touchStateRef.current;
+      if (!state.active || state.mode === 'vertical' || e.touches.length !== 1) return;
+
+      const t = e.touches[0];
+      state.lastX = t.clientX;
+      const dx = Math.abs(t.clientX - state.startX);
+      const dy = Math.abs(t.clientY - state.startY);
+      const dist = Math.hypot(dx, dy);
+      if (dist > state.maxDist) state.maxDist = dist;
+
+      if (state.mode === 'undecided') {
+        if (state.scrolledDuringTouch) {
+          state.mode = 'vertical';
+          isDraggingRef.current = false;
+          setThumbActive(false);
+          return;
+        }
+        // Wait for crisp slop before deciding direction so micro-rolls don't falsely lock vertical
+        if (dist < 7) return;
+
+        if (dy > 10 && dy > dx * 1.18) {
+          state.mode = 'vertical';
+          isDraggingRef.current = false;
+          setThumbActive(false);
+          return;
+        }
+
+        if (dx >= 6 && dx >= dy * 0.72) {
+          state.mode = 'horizontal';
+          isDraggingRef.current = true;
+          touchHandledRef.current = true;
+          setThumbActive(true);
+        } else {
+          return;
+        }
+      }
+
+      if (state.mode === 'horizontal') {
+        if (e.cancelable) {
+          e.preventDefault();
+        }
+        const next = computeValueFromClientX(t.clientX);
+        if (next !== valueRef.current) {
+          emitChange(next, false);
+        }
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      const now = performance.now();
+      lastTouchEndAtRef.current = now;
+      const state = touchStateRef.current;
+
+      if (state.active) {
+        const endClientX =
+          e.changedTouches.length > 0 ? e.changedTouches[0].clientX : state.lastX;
+
+        if (state.mode === 'horizontal') {
+          const finalVal = computeValueFromClientX(endClientX);
+          touchHandledRef.current = true;
+          emitChange(finalVal, true);
+        } else if (
+          state.mode === 'undecided' &&
+          !state.scrolledDuringTouch &&
+          state.maxDist < 14
+        ) {
+          // Clean tap anywhere on track jumps immediately to tapped point
+          const tapVal = computeValueFromClientX(endClientX);
+          touchHandledRef.current = true;
+          emitChange(tapVal, true);
+        }
+      }
+
+      touchStateRef.current.active = false;
+      touchStateRef.current.mode = 'undecided';
+      isDraggingRef.current = false;
+      setThumbActive(false);
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    el.addEventListener('touchcancel', onTouchEnd, { passive: true });
+
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [computeValueFromClientX, emitChange]);
+
+  // Desktop mouse drag listeners
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!mouseDownRef.current) return;
       const next = computeValueFromClientX(e.clientX);
-      emitChange(next);
+      if (next !== valueRef.current) {
+        emitChange(next, false);
+      }
     };
-    const handleMouseUp = () => {
+    const handleMouseUp = (e: MouseEvent) => {
+      if (!mouseDownRef.current) return;
       mouseDownRef.current = false;
       isDraggingRef.current = false;
+      if (thumbRef.current) {
+        thumbRef.current.style.transform = 'translate3d(-50%, -50%, 0) scale(1)';
+      }
+      const finalVal = computeValueFromClientX(e.clientX);
+      emitChange(finalVal, true);
     };
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
@@ -137,84 +296,32 @@ export default function ScrollSafeSlider({
     };
   }, [computeValueFromClientX, emitChange]);
 
-  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (e.touches.length !== 1) {
-      touchStateRef.current.active = false;
-      touchStateRef.current.mode = 'vertical';
-      isDraggingRef.current = false;
-      return;
-    }
-    const now = performance.now();
-    // If user is currently scrolling or just scrolled within 240ms, ignore touch completely
-    if (now - lastScrollTimeRef.current < 240) {
-      touchStateRef.current = {
-        active: true,
-        startX: e.touches[0].clientX,
-        startY: e.touches[0].clientY,
-        mode: 'vertical',
-      };
-      isDraggingRef.current = false;
-      return;
-    }
-
-    const t = e.touches[0];
-    touchStateRef.current = {
-      active: true,
-      startX: t.clientX,
-      startY: t.clientY,
-      mode: 'undecided',
-    };
-  };
-
-  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
-    const state = touchStateRef.current;
-    if (!state.active || state.mode === 'vertical' || e.touches.length !== 1) return;
-
-    // If any scroll occurred since touchstart, abort slider activation
-    if (performance.now() - lastScrollTimeRef.current < 240) {
-      state.mode = 'vertical';
-      isDraggingRef.current = false;
-      return;
-    }
-
-    const t = e.touches[0];
-    const dx = Math.abs(t.clientX - state.startX);
-    const dy = Math.abs(t.clientY - state.startY);
-
-    if (state.mode === 'undecided') {
-      // Any vertical movement >= 5px immediately locks to vertical page scroll
-      if (dy >= 5 && dy >= dx * 0.7) {
-        state.mode = 'vertical';
-        isDraggingRef.current = false;
-        return;
-      }
-      // Require intentional horizontal drag (> 7px and clearly horizontal) before activating slider
-      if (dx > 7 && dx > dy * 1.5) {
-        state.mode = 'horizontal';
-        isDraggingRef.current = true;
-      } else {
-        return;
-      }
-    }
-
-    if (state.mode === 'horizontal') {
-      const next = computeValueFromClientX(t.clientX);
-      emitChange(next);
-    }
-  };
-
-  const handleTouchEnd = () => {
-    touchStateRef.current.active = false;
-    touchStateRef.current.mode = 'undecided';
-    isDraggingRef.current = false;
-  };
-
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
+    // Only skip synthetic mouse event if touch ALREADY handled this exact tap/drag
+    if (touchHandledRef.current && performance.now() - lastTouchEndAtRef.current < 450) {
+      return;
+    }
     mouseDownRef.current = true;
     isDraggingRef.current = true;
+    if (thumbRef.current) {
+      thumbRef.current.style.transform = 'translate3d(-50%, -50%, 0) scale(1.22)';
+    }
     const next = computeValueFromClientX(e.clientX);
-    emitChange(next);
+    emitChange(next, true);
+  };
+
+  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Fallback for trackpad/tap/synthesized clicks where mousedown/touchend didn't update
+    if (touchHandledRef.current && performance.now() - lastTouchEndAtRef.current < 450) {
+      touchHandledRef.current = false;
+      return;
+    }
+    if (e.clientX === 0 && e.clientY === 0) return;
+    const next = computeValueFromClientX(e.clientX);
+    if (next !== valueRef.current) {
+      emitChange(next, true);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -233,7 +340,7 @@ export default function ScrollSafeSlider({
       next = max;
     }
     if (next !== value) {
-      emitChange(next);
+      emitChange(next, true);
     }
   };
 
@@ -248,17 +355,14 @@ export default function ScrollSafeSlider({
       aria-valuemin={min}
       aria-valuemax={max}
       aria-valuenow={value}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-      onTouchCancel={handleTouchEnd}
       onMouseDown={handleMouseDown}
+      onClick={handleClick}
       onKeyDown={handleKeyDown}
       style={{ touchAction: 'pan-y' }}
-      className={`relative w-full py-2.5 -my-1.5 flex items-center cursor-pointer select-none focus:outline-none ${className}`}
+      className={`relative w-full py-4 -my-2.5 flex items-center cursor-pointer select-none focus:outline-none ${className}`}
     >
       {/* Track */}
-      <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden relative pointer-events-none">
+      <div className="w-full h-1.5 bg-slate-900/12 dark:bg-white/15 rounded-full overflow-hidden relative pointer-events-none">
         <div
           ref={fillRef}
           className="h-full bg-slate-950 dark:bg-white rounded-full"
@@ -269,8 +373,11 @@ export default function ScrollSafeSlider({
       {/* Thumb */}
       <div
         ref={thumbRef}
-        className="w-4 h-4 rounded-full bg-slate-950 dark:bg-white border-2 border-white dark:border-slate-900 shadow-sm absolute top-1/2 -translate-y-1/2 -translate-x-1/2 pointer-events-none"
-        style={{ left: `${percent}%` }}
+        className="w-4.5 h-4.5 rounded-full bg-slate-950 dark:bg-white border-2 border-white dark:border-slate-900 shadow-md absolute top-1/2 pointer-events-none transition-transform duration-150 ease-out"
+        style={{
+          left: `${percent}%`,
+          transform: 'translate3d(-50%, -50%, 0) scale(1)',
+        }}
       />
     </div>
   );

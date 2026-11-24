@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { 
  onAuthStateChanged, 
  signInWithPopup, 
  signInAnonymously, 
  signOut, 
+ updateProfile,
  User 
 } from 'firebase/auth';
 import { auth, googleProvider } from './firebase';
@@ -19,14 +21,18 @@ import ChallanTrackLogo, { ChallanTrackMark } from './components/ChallanTrackLog
 import AccentColorPickerModal from './components/AccentColorPickerModal';
 import BiometricLockScreen from './components/BiometricLockScreen';
 import CalculatorKeypad from './components/CalculatorKeypad';
-import { isBiometricEnabled, isBiometricSessionUnlocked, setBiometricSessionUnlocked } from './lib/biometrics';
+import ModalPortal from './components/ModalPortal';
+import { NativeDatePicker } from './components/NativePickers';
+import { isBiometricEnabled, setBiometricEnabledState, isBiometricSessionUnlocked, setBiometricSessionUnlocked } from './lib/biometrics';
 import { getSavedAccentColor, applyAccentColor, getSavedThemePalette, applyThemePalette } from './lib/accentTheme';
 import {
-  LayoutDashboard, Users, Bell, BellDot, Settings, BookOpen, Clock, Globe, Plus, Moon, Sun, ArrowUpRight, ArrowDownLeft, ChevronRight, BarChart3, ArrowLeft, ClipboardList, Lock, Loader2, Calendar, PiggyBank, Goal, Palette, LogOut
+  House, Users, Bell, BellDot, Settings, BookOpen, Clock, Globe, Plus, Moon, Sun, ArrowUpRight, ArrowDownLeft, ChevronRight, BarChart3, ArrowLeft, ClipboardList, Lock, Loader2, Calendar, PiggyBank, Goal, Palette, LogOut, AlertTriangle
 } from 'lucide-react';
 import { AppShellSkeleton, DashboardSkeleton } from './components/AppSkeletonLoader';
+import { ViewTransition, usePrefersReducedMotion } from './components/MotionPrimitives';
+import { TagIcon } from './lib/tagSystem';
 import { showNotification } from './lib/notifications';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, MotionConfig } from 'motion/react';
 import { Toaster, toast } from 'sonner';
 import { triggerHaptic } from './lib/haptics';
 import { translations, Language, formatNumber } from './lib/translations';
@@ -47,19 +53,496 @@ const getLocalDateString = (date: Date): string => {
   return `${y}-${m}-${d}`;
 };
 
+const APP_TIME_FORMATTER_EN = new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit' });
+const APP_TIME_FORMATTER_BN = new Intl.DateTimeFormat('bn-BD', { hour: '2-digit', minute: '2-digit' });
+
+type AppTab = 'home' | 'customers' | 'analytics' | 'reminders' | 'settings' | 'daily_transactions' | 'goals';
+
+const DOCK_TABS: readonly AppTab[] = ['home', 'customers', 'goals', 'settings'] as const;
+
+const MobileBottomDock = React.memo(({
+  syncedTab,
+  syncedCustomerId,
+  onNavigate,
+  onOpenQuickEntry,
+  labels,
+  reducedMotion,
+}: {
+  syncedTab: AppTab;
+  syncedCustomerId: string | null;
+  onNavigate: (tab: AppTab, customerId?: string | null) => void;
+  onOpenQuickEntry: () => void;
+  labels: {
+    dashboard: string;
+    clients: string;
+    goals: string;
+    settings: string;
+    recordEntry: string;
+  };
+  reducedMotion: boolean;
+}) => {
+  const dockRef = React.useRef<HTMLDivElement>(null);
+  const trackRef = React.useRef<HTMLDivElement>(null);
+  const [dockWidth, setDockWidth] = useState<number>(() => {
+    if (typeof window === 'undefined') return 360;
+    return Math.min(420, Math.max(260, window.innerWidth - 32));
+  });
+
+  useEffect(() => {
+    const el = dockRef.current;
+    if (!el) return;
+    const measure = () => {
+      const w = el.clientWidth;
+      if (w > 0) {
+        setDockWidth((prev) => (Math.abs(prev - w) > 0.5 ? w : prev));
+      }
+    };
+    measure();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(measure);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    window.addEventListener('resize', measure, { passive: true });
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+
+  const [navState, setNavState] = useState<{
+    tab: AppTab;
+    customerId: string | null;
+    transitionMode: 'none' | 'hide-fab' | 'show-fab';
+  }>(() => ({
+    tab: syncedTab,
+    customerId: syncedCustomerId,
+    transitionMode: 'none',
+  }));
+
+  const [dragVisual, setDragVisual] = useState<{
+    pillX: number;
+    hoveredTab: AppTab;
+  } | null>(null);
+
+  const gestureRef = React.useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startTime: number;
+    startTab: AppTab;
+    isSliding: boolean;
+    holdExpired: boolean;
+    hoveredIdx: number;
+    holdTimer: number | null;
+  } | null>(null);
+
+  const computeTransitionMode = useCallback(
+    (
+      prevTab: AppTab,
+      prevCid: string | null,
+      nextTab: AppTab,
+      nextCid: string | null
+    ): 'none' | 'hide-fab' | 'show-fab' => {
+      const wasShowingFab = prevTab === 'home' || (prevTab === 'customers' && !prevCid);
+      const willShowFab = nextTab === 'home' || (nextTab === 'customers' && !nextCid);
+      return wasShowingFab && !willShowFab
+        ? 'hide-fab'
+        : !wasShowingFab && willShowFab
+        ? 'show-fab'
+        : 'none';
+    },
+    []
+  );
+
+  const transitionResetRef = React.useRef<number | null>(null);
+
+  const scheduleTransitionReset = useCallback((mode: 'none' | 'hide-fab' | 'show-fab') => {
+    if (transitionResetRef.current !== null) {
+      window.clearTimeout(transitionResetRef.current);
+      transitionResetRef.current = null;
+    }
+    if (mode === 'none') return;
+    transitionResetRef.current = window.setTimeout(() => {
+      transitionResetRef.current = null;
+      setNavState((prev) =>
+        prev.transitionMode === 'none' ? prev : { ...prev, transitionMode: 'none' }
+      );
+    }, 155);
+  }, []);
+
+  useEffect(() => {
+    const handleNavIntent = (e: Event) => {
+      const detail = (e as CustomEvent<{ tab: AppTab; customerId: string | null }>).detail;
+      if (!detail) return;
+      setNavState((prev) => {
+        if (prev.tab === detail.tab && prev.customerId === detail.customerId) return prev;
+        const mode = computeTransitionMode(prev.tab, prev.customerId, detail.tab, detail.customerId);
+        scheduleTransitionReset(mode);
+        return {
+          tab: detail.tab,
+          customerId: detail.customerId,
+          transitionMode: mode,
+        };
+      });
+    };
+
+    window.addEventListener('challan-nav-intent', handleNavIntent);
+    return () => {
+      window.removeEventListener('challan-nav-intent', handleNavIntent);
+      if (transitionResetRef.current !== null) {
+        window.clearTimeout(transitionResetRef.current);
+      }
+    };
+  }, [computeTransitionMode, scheduleTransitionReset]);
+
+  useEffect(() => {
+    setNavState((prev) => {
+      if (prev.tab === syncedTab && prev.customerId === syncedCustomerId) return prev;
+      const mode = computeTransitionMode(prev.tab, prev.customerId, syncedTab, syncedCustomerId);
+      scheduleTransitionReset(mode);
+      return {
+        tab: syncedTab,
+        customerId: syncedCustomerId,
+        transitionMode: mode,
+      };
+    });
+  }, [syncedTab, syncedCustomerId, computeTransitionMode, scheduleTransitionReset]);
+
+  useEffect(() => {
+    return () => {
+      if (gestureRef.current?.holdTimer) {
+        window.clearTimeout(gestureRef.current.holdTimer);
+      }
+    };
+  }, []);
+
+  const activeTab = navState.tab;
+  const activeCid = navState.customerId;
+  const showQuickEntryFab =
+    activeTab === 'home' || (activeTab === 'customers' && !activeCid);
+
+  const fabDelay = '0ms';
+
+  const activeNavIndex =
+    activeTab === 'customers'
+      ? 1
+      : activeTab === 'goals'
+      ? 2
+      : activeTab === 'settings'
+      ? 3
+      : 0;
+
+  // Exact pixel geometry during drag; percentage-locked when resting so resizing nav never desyncs pill width
+  const fullColWidth = Math.max(48, (dockWidth - 10) / 4);
+  const narrowColWidth = Math.max(36, (dockWidth - 76) / 4);
+  const activeColWidth = showQuickEntryFab ? narrowColWidth : fullColWidth;
+  const restingPillX = activeNavIndex * activeColWidth;
+  const highlightedTab = dragVisual ? dragVisual.hoveredTab : activeTab;
+
+  const getIndexFromClientX = (clientX: number) => {
+    const track = trackRef.current;
+    if (!track) return { idx: activeNavIndex, pillX: restingPillX };
+    const rect = track.getBoundingClientRect();
+    const colW = rect.width / 4;
+    const relX = clientX - rect.left;
+    const idx = Math.max(0, Math.min(3, Math.floor(relX / colW)));
+    const clampedPillX = Math.max(0, Math.min(rect.width - colW, relX - colW / 2));
+    return { idx, pillX: clampedPillX };
+  };
+
+  const clearGesture = () => {
+    if (gestureRef.current?.holdTimer) {
+      window.clearTimeout(gestureRef.current.holdTimer);
+    }
+    gestureRef.current = null;
+    setDragVisual(null);
+  };
+
+  const handleNavPointerDown = (e: React.PointerEvent<HTMLElement>) => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    const { idx } = getIndexFromClientX(e.clientX);
+    const startTab = DOCK_TABS[idx];
+
+    if (gestureRef.current?.holdTimer) {
+      window.clearTimeout(gestureRef.current.holdTimer);
+    }
+
+    const holdTimer = window.setTimeout(() => {
+      if (gestureRef.current && !gestureRef.current.isSliding) {
+        // Press-and-hold without sliding does nothing
+        gestureRef.current.holdExpired = true;
+      }
+    }, 420);
+
+    gestureRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      startTime: performance.now(),
+      startTab,
+      isSliding: false,
+      holdExpired: false,
+      hoveredIdx: idx,
+      holdTimer,
+    };
+
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+  };
+
+  const handleNavPointerMove = (e: React.PointerEvent<HTMLElement>) => {
+    const g = gestureRef.current;
+    if (!g || g.pointerId !== e.pointerId) return;
+
+    const dx = e.clientX - g.startX;
+    const dy = e.clientY - g.startY;
+
+    if (!g.isSliding) {
+      if (Math.abs(dx) > 10 && Math.abs(dx) >= Math.abs(dy) * 0.75) {
+        g.isSliding = true;
+        g.holdExpired = false;
+        if (g.holdTimer) {
+          window.clearTimeout(g.holdTimer);
+          g.holdTimer = null;
+        }
+      } else {
+        return;
+      }
+    }
+
+    const { idx, pillX } = getIndexFromClientX(e.clientX);
+    if (idx !== g.hoveredIdx) {
+      g.hoveredIdx = idx;
+      triggerHaptic('single');
+    }
+    setDragVisual({ pillX, hoveredTab: DOCK_TABS[idx] });
+  };
+
+  const handleNavPointerUp = (e: React.PointerEvent<HTMLElement>) => {
+    const g = gestureRef.current;
+    if (!g || g.pointerId !== e.pointerId) return;
+
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {}
+
+    const { isSliding, holdExpired, startX, startY, startTime, startTab } = g;
+    const { idx } = getIndexFromClientX(e.clientX);
+    clearGesture();
+
+    if (isSliding) {
+      // Switch mode ONLY when finger is lifted after sliding
+      const targetTab = DOCK_TABS[idx];
+      onNavigate(targetTab);
+      return;
+    }
+
+    // Non-slide action: only quick press switches; press-and-hold does nothing
+    const dist = Math.hypot(e.clientX - startX, e.clientY - startY);
+    const elapsed = performance.now() - startTime;
+    if (!holdExpired && elapsed < 420 && dist <= 18) {
+      onNavigate(startTab);
+    }
+  };
+
+  const handleNavPointerCancel = (e: React.PointerEvent<HTMLElement>) => {
+    const g = gestureRef.current;
+    if (!g || g.pointerId !== e.pointerId) return;
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {}
+    clearGesture();
+  };
+
+  const handleKeyboardClick = (e: React.MouseEvent<HTMLButtonElement>, targetTab: AppTab) => {
+    // Only handle keyboard activation (detail === 0); pointer interactions are handled via pointer events above
+    if (e.detail === 0) {
+      onNavigate(targetTab);
+    }
+  };
+
+  return (
+    <div
+      className="fixed bottom-4 inset-x-4 z-40 md:hidden flex justify-center pointer-events-none"
+      style={{ transform: 'translate3d(0, 0, 0)', isolation: 'isolate' }}
+    >
+      <div ref={dockRef} className="relative w-full max-w-[420px] h-[56px] flex items-center">
+        <nav
+          onPointerDown={handleNavPointerDown}
+          onPointerMove={handleNavPointerMove}
+          onPointerUp={handleNavPointerUp}
+          onPointerCancel={handleNavPointerCancel}
+          className="pointer-events-auto glass-chrome-bottom rounded-full h-[56px] p-[5px] flex items-center touch-none select-none"
+          style={{
+            width: showQuickEntryFab ? 'calc(100% - 66px)' : '100%',
+            transitionProperty: reducedMotion || navState.transitionMode === 'none' ? 'none' : 'width',
+            transitionDuration: reducedMotion || navState.transitionMode === 'none' ? '0ms' : '130ms',
+            transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
+        >
+          <div ref={trackRef} className="relative grid grid-cols-4 w-full h-full">
+            {/* Borderless GPU Sliding Active Pill with Crisp, Snappy Ease */}
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 left-0 z-0 will-change-transform bg-slate-950/[0.085] dark:bg-white/[0.14] rounded-full border-0"
+              style={{
+                width: '25%',
+                transform: dragVisual
+                  ? `translate3d(${dragVisual.pillX}px, 0, 0)`
+                  : `translate3d(${activeNavIndex * 100}%, 0, 0)`,
+                transitionProperty: reducedMotion || dragVisual ? 'none' : 'transform',
+                transitionDuration: reducedMotion || dragVisual ? '0ms' : '135ms',
+                transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+              }}
+            />
+
+            <button
+              type="button"
+              onClick={(e) => handleKeyboardClick(e, 'home')}
+              className={`relative z-10 h-full min-w-0 flex flex-col items-center justify-center gap-0.5 rounded-full cursor-pointer transition-colors duration-150 ${
+                highlightedTab === 'home' || highlightedTab === 'daily_transactions'
+                  ? 'text-slate-950 dark:text-white font-bold'
+                  : 'text-slate-500 dark:text-slate-400 font-medium'
+              }`}
+            >
+              <House className="w-4.5 h-4.5 stroke-[1.25]" />
+              <span className="text-[10px] leading-tight">{labels.dashboard}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => handleKeyboardClick(e, 'customers')}
+              className={`relative z-10 h-full min-w-0 flex flex-col items-center justify-center gap-0.5 rounded-full cursor-pointer transition-colors duration-150 ${
+                highlightedTab === 'customers'
+                  ? 'text-slate-950 dark:text-white font-bold'
+                  : 'text-slate-500 dark:text-slate-400 font-medium'
+              }`}
+              id="nav_customers_tab"
+            >
+              <Users className="w-4.5 h-4.5 stroke-[1.25]" />
+              <span className="text-[10px] leading-tight">{labels.clients}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => handleKeyboardClick(e, 'goals')}
+              className={`relative z-10 h-full min-w-0 flex flex-col items-center justify-center gap-0.5 rounded-full cursor-pointer transition-colors duration-150 ${
+                highlightedTab === 'goals'
+                  ? 'text-slate-950 dark:text-white font-bold'
+                  : 'text-slate-500 dark:text-slate-400 font-medium'
+              }`}
+              id="nav_goals_tab"
+            >
+              <Goal className="w-4.5 h-4.5 stroke-[1.25]" />
+              <span className="text-[10px] leading-tight">{labels.goals}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => handleKeyboardClick(e, 'settings')}
+              className={`relative z-10 h-full min-w-0 flex flex-col items-center justify-center gap-0.5 rounded-full cursor-pointer transition-colors duration-150 ${
+                highlightedTab === 'settings'
+                  ? 'text-slate-950 dark:text-white font-bold'
+                  : 'text-slate-500 dark:text-slate-400 font-medium'
+              }`}
+              id="nav_settings_tab"
+            >
+              <Settings className="w-4.5 h-4.5 stroke-[1.25]" />
+              <span className="text-[10px] leading-tight">{labels.settings}</span>
+            </button>
+          </div>
+        </nav>
+
+        <button
+          type="button"
+          onClick={showQuickEntryFab ? onOpenQuickEntry : undefined}
+          aria-hidden={!showQuickEntryFab}
+          tabIndex={showQuickEntryFab ? 0 : -1}
+          className={`absolute right-0 bottom-0 z-20 touch-press touch-manipulation w-[56px] h-[56px] rounded-full text-white flex items-center justify-center shrink-0 will-change-transform ${
+            showQuickEntryFab ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'
+          }`}
+          style={{
+            backgroundColor: 'var(--accent-color)',
+            boxShadow: '0 18px 36px -8px var(--accent-glow), 0 6px 14px -4px rgba(15, 23, 42, 0.22), inset 0 1px 0 rgba(255,255,255,0.35)',
+            transform: showQuickEntryFab
+              ? 'translate3d(0, 0, 0) scale(1)'
+              : 'translate3d(4px, 6px, 0) scale(0.75)',
+            opacity: showQuickEntryFab ? 1 : 0,
+            transitionProperty: reducedMotion ? 'none' : 'transform, opacity',
+            transitionDuration: reducedMotion ? '0ms' : '130ms',
+            transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+            transitionDelay: fabDelay,
+          }}
+          title={labels.recordEntry}
+          id="fab_entry_btn"
+        >
+          <Plus className="w-6 h-6 stroke-[1.5]" />
+        </button>
+      </div>
+    </div>
+  );
+});
+
 export default function App() {
+  const reducedMotion = usePrefersReducedMotion();
+  return (
+    <MotionConfig reducedMotion={reducedMotion ? 'always' : 'user'}>
+      <AppContent reducedMotion={reducedMotion} />
+    </MotionConfig>
+  );
+}
+
+function AppContent({ reducedMotion }: { reducedMotion: boolean }) {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [currentTab, setCurrentTab] = useState<'home' | 'customers' | 'analytics' | 'reminders' | 'settings' | 'daily_transactions' | 'goals'>('home');
-  const [isQuickEntryOpen, setIsQuickEntryOpen] = useState(false);
+  const [currentTab, setCurrentTab] = useState<AppTab>('home');
   const [selectedCustomerIdForDetail, setSelectedCustomerIdForDetail] = useState<string | null>(null);
+  const navRafRef = React.useRef<number | null>(null);
+  const [isQuickEntryOpen, setIsQuickEntryOpen] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [swipeGesturesEnabled, setSwipeGesturesEnabled] = useState(() => localStorage.getItem('swipe_gestures_enabled') !== 'false');
+  const [showDashboardReminders, setShowDashboardReminders] = useState(() => localStorage.getItem('show_dashboard_reminders') !== 'false');
+  const [showTagChart, setShowTagChart] = useState(() => localStorage.getItem('show_tag_chart') !== 'false');
   const [highlightedTxId, setHighlightedTxId] = useState<string | null>(null);
   const [isAccentModalOpen, setIsAccentModalOpen] = useState(false);
   const [activeAccentHex, setActiveAccentHex] = useState(getSavedAccentColor);
   const [biometricUnlocked, setBiometricUnlocked] = useState<boolean>(() => isBiometricSessionUnlocked());
+
+  const handleToggleDashboardReminders = useCallback((val: boolean) => {
+    setShowDashboardReminders(val);
+    try {
+      localStorage.setItem('show_dashboard_reminders', val ? 'true' : 'false');
+    } catch {}
+  }, []);
+
+  const handleToggleTagChart = useCallback((val: boolean) => {
+    setShowTagChart(val);
+    try {
+      localStorage.setItem('show_tag_chart', val ? 'true' : 'false');
+    } catch {}
+  }, []);
+
+  const handleSwipeGesturesToggle = useCallback((val: boolean) => {
+    setSwipeGesturesEnabled(val);
+    try {
+      localStorage.setItem('swipe_gestures_enabled', val ? 'true' : 'false');
+    } catch {}
+  }, []);
+
+  const handleLockBiometricSession = useCallback(() => {
+    const activeUid = user?.uid || auth.currentUser?.uid || 'local-guest-session';
+    setBiometricEnabledState(true, activeUid);
+    setBiometricSessionUnlocked(false);
+    setBiometricUnlocked(false);
+  }, [user]);
+
+  const handleInstallComplete = useCallback(() => {
+    setDeferredPrompt(null);
+  }, []);
 
   useEffect(() => {
     applyAccentColor(getSavedAccentColor());
@@ -78,6 +561,11 @@ export default function App() {
     isQuickEntryOpenRef.current = isQuickEntryOpen;
   }, [isQuickEntryOpen]);
 
+  const isAccentModalOpenRef = React.useRef(isAccentModalOpen);
+  React.useEffect(() => {
+    isAccentModalOpenRef.current = isAccentModalOpen;
+  }, [isAccentModalOpen]);
+
   // Reset scroll height to top on tab or selected customer changes
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'instant' });
@@ -92,34 +580,130 @@ export default function App() {
    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
  }, []);
 
- // History API / Breadcrumbs for Android Back Button support
- const navigateTo = (tab: typeof currentTab, customerId: string | null = null, replace = false) => {
- triggerHaptic('single');
- setCurrentTab(tab);
- setSelectedCustomerIdForDetail(customerId);
- const state = { tab, customerId, quickEntry: false };
- const url = `?tab=${tab}${customerId ? `&c=${customerId}` : ''}`;
- if (replace) {
- window.history.replaceState(state, '', url);
- } else {
- window.history.pushState(state, '', url);
- }
- };
+  const currentTabRef = React.useRef<AppTab>(currentTab);
+  const selectedCustomerIdRef = React.useRef<string | null>(selectedCustomerIdForDetail);
+  const reducedMotionRef = React.useRef<boolean>(reducedMotion);
+  const navTimerRef = React.useRef<number | null>(null);
+  const pendingNavRef = React.useRef<{ tab: AppTab; customerId: string | null } | null>(null);
+  const lastNavIntentRef = React.useRef<{ tab: AppTab; customerId: string | null; time: number } | null>(null);
+  currentTabRef.current = currentTab;
+  selectedCustomerIdRef.current = selectedCustomerIdForDetail;
+  reducedMotionRef.current = reducedMotion;
 
- const openQuickEntry = () => {
- triggerHaptic('single');
- window.history.pushState({ ...window.history.state, quickEntry: true }, '', window.location.href);
- setIsQuickEntryOpen(true);
- };
+  useEffect(() => {
+    const onIntent = (e: Event) => {
+      const detail = (e as CustomEvent<{ tab: AppTab; customerId: string | null; fromPointerDown?: boolean }>).detail;
+      if (!detail) return;
+      const now = performance.now();
+      const prev = lastNavIntentRef.current;
+      if (
+        detail.fromPointerDown ||
+        !prev ||
+        prev.tab !== detail.tab ||
+        prev.customerId !== detail.customerId ||
+        now - prev.time > 500
+      ) {
+        lastNavIntentRef.current = {
+          tab: detail.tab,
+          customerId: detail.customerId,
+          time: now,
+        };
+      }
+    };
+    window.addEventListener('challan-nav-intent', onIntent);
+    return () => window.removeEventListener('challan-nav-intent', onIntent);
+  }, []);
 
-  const closeQuickEntry = () => {
+  // History API / Breadcrumbs for Android Back Button support
+  const navigateTo = useCallback((tab: AppTab, customerId: string | null = null, replace = false) => {
+    triggerHaptic('single');
+
+    const prevTab = pendingNavRef.current?.tab ?? currentTabRef.current;
+    const prevCid = pendingNavRef.current ? pendingNavRef.current.customerId : selectedCustomerIdRef.current;
+    const wasShowingFab = prevTab === 'home' || (prevTab === 'customers' && !prevCid);
+    const willShowFab = tab === 'home' || (tab === 'customers' && !customerId);
+    const isMobileDockVisible = typeof window !== 'undefined' && window.innerWidth < 768;
+
+    window.dispatchEvent(
+      new CustomEvent('challan-nav-intent', {
+        detail: { tab, customerId, fromPointerDown: false },
+      })
+    );
+    if (navRafRef.current) {
+      window.cancelAnimationFrame(navRafRef.current);
+      navRafRef.current = null;
+    }
+    if (navTimerRef.current !== null) {
+      window.clearTimeout(navTimerRef.current);
+      navTimerRef.current = null;
+      pendingNavRef.current = null;
+    }
+
+    const commitTabChange = () => {
+      pendingNavRef.current = null;
+      React.startTransition(() => {
+        setCurrentTab(tab);
+        setSelectedCustomerIdForDetail(customerId);
+      });
+      try {
+        const state = { tab, customerId, quickEntry: false };
+        const url = `?tab=${tab}${customerId ? `&c=${customerId}` : ''}`;
+        if (replace) {
+          window.history.replaceState(state, '', url);
+        } else {
+          window.history.pushState(state, '', url);
+        }
+      } catch {}
+    };
+
+    // Let the 130ms mobile dock morph finish uninterrupted before mounting heavy Dashboard/tab content
+    if (isMobileDockVisible && !reducedMotionRef.current && wasShowingFab !== willShowFab) {
+      pendingNavRef.current = { tab, customerId };
+      navTimerRef.current = window.setTimeout(() => {
+        navTimerRef.current = null;
+        commitTabChange();
+      }, 135);
+      return;
+    }
+
+    // Commit immediately when FAB visibility doesn't change or on desktop
+    pendingNavRef.current = null;
+    commitTabChange();
+  }, []);
+
+  const handleOpenReminders = useCallback(() => {
+    navigateTo('reminders');
+  }, [navigateTo]);
+
+  const openQuickEntry = useCallback(() => {
+    triggerHaptic('single');
+    window.history.pushState({ ...window.history.state, quickEntry: true }, '', window.location.href);
+    setIsQuickEntryOpen(true);
+  }, []);
+
+  const closeQuickEntry = useCallback(() => {
     triggerHaptic('tick');
     isQuickEntryOpenRef.current = false;
     setIsQuickEntryOpen(false);
     if (window.history.state?.quickEntry) {
       window.history.back();
     }
-  };
+  }, []);
+
+  const openAccentModal = useCallback(() => {
+    triggerHaptic('single');
+    window.history.pushState({ ...window.history.state, modal: 'accentPalette' }, '', window.location.href);
+    setIsAccentModalOpen(true);
+  }, []);
+
+  const closeAccentModal = useCallback(() => {
+    triggerHaptic('tick');
+    isAccentModalOpenRef.current = false;
+    setIsAccentModalOpen(false);
+    if (window.history.state?.modal === 'accentPalette') {
+      window.history.back();
+    }
+  }, []);
 
   useEffect(() => {
     // Force open dashboard on fresh load regardless of previous URL
@@ -131,6 +715,10 @@ export default function App() {
 
     const handlePopState = (e: PopStateEvent) => {
       setAppDialog(null);
+      if (isAccentModalOpenRef.current && e.state?.modal !== 'accentPalette') {
+        isAccentModalOpenRef.current = false;
+        setIsAccentModalOpen(false);
+      }
       const wasQuickEntryOpen = isQuickEntryOpenRef.current;
       const isNowQuickEntryOpen = e.state?.quickEntry || false;
       if (wasQuickEntryOpen && !isNowQuickEntryOpen) {
@@ -138,8 +726,13 @@ export default function App() {
       }
       if (e.state) {
         if (e.state.tab) {
-          setCurrentTab(e.state.tab);
-          setSelectedCustomerIdForDetail(e.state.customerId !== undefined ? e.state.customerId : null);
+          const nextTab = e.state.tab as AppTab;
+          const nextCid = e.state.customerId !== undefined ? e.state.customerId : null;
+          window.dispatchEvent(new CustomEvent('challan-nav-intent', { detail: { tab: nextTab, customerId: nextCid } }));
+          React.startTransition(() => {
+            setCurrentTab(nextTab);
+            setSelectedCustomerIdForDetail(nextCid);
+          });
         }
         if (!isNowQuickEntryOpen) {
           isQuickEntryOpenRef.current = false;
@@ -172,12 +765,29 @@ export default function App() {
  return (localStorage.getItem('lang') as Language) || 'en';
  });
 
- const handleLangChange = (newLang: Language) => {
- setLang(newLang);
- localStorage.setItem('lang', newLang);
- };
+  const handleLangChange = useCallback((newLang: Language) => {
+    setLang(newLang);
+    localStorage.setItem('lang', newLang);
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = newLang;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = lang;
+    }
+  }, [lang]);
 
  const t = translations[lang];
+
+ const dockLabels = useMemo(() => ({
+   dashboard: t.dashboard,
+   clients: t.clients,
+   goals: t.goals,
+   settings: t.settings,
+   recordEntry: t.recordEntry,
+ }), [t.dashboard, t.clients, t.goals, t.settings, t.recordEntry]);
 
 
 
@@ -199,31 +809,69 @@ export default function App() {
 
  const [authError, setAuthError] = useState<string | null>(null);
 
- // Sync Auth State
- useEffect(() => {
- const isGuest = localStorage.getItem('local_guest_session') === 'true';
- if (isGuest) {
- setUser({
- uid: 'local-guest-session',
- email: 'guest@challantrack.local',
- displayName: 'Guest Owner'
- } as any);
- setAuthLoading(false);
- }
+  const [customDisplayName, setCustomDisplayName] = useState<string>('');
 
- const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
- if (currentUser) {
- setUser(currentUser);
- localStorage.removeItem('local_guest_session');
- } else {
- if (localStorage.getItem('local_guest_session') !== 'true') {
- setUser(null);
- }
- }
- setAuthLoading(false);
- });
- return () => unsubscribe();
- }, []);
+  // Sync Auth State
+  useEffect(() => {
+    const isGuest = localStorage.getItem('local_guest_session') === 'true';
+    if (isGuest) {
+      const savedGuestName = localStorage.getItem('custom_display_name_local-guest-session') || 'Guest Owner';
+      setCustomDisplayName(savedGuestName);
+      setUser({
+        uid: 'local-guest-session',
+        email: 'guest@challantrack.local',
+        displayName: savedGuestName
+      } as any);
+      setAuthLoading(false);
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (currentUser) {
+        const savedOverride = localStorage.getItem(`custom_display_name_${currentUser.uid}`);
+        setCustomDisplayName(currentUser.displayName || savedOverride || '');
+        setUser(currentUser);
+        localStorage.removeItem('local_guest_session');
+      } else {
+        if (localStorage.getItem('local_guest_session') !== 'true') {
+          setCustomDisplayName('');
+          setUser(null);
+        }
+      }
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const resolvedUserName = useMemo(() => {
+    if (!user) return '';
+    return (
+      customDisplayName.trim() ||
+      user.displayName ||
+      localStorage.getItem(`custom_display_name_${user.uid}`) ||
+      user.email?.split('@')[0] ||
+      ''
+    );
+  }, [user, customDisplayName]);
+
+  const greetingMessage = useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) return lang === 'bn' ? 'শুভ সকাল' : 'Good Morning';
+    if (hour >= 12 && hour < 17) return lang === 'bn' ? 'শুভ দুপুর' : 'Good Afternoon';
+    if (hour >= 17 && hour < 21) return lang === 'bn' ? 'শুভ সন্ধ্যা' : 'Good Evening';
+    return lang === 'bn' ? 'শুভ রাত্রি' : 'Good Night';
+  }, [lang]);
+
+  const handleUpdateDisplayName = useCallback(async (newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed || !user) return;
+    localStorage.setItem(`custom_display_name_${user.uid}`, trimmed);
+    setCustomDisplayName(trimmed);
+    if (user.uid !== 'local-guest-session' && auth.currentUser) {
+      await updateProfile(auth.currentUser, { displayName: trimmed });
+    } else {
+      setUser((prev) => (prev ? ({ ...prev, displayName: trimmed } as User) : prev));
+    }
+  }, [user]);
 
   const [selectedDailyDate, setSelectedDailyDate] = useState<Date>(new Date());
 
@@ -234,6 +882,7 @@ export default function App() {
     allCustomerTransactions,
     dailyTransactions,
     todayTransactions,
+    tagIntelligenceTransactions,
     reminders,
     settings,
     loading: ledgerLoading,
@@ -277,8 +926,6 @@ export default function App() {
     archiveCustomerExcessStatements,
     exportArchivedStatements
   } = useLedger(user?.uid, selectedDailyDate, selectedCustomerIdForDetail);
-
-  const dateInputRef = React.useRef<HTMLInputElement>(null);
 
 // End-of-Day Cash Summary Notification
   useEffect(() => {
@@ -429,41 +1076,170 @@ export default function App() {
  onCancel?: () => void;
  } | null>(null);
 
- useEffect(() => {
-    if (appDialog?.isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
+  useEffect(() => {
+    if (!appDialog?.isOpen) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (appDialog.onCancel) appDialog.onCancel();
+        setAppDialog(null);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [appDialog]);
+
+  const triggerAlert = useCallback((title: string, message: string) => {
+    toast.error(title, { description: message });
+  }, []);
+
+  const triggerConfirm = useCallback((title: string, message: string, onConfirmCallback: () => void) => {
+    window.history.pushState({ ...window.history.state, dialogOpen: true }, '', window.location.href);
+    setAppDialog({
+      isOpen: true,
+      type: 'confirm',
+      title,
+      message,
+      onConfirm: () => {
+        if (window.history.state?.dialogOpen) {
+          window.history.replaceState({ ...window.history.state, dialogOpen: false }, '', window.location.href);
+        }
+        onConfirmCallback();
+        setAppDialog(null);
+      },
+      onCancel: () => {
+        if (window.history.state?.dialogOpen) window.history.back();
+        setAppDialog(null);
+      }
+    });
+  }, []);
+
+  const activeViewTransitionRef = React.useRef<any>(null);
+  const themeSwitchTimerRef = React.useRef<number | null>(null);
+
+  const handleThemeChange = useCallback(async (newTheme: 'light' | 'dark', origin?: { x: number; y: number }) => {
+    if (typeof document === 'undefined') {
+      setTheme(newTheme);
+      return;
     }
-    return () => { document.body.style.overflow = 'unset'; };
-  }, [appDialog?.isOpen]);
 
- const triggerAlert = (title: string, message: string) => {
- toast.error(title, { description: message });
- };
+    const root = document.documentElement;
+    const currentIsDark = root.classList.contains('dark');
+    const nextIsDark = newTheme === 'dark';
+    if (currentIsDark === nextIsDark) return;
 
- const triggerConfirm = (title: string, message: string, onConfirmCallback: () => void) => {
- window.history.pushState({ ...window.history.state, dialogOpen: true }, '', window.location.href);
- setAppDialog({
- isOpen: true,
- type: 'confirm',
- title,
- message,
- onConfirm: () => {
- if (window.history.state?.dialogOpen) window.history.back();
- onConfirmCallback();
- setAppDialog(null);
- },
- onCancel: () => {
- if (window.history.state?.dialogOpen) window.history.back();
- setAppDialog(null);
- }
- });
- };
-  const handleThemeChange = async (newTheme: 'light' | 'dark') => {
-    setTheme(newTheme);
-    localStorage.setItem('theme', newTheme);
-  };
+    if (activeViewTransitionRef.current && typeof activeViewTransitionRef.current.skipTransition === 'function') {
+      try {
+        activeViewTransitionRef.current.skipTransition();
+      } catch {}
+    }
+    if (themeSwitchTimerRef.current !== null) {
+      window.clearTimeout(themeSwitchTimerRef.current);
+      themeSwitchTimerRef.current = null;
+    }
+
+    const systemReduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    const startViewTransition = (document as any).startViewTransition?.bind(document);
+
+    if (typeof startViewTransition === 'function' && !reducedMotion && !systemReduced) {
+      const cx = origin ? Math.round(origin.x) : Math.round(window.innerWidth / 2);
+      const cy = origin ? Math.round(origin.y) : Math.round(window.innerHeight / 2);
+      const maxRadius = Math.ceil(
+        Math.hypot(
+          Math.max(cx, window.innerWidth - cx),
+          Math.max(cy, window.innerHeight - cy)
+        )
+      ) + 32;
+
+      root.style.setProperty('--theme-clip-x', `${cx}px`);
+      root.style.setProperty('--theme-clip-y', `${cy}px`);
+      root.style.setProperty('--theme-clip-r', `${maxRadius}px`);
+      root.setAttribute('data-theme-transition', nextIsDark ? 'expand' : 'collapse');
+
+      try {
+        const vt = startViewTransition(() => {
+          root.classList.add('theme-switching');
+          flushSync(() => {
+            root.classList.toggle('dark', nextIsDark);
+            setTheme(newTheme);
+          });
+          try {
+            localStorage.setItem('theme', newTheme);
+          } catch {}
+        });
+
+        activeViewTransitionRef.current = vt;
+
+        vt.ready
+          .then(() => {
+            if (activeViewTransitionRef.current !== vt) return;
+            if (nextIsDark) {
+              // Expand outward from click point: new dark mode grows to cover entire screen
+              root.animate(
+                {
+                  clipPath: [
+                    `circle(0px at ${cx}px ${cy}px)`,
+                    `circle(${maxRadius}px at ${cx}px ${cy}px)`,
+                  ],
+                },
+                {
+                  duration: 480,
+                  easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+                  fill: 'both',
+                  pseudoElement: '::view-transition-new(root)',
+                }
+              );
+            } else {
+              // Collapse inward into click point: old dark mode shrinks into point zero revealing light mode underneath
+              root.animate(
+                {
+                  clipPath: [
+                    `circle(${maxRadius}px at ${cx}px ${cy}px)`,
+                    `circle(0px at ${cx}px ${cy}px)`,
+                  ],
+                },
+                {
+                  duration: 480,
+                  easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+                  fill: 'both',
+                  pseudoElement: '::view-transition-old(root)',
+                }
+              );
+            }
+          })
+          .catch(() => {});
+
+        vt.finished.finally(() => {
+          if (activeViewTransitionRef.current === vt) {
+            activeViewTransitionRef.current = null;
+            root.classList.remove('theme-switching');
+            root.removeAttribute('data-theme-transition');
+            root.style.removeProperty('--theme-clip-x');
+            root.style.removeProperty('--theme-clip-y');
+            root.style.removeProperty('--theme-clip-r');
+          }
+        });
+        return;
+      } catch {
+        root.removeAttribute('data-theme-transition');
+        root.style.removeProperty('--theme-clip-x');
+        root.style.removeProperty('--theme-clip-y');
+        root.style.removeProperty('--theme-clip-r');
+      }
+    }
+
+    root.classList.add('theme-switching');
+    flushSync(() => {
+      root.classList.toggle('dark', nextIsDark);
+      setTheme(newTheme);
+    });
+    try {
+      localStorage.setItem('theme', newTheme);
+    } catch {}
+    themeSwitchTimerRef.current = window.setTimeout(() => {
+      root.classList.remove('theme-switching');
+      themeSwitchTimerRef.current = null;
+    }, 60);
+  }, []);
 
  // Handle Log In Mechanisms
   const handleGoogleSignIn = async () => {
@@ -517,10 +1293,12 @@ export default function App() {
 
  const handleGuestSignIn = () => {
  localStorage.setItem('local_guest_session', 'true');
+ const savedGuestName = localStorage.getItem('custom_display_name_local-guest-session') || 'Guest Owner';
+ setCustomDisplayName(savedGuestName);
  setUser({
  uid: 'local-guest-session',
  email: 'guest@challantrack.local',
- displayName: 'Guest Owner'
+ displayName: savedGuestName
  } as any);
  };
 
@@ -544,11 +1322,34 @@ export default function App() {
  );
  };
 
-   // Nav helper
-  const navigateToCustomer = (id: string, replace = false) => {
+  // Nav helpers
+  const navigateToCustomer = useCallback((id: string, replace = false) => {
     setIsQuickEntryOpen(false);
     navigateTo('customers', id, replace);
-  };
+  }, [navigateTo]);
+
+  const handleSelectCustomerId = useCallback((id: string | null) => {
+    navigateTo('customers', id);
+  }, [navigateTo]);
+
+  const handleViewDailyTxs = useCallback(() => {
+    navigateTo('daily_transactions');
+  }, [navigateTo]);
+
+  const activeRemindersCount = useMemo(
+    () => reminders.reduce((count, r) => (r.active ? count + 1 : count), 0),
+    [reminders]
+  );
+
+  const dailyTotals = useMemo(() => {
+    let dues = 0;
+    let got = 0;
+    for (const tx of dailyTransactions) {
+      if (tx.type === 'due') dues += tx.amount;
+      else if (tx.type === 'payment') got += tx.amount;
+    }
+    return { dues, got, count: dailyTransactions.length };
+  }, [dailyTransactions]);
 
   if (authLoading) {
     return (
@@ -558,7 +1359,15 @@ export default function App() {
           position="bottom-center"
           duration={2500}
           toastOptions={{ 
-            className: 'sonner-custom-toast'
+            className: 'sonner-custom-toast',
+            style: {
+              backgroundColor: theme === 'dark' ? 'rgba(var(--theme-bg-surface-rgb, 18, 18, 22), 0.97)' : 'rgba(var(--theme-light-surface-rgb, 255, 255, 255), 0.97)',
+              backdropFilter: 'blur(28px) saturate(190%)',
+              WebkitBackdropFilter: 'blur(28px) saturate(190%)',
+              color: theme === 'dark' ? '#FAFAFA' : '#09090B',
+              border: theme === 'dark' ? '1px solid rgba(var(--accent-rgb, 16, 185, 129), 0.32)' : '1px solid rgba(var(--accent-rgb, 5, 150, 105), 0.28)',
+              boxShadow: theme === 'dark' ? '0 24px 48px -10px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(var(--accent-rgb, 16, 185, 129), 0.18)' : '0 20px 40px -10px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(var(--accent-rgb, 5, 150, 105), 0.14)'
+            }
           }} 
         />
         <AppShellSkeleton />
@@ -566,125 +1375,157 @@ export default function App() {
     );
   }
 
-  // --- 1. SIGN IN LANDING SCREEN (WITH TRANSLATIONS) ---
+  // --- 1. SIGN IN LANDING SCREEN (REDESIGNED FOR DESKTOP & MOBILE) ---
   if (!user) {
     return (
-      <div id="auth_view" className="relative min-h-screen bg-white dark:bg-[#090D14] text-slate-900 dark:text-slate-100 flex flex-col items-center justify-center p-4 sm:p-6 no-select transition-colors">
+      <div
+        key="auth-view"
+        id="auth_view"
+        className="shell-fade-enter relative min-h-[100dvh] bg-white dark:bg-[#090D14] text-slate-900 dark:text-slate-100 flex flex-col justify-between px-5 py-6 sm:px-8 sm:py-8 no-select transition-colors"
+      >
         <div aria-hidden="true" className="app-ambient-backdrop">
           <div className="app-ambient-grid" />
+          <div className="app-ambient-noise" />
         </div>
-        <Toaster 
-          theme={theme} 
-          position="bottom-center" 
+        <Toaster
+          theme={theme}
+          position="bottom-center"
           duration={2500}
-          toastOptions={{ 
-            className: 'sonner-custom-toast'
-          }} 
+          toastOptions={{
+            className: 'sonner-custom-toast',
+            style: {
+              backgroundColor: theme === 'dark' ? 'rgba(var(--theme-bg-surface-rgb, 18, 18, 22), 0.97)' : 'rgba(var(--theme-light-surface-rgb, 255, 255, 255), 0.97)',
+              backdropFilter: 'blur(28px) saturate(190%)',
+              WebkitBackdropFilter: 'blur(28px) saturate(190%)',
+              color: theme === 'dark' ? '#FAFAFA' : '#09090B',
+              border: theme === 'dark' ? '1px solid rgba(var(--accent-rgb, 16, 185, 129), 0.32)' : '1px solid rgba(var(--accent-rgb, 5, 150, 105), 0.28)',
+              boxShadow: theme === 'dark' ? '0 24px 48px -10px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(var(--accent-rgb, 16, 185, 129), 0.18)' : '0 20px 40px -10px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(var(--accent-rgb, 5, 150, 105), 0.14)'
+            }
+          }}
         />
-        
-        {/* Top Controls: Language & Theme Switchers */}
-        <div className="relative z-10 w-full max-w-sm md:max-w-3xl lg:max-w-4xl flex items-center justify-between mb-6 sm:mb-8">
-          <button
-            onClick={() => {
-              triggerHaptic('single');
-              handleThemeChange(theme === 'dark' ? 'light' : 'dark');
-            }}
-            className="surface-glass-interactive px-3 py-1.5 border border-slate-200/80 dark:border-slate-700/80 rounded-xl text-slate-700 dark:text-slate-200 cursor-pointer flex items-center gap-2 text-xs font-semibold"
-            title="Toggle theme"
-          >
-            {theme === 'dark' ? <Sun className="w-3.5 h-3.5 text-white" /> : <Moon className="w-3.5 h-3.5 text-slate-700" />}
-            {theme === 'dark' ? (lang === 'bn' ? 'লাইট মোড' : 'Light Mode') : (lang === 'bn' ? 'ডার্ক মোড' : 'Dark Mode')}
-          </button>
 
-          <button
-            onClick={() => {
-              triggerHaptic('single');
-              handleLangChange(lang === 'bn' ? 'en' : 'bn');
-            }}
-            className="surface-glass-interactive px-3 py-1.5 border border-slate-200/80 dark:border-slate-700/80 rounded-xl font-bold text-xs text-slate-700 dark:text-slate-200 flex items-center gap-1.5 cursor-pointer"
-          >
-            <Globe className="w-3.5 h-3.5" />
-            {lang === 'bn' ? 'English' : 'বাংলা'}
-          </button>
-        </div>
+        {/* Minimal Top Utility Bar */}
+        <header className="relative z-10 w-full max-w-5xl mx-auto flex items-center justify-between gap-3">
+          <div className="hidden md:flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-medium">
+            <span className={lang === 'bn' ? 'font-bold text-slate-700 dark:text-slate-300' : 'micro-mono-label text-slate-600 dark:text-slate-300'}>
+              {lang === 'bn' ? 'ডিজিটাল খতিয়ান ও হিসাব' : 'Personal & Business Ledger'}
+            </span>
+          </div>
 
-        {/* Auth Card Container: Compact on mobile, expansive split showcase on desktop */}
-        <div className="relative z-10 w-full max-w-sm md:max-w-3xl lg:max-w-4xl surface-hero-glass border rounded-2xl p-6 sm:p-8 md:p-10 transition-all overflow-hidden">
-          {/* Subtle top-right blurred accent aura */}
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute -top-24 -right-24 w-64 h-64 rounded-full blur-3xl opacity-20 dark:opacity-25"
-            style={{ backgroundColor: 'var(--accent-color)' }}
-          />
-          <div className="relative z-10 grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-10 items-stretch">
-            
-            {/* Left Column (Brand + Key Features Showcase on desktop) */}
-            <div className="md:col-span-7 flex flex-col justify-between space-y-6">
-              {/* Custom Challan Track Brand Header */}
-              <div className="space-y-2">
-                <ChallanTrackLogo size="lg" variant="full" />
-                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 font-medium leading-relaxed">
+          <div className="hidden md:flex items-center justify-end gap-2 w-auto">
+            <button
+              type="button"
+              onClick={(e) => {
+                triggerHaptic('single');
+                const iconEl = e.currentTarget.querySelector('svg');
+                const rect = (iconEl ?? e.currentTarget).getBoundingClientRect();
+                handleThemeChange(theme === 'dark' ? 'light' : 'dark', {
+                  x: rect.left + rect.width / 2,
+                  y: rect.top + rect.height / 2,
+                });
+              }}
+              className="touch-press surface-glass-interactive px-3.5 py-2 border rounded-full text-slate-800 dark:text-slate-200 cursor-pointer flex items-center gap-2 text-xs font-semibold"
+              title="Toggle theme"
+            >
+              {theme === 'dark' ? <Sun className="w-3.5 h-3.5 stroke-[1.35]" /> : <Moon className="w-3.5 h-3.5 stroke-[1.35]" />}
+              <span>{theme === 'dark' ? (lang === 'bn' ? 'লাইট' : 'Light') : (lang === 'bn' ? 'ডার্ক' : 'Dark')}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('single');
+                handleLangChange(lang === 'bn' ? 'en' : 'bn');
+              }}
+              className="touch-press surface-glass-interactive px-3.5 py-2 border rounded-full font-bold text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5 cursor-pointer"
+            >
+              <Globe className="w-3.5 h-3.5 stroke-[1.35]" />
+              <span>{lang === 'bn' ? 'English' : 'বাংলা'}</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Main Center Stage: Asymmetric Editorial Desktop / Above-the-Fold Mobile */}
+        <main className="relative z-10 w-full max-w-md md:max-w-5xl mx-auto my-auto py-8 md:py-12">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-7 md:gap-14 lg:gap-16 items-center">
+            {/* Brand Hero (Order 1 on Mobile & Left Column Top on Desktop) */}
+            <div className="md:col-span-7 flex flex-col space-y-6 md:space-y-8">
+              <div className="space-y-3.5">
+                <ChallanTrackLogo size="xl" variant="full" />
+                <p className="text-sm sm:text-base md:text-[17px] text-slate-600 dark:text-slate-300 font-medium leading-relaxed max-w-md">
                   {t.ledgerForTablet}
                 </p>
               </div>
 
-              {/* Key Features List */}
-              <div className="space-y-3 pt-3 border-t border-slate-200/60 dark:border-white/[0.07]">
-                <div className="flex items-start gap-3 p-2.5 rounded-xl surface-subcard border border-slate-200/50 dark:border-white/[0.06] transition-colors">
-                  <div className="p-2 bg-white/80 dark:bg-white/[0.06] text-slate-700 dark:text-slate-300 rounded-lg shrink-0 border border-slate-200/70 dark:border-white/10">
-                    <ArrowUpRight className="w-4 h-4 stroke-[2.2]" />
+              {/* Quick Descriptions Section — Above Auth Sheet on Mobile, Left Column on Desktop */}
+              <div className="block divide-y divide-slate-900/[0.08] dark:divide-white/[0.08] border-y border-slate-900/[0.08] dark:border-white/[0.08] max-w-lg">
+                <div className="flex items-start gap-4 py-4">
+                  <div className="w-8 h-8 rounded-xl bg-slate-900/[0.04] dark:bg-white/[0.05] flex items-center justify-center shrink-0 mt-0.5">
+                    <ArrowUpRight className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--accent-color)' }} />
                   </div>
                   <div>
-                    <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">{t.trackAndDeduct}</h4>
-                    <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">{t.trackDesc}</p>
+                    <h4 className="text-sm font-bold text-slate-950 dark:text-white">{t.trackAndDeduct}</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">{t.trackDesc}</p>
                   </div>
                 </div>
 
-                <div className="flex items-start gap-3 p-2.5 rounded-xl surface-subcard border border-slate-200/50 dark:border-white/[0.06] transition-colors">
-                  <div className="p-2 bg-white/80 dark:bg-white/[0.06] text-slate-700 dark:text-slate-300 rounded-lg shrink-0 border border-slate-200/70 dark:border-white/10">
-                    <Globe className="w-4 h-4 stroke-[2.2]" />
+                <div className="flex items-start gap-4 py-4">
+                  <div className="w-8 h-8 rounded-xl bg-slate-900/[0.04] dark:bg-white/[0.05] flex items-center justify-center shrink-0 mt-0.5">
+                    <Globe className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--accent-color)' }} />
                   </div>
                   <div>
-                    <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">{t.cloudSync}</h4>
-                    <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">{t.cloudDesc}</p>
+                    <h4 className="text-sm font-bold text-slate-950 dark:text-white">{t.cloudSync}</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">{t.cloudDesc}</p>
                   </div>
                 </div>
 
-                <div className="flex items-start gap-3 p-2.5 rounded-xl surface-subcard border border-slate-200/50 dark:border-white/[0.06] transition-colors">
-                  <div className="p-2 bg-white/80 dark:bg-white/[0.06] text-slate-700 dark:text-slate-300 rounded-lg shrink-0 border border-slate-200/70 dark:border-white/10">
-                    <Bell className="w-4 h-4 stroke-[2.2]" />
+                <div className="flex items-start gap-4 py-4">
+                  <div className="w-8 h-8 rounded-xl bg-slate-900/[0.04] dark:bg-white/[0.05] flex items-center justify-center shrink-0 mt-0.5">
+                    <Bell className="w-4 h-4 stroke-[1.5]" style={{ color: 'var(--accent-color)' }} />
                   </div>
                   <div>
-                    <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">{t.simpleAlerts}</h4>
-                    <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">{t.alertsDesc}</p>
+                    <h4 className="text-sm font-bold text-slate-950 dark:text-white">{t.simpleAlerts}</h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">{t.alertsDesc}</p>
                   </div>
                 </div>
-              </div>
-
-              {/* Desktop-friendly offline notice in footer of left column */}
-              <div className="hidden md:flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-medium pt-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
-                <span>{t.offlineNotice}</span>
               </div>
             </div>
 
-            {/* Right Column (Sign-in Actions, Troubleshooting & Security Notice) */}
-            <div className="md:col-span-5 flex flex-col justify-center space-y-4 md:pl-6 md:border-l md:border-slate-100 dark:md:border-slate-800/80">
-              <div className="hidden md:block space-y-1 mb-1">
-                <h3 className="text-base font-extrabold text-slate-950 dark:text-white">
+            {/* Auth Sheet (Below Quick Descriptions on Mobile, Right Column on Desktop) */}
+            <div className="md:col-span-5 relative overflow-hidden surface-hero-glass border rounded-[32px] p-6 sm:p-8 space-y-6">
+              {/* Specular Top Accent Rim */}
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-10 top-0 h-[1px] opacity-75"
+                style={{
+                  background: 'linear-gradient(90deg, transparent, var(--accent-color), transparent)'
+                }}
+              />
+
+              <div className="space-y-1.5">
+                <span className={lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400' : 'micro-mono-label font-semibold text-slate-500 dark:text-slate-400'}>
+                  {lang === 'bn' ? 'অ্যাকাউন্ট অ্যাক্সেস' : 'Workspace Access'}
+                </span>
+                <h2 className="text-2xl font-display font-extrabold tracking-tight text-slate-950 dark:text-white leading-tight">
                   {lang === 'bn' ? 'অ্যাকাউন্টে প্রবেশ করুন' : 'Sign in to Continue'}
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                  {lang === 'bn' ? 'আপনার ব্যবসা খতিয়ান ও ব্যাকআপ সিঙ্ক করতে যুক্ত হন' : 'Access your live ledger, analytics and customer balances'}
+                </h2>
+                <p className="text-xs sm:text-[13px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  {lang === 'bn'
+                    ? 'আপনার ব্যবসা খতিয়ান ও ব্যাকআপ সিঙ্ক করতে যুক্ত হন'
+                    : 'Access live balances, reminders, and automatic cloud sync'}
                 </p>
               </div>
 
-              {/* Action Buttons */}
-              <div className="space-y-2.5">
+              {/* Preserved Login Button Design */}
+              <div className="space-y-3">
                 <button
                   onClick={handleGoogleSignIn}
                   disabled={googleLoading}
-                  className="w-full py-3 sm:py-3.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 dark:text-slate-950 text-white font-bold rounded-xl flex items-center justify-center gap-2.5 transition-colors cursor-pointer text-sm disabled:opacity-75 disabled:cursor-not-allowed select-none active:scale-[0.98] shadow-xs"
+                  className="touch-press w-full py-3.5 rounded-full text-white font-bold flex items-center justify-center gap-2.5 transition-all cursor-pointer text-sm disabled:opacity-75 disabled:cursor-not-allowed select-none"
+                  style={{
+                    backgroundColor: 'var(--accent-color)',
+                    boxShadow: '0 14px 30px -10px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.28)'
+                  }}
                   id="google_signin_btn"
                 >
                   {googleLoading ? (
@@ -699,10 +1540,10 @@ export default function App() {
                   )}
                   {googleLoading ? (lang === 'bn' ? 'লগইন হচ্ছে...' : 'Signing in...') : t.googleSignIn}
                 </button>
-                
+
                 <button
                   onClick={handleGuestSignIn}
-                  className="w-full py-3 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900/60 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold rounded-xl flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-800/80 transition-colors cursor-pointer text-sm select-none active:scale-[0.98]"
+                  className="touch-press w-full py-3.5 surface-subcard border rounded-full text-slate-900 dark:text-white font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer text-sm select-none"
                   id="guest_signin_btn"
                 >
                   {t.guestSignIn}
@@ -710,10 +1551,10 @@ export default function App() {
               </div>
 
               {authError && (
-                <div className="bg-[#FFF8E6] dark:bg-[#261E0A] border border-[#FFC043]/40 p-3.5 rounded-xl text-xs text-[#7A4B00] dark:text-[#FFD479] font-medium space-y-2">
+                <div className="bg-[#FFF8E6] dark:bg-[#261E0A] border border-[#FFC043]/40 p-3.5 rounded-2xl text-xs text-[#7A4B00] dark:text-[#FFD479] font-medium space-y-2">
                   <div className="flex items-center gap-1.5 font-bold">
-                    <span className="w-2 h-2 rounded-full bg-[#FFC043]"></span>
-                    {lang === 'bn' ? 'লগইন সাহায্য নির্দেশিকা' : 'Google Login Troubleshooting'}
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{lang === 'bn' ? 'লগইন সাহায্য নির্দেশিকা' : 'Google Login Troubleshooting'}</span>
                   </div>
                   <p className="opacity-90">
                     {lang === 'bn'
@@ -731,26 +1572,26 @@ export default function App() {
                 </div>
               )}
 
-              {/* Secure Sync Notice */}
-              <div className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800/80 p-3.5 rounded-xl text-[11px] text-[#545454] dark:text-[#A6A6A6] font-medium leading-normal flex items-start gap-2.5">
-                <Lock className="w-4 h-4 text-black dark:text-white shrink-0 mt-0.5" />
+              <div className="pt-4 border-t border-slate-900/[0.06] dark:border-white/[0.07] text-[11px] text-slate-500 dark:text-slate-400 font-medium leading-relaxed flex items-start gap-2.5">
+                <Lock className="w-3.5 h-3.5 stroke-[1.35] shrink-0 mt-0.5 opacity-75" />
                 <span>
-                  {lang === 'bn' 
-                    ? 'ক্লাউড সিঙ্ক: আপনার হিসাব খাতার ডেটা সুরক্ষিত রাখতে গুগল দিয়ে নিরাপদে লগইন করুন।'
-                    : 'Cloud Sync: Sign in with Google to protect your ledger calculations and sync across devices.'}
+                  {lang === 'bn'
+                    ? 'ক্লাউড সিঙ্ক: আপনার হিসাব সুরক্ষিত রাখতে গুগল দিয়ে নিরাপদে লগইন করুন।'
+                    : 'Cloud Sync keeps your ledger calculations protected and synced across devices.'}
                 </span>
-              </div>
-
-              {/* Mobile-only offline notice */}
-              <div className="md:hidden text-[10px] text-center text-[#757575] font-medium pt-1">
-                {t.offlineNotice}
               </div>
             </div>
           </div>
-        </div>
+        </main>
+
+        {/* Anchored Minimal Footer */}
+        <footer className="relative z-10 w-full max-w-5xl mx-auto pt-4 pb-2 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+          <span className="hidden sm:inline">{t.offlineNotice}</span>
+          <span className="hidden sm:inline font-mono text-[10px] opacity-70">ChallanTrack</span>
+        </footer>
       </div>
- );
- }
+    );
+  }
 
  // --- 1.5 SEPARATE BIOMETRIC AUTHENTICATION LOGIN SCREEN ---
  if (user && isBiometricEnabled(user.uid) && !biometricUnlocked) {
@@ -764,14 +1605,22 @@ export default function App() {
          duration={2500}
          visibleToasts={2}
          gap={8}
-         toastOptions={{ 
-           className: 'sonner-custom-toast'
+         toastOptions={{
+           className: 'sonner-custom-toast',
+           style: {
+             backgroundColor: theme === 'dark' ? 'rgba(var(--theme-bg-surface-rgb, 18, 18, 22), 0.97)' : 'rgba(var(--theme-light-surface-rgb, 255, 255, 255), 0.97)',
+             backdropFilter: 'blur(28px) saturate(190%)',
+             WebkitBackdropFilter: 'blur(28px) saturate(190%)',
+             color: theme === 'dark' ? '#FAFAFA' : '#09090B',
+             border: theme === 'dark' ? '1px solid rgba(var(--accent-rgb, 16, 185, 129), 0.32)' : '1px solid rgba(var(--accent-rgb, 5, 150, 105), 0.28)',
+             boxShadow: theme === 'dark' ? '0 24px 48px -10px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(var(--accent-rgb, 16, 185, 129), 0.18)' : '0 20px 40px -10px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(var(--accent-rgb, 5, 150, 105), 0.14)'
+           }
          }}
        />
        <BiometricLockScreen
          userId={user.uid}
          userEmail={user.email || 'ChallanTrack User'}
-         userName={user.displayName || undefined}
+         userName={resolvedUserName || undefined}
          theme={theme}
          onThemeChange={handleThemeChange}
          lang={lang}
@@ -796,34 +1645,48 @@ export default function App() {
 
   // --- 2. MAIN APP CONTAINER (LOGGED IN & TRANSLATED) ---
   return (
-    <div className="relative min-h-screen bg-white dark:bg-[#090D14] text-slate-900 dark:text-slate-100 flex flex-col md:flex-row no-select transition-colors">
+    <div
+      key={`app-shell-${user.uid}`}
+      className="shell-fade-enter relative min-h-screen bg-white dark:bg-[#090D14] text-slate-900 dark:text-slate-100 flex flex-col md:flex-row no-select transition-colors"
+    >
       <div aria-hidden="true" className="app-ambient-backdrop">
         <div className="app-ambient-grid" />
+        <div className="app-ambient-noise" />
       </div>
 
       <Toaster 
         theme={theme} 
         position="bottom-center" 
         offset={{ bottom: 24 }}
-        mobileOffset={{ bottom: 76, left: 16, right: 16 }}
+        mobileOffset={{ bottom: 84, left: 16, right: 16 }}
         duration={2500}
         visibleToasts={2}
         gap={8}
-        toastOptions={{ 
-          className: 'sonner-custom-toast'
+        toastOptions={{
+          className: 'sonner-custom-toast',
+          style: {
+            backgroundColor: theme === 'dark' ? 'rgba(var(--theme-bg-surface-rgb, 18, 18, 22), 0.97)' : 'rgba(var(--theme-light-surface-rgb, 255, 255, 255), 0.97)',
+            backdropFilter: 'blur(28px) saturate(190%)',
+            WebkitBackdropFilter: 'blur(28px) saturate(190%)',
+            color: theme === 'dark' ? '#FAFAFA' : '#09090B',
+            border: theme === 'dark' ? '1px solid rgba(var(--accent-rgb, 16, 185, 129), 0.32)' : '1px solid rgba(var(--accent-rgb, 5, 150, 105), 0.28)',
+            boxShadow: theme === 'dark' ? '0 24px 48px -10px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(var(--accent-rgb, 16, 185, 129), 0.18)' : '0 20px 40px -10px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(var(--accent-rgb, 5, 150, 105), 0.14)'
+          }
         }}
       />
 
-      {/* DESKTOP ONLY: Left Sidebar (Executive Navigation Rail) */}
-      <aside className="hidden md:flex flex-col w-60 lg:w-64 shrink-0 sticky top-0 h-screen exec-sidebar z-30 transition-colors justify-between p-4 lg:p-5 select-none border-r">
+      {/* DESKTOP ONLY: Left Sidebar (Floating Pill-Sculpted Executive Rail) */}
+      <aside className="hidden md:flex flex-col w-60 lg:w-64 shrink-0 sticky top-3 md:m-3 md:mr-0 h-[calc(100vh-1.5rem)] rounded-3xl exec-sidebar z-20 transition-colors justify-between p-4 lg:p-5 select-none overflow-hidden">
+        <div aria-hidden="true" className="exec-sidebar-glass" />
+
         {/* Top: Brand & Primary Navigation */}
-        <div className="space-y-4">
+        <div className="relative z-10 space-y-4">
           <div 
             onClick={() => { triggerHaptic('single'); navigateTo('home'); }}
             className="flex items-center gap-3 py-1 cursor-pointer group select-none active:scale-[0.98] transition-transform"
             role="button"
             tabIndex={0}
-            title={lang === 'bn' ? 'ড্যাশবোর্ডে ফিরে যান' : 'Go to Dashboard'}
+            title={lang === 'bn' ? 'হোমে ফিরে যান' : 'Go to Home'}
           >
             <ChallanTrackLogo size="md" variant="full" />
           </div>
@@ -831,120 +1694,147 @@ export default function App() {
           {/* Primary Quick Entry Button */}
           <button
             onClick={openQuickEntry}
-            className="w-full py-2.5 px-3.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 font-bold text-xs rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-[0.98] transition-all border-2 border-slate-950 dark:border-white"
+            className="w-full py-2.5 px-3.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 font-bold text-xs rounded-2xl flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-[0.98] transition-all border border-slate-950 dark:border-white"
             id="sidebar_quick_entry_btn"
           >
-            <Plus className="w-4 h-4 stroke-[3]" />
+            <Plus className="w-4 h-4 stroke-[1.5]" />
             <span>{lang === 'bn' ? 'হিসাব লিখুন' : 'New Entry'}</span>
           </button>
 
           {/* Sidebar Navigation Items */}
-          <nav className="space-y-1.5 pt-2">
-            {/* Dashboard */}
-            <button
-              onClick={() => navigateTo('home')}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-98 ${
-                (currentTab === 'home' || currentTab === 'daily_transactions')
-                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-950 hover:bg-slate-100/80 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60'
-              }`}
-              id="sidebar_nav_home"
-            >
-              <LayoutDashboard className="w-4 h-4 stroke-[2.2] shrink-0" />
-              <span className="flex-1 text-left">{t.dashboard}</span>
-            </button>
+          {(() => {
+            const activeSidebarIndex =
+              currentTab === 'customers'
+                ? 1
+                : currentTab === 'goals'
+                ? 2
+                : currentTab === 'reminders'
+                ? 3
+                : currentTab === 'settings'
+                ? 4
+                : 0;
 
-            {/* Customers / Clients */}
-            <button
-              onClick={() => navigateTo('customers')}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-98 ${
-                currentTab === 'customers'
-                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-950 hover:bg-slate-100/80 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60'
-              }`}
-              id="sidebar_nav_customers"
-            >
-              <Users className="w-4 h-4 stroke-[2.2] shrink-0" />
-              <span className="flex-1 text-left">{t.clients}</span>
-            </button>
+            return (
+              <nav className="relative flex flex-col gap-1.5 mt-2">
+                {/* Single Container-Relative GPU Sliding Pill (Immune to scroll resets & sub-view switches) */}
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-0 top-0 h-10 bg-slate-950 dark:bg-white rounded-xl border-2 border-slate-950 dark:border-white shadow-xs z-0 will-change-transform"
+                  style={{
+                    transform: `translate3d(0, ${activeSidebarIndex * 46}px, 0)`,
+                    transition: 'transform 280ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  }}
+                />
 
-            {/* Goals */}
-            <button
-              onClick={() => navigateTo('goals')}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-98 ${
-                currentTab === 'goals'
-                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-950 hover:bg-slate-100/80 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60'
-              }`}
-              id="sidebar_nav_goals"
-            >
-              <Goal className="w-4 h-4 stroke-[2.2] shrink-0" />
-              <span className="flex-1 text-left">{t.goals}</span>
-            </button>
+                {/* Home */}
+                <button
+                  onClick={() => navigateTo('home')}
+                  className={`relative z-10 w-full h-10 flex items-center gap-3 px-3.5 rounded-xl text-xs font-bold transition-colors cursor-pointer active:scale-98 ${
+                    currentTab === 'home' || currentTab === 'daily_transactions'
+                      ? 'text-white dark:text-slate-950'
+                      : 'text-slate-600 hover:text-slate-950 hover:bg-slate-900/[0.04] dark:text-slate-400 dark:hover:text-white dark:hover:bg-white/[0.05]'
+                  }`}
+                  id="sidebar_nav_home"
+                >
+                  <House className="w-4 h-4 stroke-[1.25] shrink-0" />
+                  <span className="flex-1 text-left">{t.dashboard}</span>
+                </button>
 
-            {/* Reminders */}
-            <button
-              onClick={() => { triggerHaptic('single'); navigateTo('reminders'); }}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-98 ${
-                currentTab === 'reminders'
-                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-950 hover:bg-slate-100/80 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60'
-              }`}
-              id="sidebar_nav_reminders"
-            >
-              {reminders.some(r => r.active) ? (
-                <BellDot className="w-4 h-4 stroke-[2.2] shrink-0 text-amber-500" />
-              ) : (
-                <Bell className="w-4 h-4 stroke-[2.2] shrink-0" />
-              )}
-              <span className="flex-1 text-left">{t.reminders}</span>
-              {reminders.some(r => r.active) && (
-                <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
-                  {reminders.filter(r => r.active).length}
-                </span>
-              )}
-            </button>
+                {/* Customers / Clients */}
+                <button
+                  onClick={() => navigateTo('customers')}
+                  className={`relative z-10 w-full h-10 flex items-center gap-3 px-3.5 rounded-xl text-xs font-bold transition-colors cursor-pointer active:scale-98 ${
+                    currentTab === 'customers'
+                      ? 'text-white dark:text-slate-950'
+                      : 'text-slate-600 hover:text-slate-950 hover:bg-slate-900/[0.04] dark:text-slate-400 dark:hover:text-white dark:hover:bg-white/[0.05]'
+                  }`}
+                  id="sidebar_nav_customers"
+                >
+                  <Users className="w-4 h-4 stroke-[1.25] shrink-0" />
+                  <span className="flex-1 text-left">{t.clients}</span>
+                </button>
 
-            {/* Settings */}
-            <button
-              onClick={() => navigateTo('settings')}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-98 ${
-                currentTab === 'settings'
-                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-950 hover:bg-slate-100/80 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/60'
-              }`}
-              id="sidebar_nav_settings"
-            >
-              <Settings className="w-4 h-4 stroke-[2.2] shrink-0" />
-              <span className="flex-1 text-left">{t.settings}</span>
-            </button>
-          </nav>
+                {/* Goals */}
+                <button
+                  onClick={() => navigateTo('goals')}
+                  className={`relative z-10 w-full h-10 flex items-center gap-3 px-3.5 rounded-xl text-xs font-bold transition-colors cursor-pointer active:scale-98 ${
+                    currentTab === 'goals'
+                      ? 'text-white dark:text-slate-950'
+                      : 'text-slate-600 hover:text-slate-950 hover:bg-slate-900/[0.04] dark:text-slate-400 dark:hover:text-white dark:hover:bg-white/[0.05]'
+                  }`}
+                  id="sidebar_nav_goals"
+                >
+                  <Goal className="w-4 h-4 stroke-[1.25] shrink-0" />
+                  <span className="flex-1 text-left">{t.goals}</span>
+                </button>
+
+                {/* Reminders */}
+                <button
+                  onClick={() => { triggerHaptic('single'); navigateTo('reminders'); }}
+                  className={`relative z-10 w-full h-10 flex items-center gap-3 px-3.5 rounded-xl text-xs font-bold transition-colors cursor-pointer active:scale-98 ${
+                    currentTab === 'reminders'
+                      ? 'text-white dark:text-slate-950'
+                      : 'text-slate-600 hover:text-slate-950 hover:bg-slate-900/[0.04] dark:text-slate-400 dark:hover:text-white dark:hover:bg-white/[0.05]'
+                  }`}
+                  id="sidebar_nav_reminders"
+                >
+                  {activeRemindersCount > 0 ? (
+                    <BellDot className="w-4 h-4 stroke-[1.25] shrink-0 text-amber-500" />
+                  ) : (
+                    <Bell className="w-4 h-4 stroke-[1.25] shrink-0" />
+                  )}
+                  <span className="flex-1 text-left">{t.reminders}</span>
+                  {activeRemindersCount > 0 && (
+                    <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                      {formatNumber(activeRemindersCount, lang)}
+                    </span>
+                  )}
+                </button>
+
+                {/* Settings */}
+                <button
+                  onClick={() => navigateTo('settings')}
+                  className={`relative z-10 w-full h-10 flex items-center gap-3 px-3.5 rounded-xl text-xs font-bold transition-colors cursor-pointer active:scale-98 ${
+                    currentTab === 'settings'
+                      ? 'text-white dark:text-slate-950'
+                      : 'text-slate-600 hover:text-slate-950 hover:bg-slate-900/[0.04] dark:text-slate-400 dark:hover:text-white dark:hover:bg-white/[0.05]'
+                  }`}
+                  id="sidebar_nav_settings"
+                >
+                  <Settings className="w-4 h-4 stroke-[1.25] shrink-0" />
+                  <span className="flex-1 text-left">{t.settings}</span>
+                </button>
+              </nav>
+            );
+          })()}
         </div>
 
         {/* Bottom Utility Controls & Profile */}
-        <div className="pt-4 border-t border-slate-200/70 dark:border-white/[0.08] space-y-3">
+        <div className="relative z-10 pt-4 border-t border-slate-200/70 dark:border-white/[0.08] space-y-3">
           {/* Quick Utility Row: Theme, Palette, Lang */}
           <div className="grid grid-cols-3 gap-2">
             <button
-              onClick={() => {
+              onClick={(e) => {
                 triggerHaptic('single');
-                handleThemeChange(theme === 'dark' ? 'light' : 'dark');
+                const iconEl = e.currentTarget.querySelector('svg');
+                const rect = (iconEl ?? e.currentTarget).getBoundingClientRect();
+                handleThemeChange(theme === 'dark' ? 'light' : 'dark', {
+                  x: rect.left + rect.width / 2,
+                  y: rect.top + rect.height / 2,
+                });
               }}
               className="py-2 px-2.5 rounded-xl bg-slate-100/80 hover:bg-slate-200/80 dark:bg-white/[0.05] dark:hover:bg-white/[0.1] text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 flex items-center justify-center cursor-pointer transition-colors"
               title={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
             >
-              {theme === 'dark' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+              {theme === 'dark' ? <Sun className="w-4 h-4 stroke-[1.25]" /> : <Moon className="w-4 h-4 stroke-[1.25]" />}
             </button>
 
             <button
-              onClick={() => {
-                triggerHaptic('single');
-                setIsAccentModalOpen(true);
-              }}
+              onClick={openAccentModal}
               className="py-2 px-2.5 rounded-xl bg-slate-100/80 hover:bg-slate-200/80 dark:bg-white/[0.05] dark:hover:bg-white/[0.1] text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 flex items-center justify-center cursor-pointer transition-colors"
               title={lang === 'bn' ? 'থিম ও কালার' : 'Theme & Palette'}
             >
-              <Palette className="w-3.5 h-3.5" />
+              <Palette className="w-4 h-4 stroke-[1.25]" />
             </button>
 
             <button
@@ -961,21 +1851,21 @@ export default function App() {
 
           {/* User Account / Sign Out Row */}
           {user && (
-            <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200/60 dark:border-white/[0.06]">
+            <div className="flex items-center justify-between p-2.5 rounded-xl surface-subcard border border-slate-200/60 dark:border-white/[0.06]">
               <div className="min-w-0 flex-1 pr-2">
                 <p className="text-[11px] font-bold text-slate-900 dark:text-white truncate">
-                  {user.displayName || user.email?.split('@')[0] || 'User'}
+                  {resolvedUserName || user.email?.split('@')[0] || 'User'}
                 </p>
-                <p className="text-[10px] text-slate-400 truncate">
+                <p className="text-[10px] font-mono text-slate-400 truncate">
                   {user.email || ''}
                 </p>
               </div>
               <button
                 onClick={handleSignOut}
                 className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
-                title={t.signOut}
+                title={t.signOutBtn}
               >
-                <LogOut className="w-3.5 h-3.5" />
+                <LogOut className="w-4 h-4 stroke-[1.25]" />
               </button>
             </div>
           )}
@@ -984,82 +1874,80 @@ export default function App() {
 
       {/* Main Content Column */}
       <div className="flex-1 flex flex-col min-w-0 pb-24 md:pb-6">
-        {/* Mobile-Only Frosted Glass Top Bar */}
-        <header className="md:hidden glass-chrome-header bg-white/75 dark:bg-[#121215]/75 backdrop-blur-xl backdrop-saturate-150 border-b border-slate-200/70 dark:border-white/[0.08] py-3 px-4 sm:px-6 sticky top-0 z-30 transition-colors">
-          <div className="max-w-6xl mx-auto flex items-center justify-between gap-3 sm:gap-4">
-            
-            {/* Zone 1: Pure Typographic Logo with Squircle Mark */}
-            <div 
+        {/* Floating Glass Capsule Mobile Top Bar */}
+        <header className="md:hidden sticky top-3 z-30 px-4 pointer-events-none">
+          <div className="pointer-events-auto relative overflow-hidden max-w-6xl mx-auto glass-chrome-header rounded-full p-1 flex items-center justify-between gap-2 transition-colors">
+            {/* Subtle Ambient Top Edge Rim Highlight */}
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-10 top-0 h-[1px] opacity-70"
+              style={{
+                background: 'linear-gradient(90deg, transparent, var(--accent-color), transparent)'
+              }}
+            />
+
+            <button
+              type="button"
               onClick={() => { triggerHaptic('single'); navigateTo('home'); }}
-              className="flex items-center gap-2.5 cursor-pointer group select-none active:scale-[0.98] transition-transform"
-              role="button"
-              tabIndex={0}
-              title={lang === 'bn' ? 'ড্যাশবোর্ডে ফিরে যান' : 'Go to Dashboard'}
+              className="flex items-center gap-2.5 cursor-pointer select-none touch-press min-w-0 text-left focus:outline-none"
+              title={lang === 'bn' ? 'হোমে ফিরে যান' : 'Go to Home'}
             >
-              <ChallanTrackLogo size="md" variant="compact" />
-            </div>
+              <ChallanTrackMark size={38} className="ml-[2px] shrink-0" />
+              <ChallanTrackLogo size="sm" variant="compact" className="pr-1" />
+            </button>
 
-            {/* Zone 3: Quick Action Triggers & Utilities */}
-            <div className="flex items-center gap-2">
+            {/* Recessed Liquid Utility Capsule */}
+            <div className="flex items-center gap-0.5 p-1 rounded-full bg-slate-900/[0.045] dark:bg-white/[0.06] border border-slate-900/[0.05] dark:border-white/[0.07] shrink-0">
               <button
-                onClick={openQuickEntry}
-                className="hidden sm:flex px-3.5 py-2 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 font-bold text-xs rounded-xl items-center gap-1.5 cursor-pointer shadow-sm active:scale-[0.98] transition-all border-2 border-slate-950 dark:border-white"
-                id="top_quick_entry_btn"
-              >
-                <Plus className="w-3.5 h-3.5 stroke-[3]" />
-                <span>{lang === 'bn' ? 'হিসাব লিখুন' : 'New Entry'}</span>
-              </button>
-
-              {/* Custom Accent & Theme Color Palette Trigger */}
-              <button
-                onClick={() => {
-                  triggerHaptic('single');
-                  setIsAccentModalOpen(true);
-                }}
-                className="p-2 rounded-xl bg-white/75 dark:bg-white/[0.04] hover:bg-white dark:hover:bg-white/[0.09] backdrop-blur-md border-2 border-slate-300/90 dark:border-slate-700/90 cursor-pointer transition-all shadow-2xs relative active:scale-95"
-                title={lang === 'bn' ? 'থিম ও অ্যাকসেন্ট কালার পরিবর্তন' : 'Theme & Accent Palette'}
+                type="button"
+                onClick={openAccentModal}
+                className="touch-press relative w-8 h-8 rounded-full flex items-center justify-center text-slate-800 dark:text-white hover:bg-white/75 dark:hover:bg-white/[0.1] cursor-pointer transition-colors"
+                title={lang === 'bn' ? 'থিম ও অ্যাকসেন্ট কালার' : 'Theme & Palette'}
                 id="header_accent_palette_btn"
               >
-                <Palette className="w-3.5 h-3.5 text-slate-900 dark:text-white" />
+                <Palette className="w-[15px] h-[15px] stroke-[1.35]" />
               </button>
 
-              {/* Reminders Header Action Button */}
               <button
+                type="button"
                 onClick={() => { triggerHaptic('single'); navigateTo('reminders'); }}
-                className={`p-2 sm:px-3 sm:py-2 rounded-xl border-2 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs backdrop-blur-md ${
+                className={`touch-press relative w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
                   currentTab === 'reminders'
-                    ? 'bg-slate-950 text-white border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white'
-                    : 'bg-white/75 hover:bg-white dark:bg-white/[0.04] dark:hover:bg-white/[0.09] text-slate-800 dark:text-slate-200 border-slate-300/90 dark:border-slate-700/90'
+                    ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 shadow-xs'
+                    : 'text-slate-800 dark:text-white hover:bg-white/75 dark:hover:bg-white/[0.1]'
                 }`}
                 title={t.reminders}
                 id="header_reminders_btn"
               >
-                {reminders.some(r => r.active) ? (
-                  <BellDot className="w-3.5 h-3.5 stroke-[2]" />
+                {activeRemindersCount > 0 ? (
+                  <BellDot className="w-[15px] h-[15px] stroke-[1.35]" />
                 ) : (
-                  <Bell className="w-3.5 h-3.5 stroke-[2]" />
+                  <Bell className="w-[15px] h-[15px] stroke-[1.35]" />
                 )}
-                <span className="hidden sm:inline">{t.reminders}</span>
               </button>
 
-              {/* Theme Toggle */}
               <button
-                onClick={() => {
+                type="button"
+                onClick={(e) => {
                   triggerHaptic('single');
-                  handleThemeChange(theme === 'dark' ? 'light' : 'dark');
+                  const iconEl = e.currentTarget.querySelector('svg');
+                  const rect = (iconEl ?? e.currentTarget).getBoundingClientRect();
+                  handleThemeChange(theme === 'dark' ? 'light' : 'dark', {
+                    x: rect.left + rect.width / 2,
+                    y: rect.top + rect.height / 2,
+                  });
                 }}
-                className="p-2 rounded-xl bg-white/75 hover:bg-white dark:bg-white/[0.04] dark:hover:bg-white/[0.09] backdrop-blur-md text-slate-900 dark:text-white border-2 border-slate-300/90 dark:border-slate-700/90 cursor-pointer transition-all shadow-2xs active:scale-95"
+                className="touch-press w-8 h-8 rounded-full flex items-center justify-center text-slate-800 dark:text-white hover:bg-white/75 dark:hover:bg-white/[0.1] cursor-pointer transition-colors"
                 title="Toggle theme"
               >
-                {theme === 'dark' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+                {theme === 'dark' ? <Sun className="w-[15px] h-[15px] stroke-[1.35]" /> : <Moon className="w-[15px] h-[15px] stroke-[1.35]" />}
               </button>
             </div>
-
           </div>
         </header>
 
-        {/* Main Core Content Stage */}
-        <main className="relative flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 mb-8">
+        {/* Main Core Content Stage (Global top margin compensates for floating navbar) */}
+        <main className="relative flex-1 max-w-6xl w-full mx-auto mt-3 sm:mt-4 pt-4 sm:pt-6 px-4 pb-6 sm:px-6 mb-8">
  
  {/* Loading skeleton for ledger initialization */}
  {ledgerLoading && (
@@ -1068,17 +1956,25 @@ export default function App() {
 
  {/* Dynamic Route/Component loading */}
  {!ledgerLoading && (
+ <ViewTransition viewKey={`${currentTab}-${user.uid}`}>
  <div className="space-y-6">
  {currentTab === 'home' && (
  <Dashboard 
   customers={customers}
   transactions={todayTransactions}
+  tagTransactions={tagIntelligenceTransactions}
   transactionsCount={settings?.transactionsCount || 0}
   monthlySummaries={monthlySummaries}
   onOpenQuickEntry={openQuickEntry}
   onSelectCustomer={navigateToCustomer}
   lang={lang}
-  onViewDailyTxs={() => navigateTo('daily_transactions')}
+  onViewDailyTxs={handleViewDailyTxs}
+  userName={resolvedUserName}
+  greetingMessage={greetingMessage}
+  reminders={reminders}
+  showDashboardReminders={showDashboardReminders}
+  onOpenReminders={handleOpenReminders}
+  showTagChart={showTagChart}
   />
  )}
 
@@ -1094,7 +1990,7 @@ export default function App() {
  updateCustomerDetails={updateCustomerDetails}
  deleteCustomer={deleteCustomer}
  selectedCustomerId={selectedCustomerIdForDetail}
- setSelectedCustomerId={(id) => navigateTo('customers', id)} hasMoreTxs={hasMoreCustomerTxs} loadMoreTransactions={loadMoreCustomerTransactions} customerTxLimit={customerTxLimit} resetCustomerTxLimit={resetCustomerTxLimit}
+ setSelectedCustomerId={handleSelectCustomerId} hasMoreTxs={hasMoreCustomerTxs} loadMoreTransactions={loadMoreCustomerTransactions} customerTxLimit={customerTxLimit} resetCustomerTxLimit={resetCustomerTxLimit}
  activeCustomerTxCount={activeCustomerTxCount}
  lang={lang}
  triggerConfirm={triggerConfirm}
@@ -1153,133 +2049,116 @@ updateSettings={updateSettings}
           lang={lang}
           onLangChange={handleLangChange}
           deferredPrompt={deferredPrompt}
-          onInstallComplete={() => setDeferredPrompt(null)}
+          onInstallComplete={handleInstallComplete}
           trashCustomers={trashCustomers}
           restoreCustomer={restoreCustomer}
           permanentlyDeleteCustomer={permanentlyDeleteCustomer}
           emptyTrash={emptyTrash}
           swipeGesturesEnabled={swipeGesturesEnabled}
-          onSwipeGesturesToggle={(val) => {
-            setSwipeGesturesEnabled(val);
-            localStorage.setItem('swipe_gestures_enabled', val ? 'true' : 'false');
-          }}
+          onSwipeGesturesToggle={handleSwipeGesturesToggle}
+          showDashboardReminders={showDashboardReminders}
+          onToggleDashboardReminders={handleToggleDashboardReminders}
           importLedgerData={importLedgerData}
           userId={user?.uid}
-          userEmail={user?.email || user?.displayName || 'ChallanTrack User'}
+          userEmail={user?.email || 'ChallanTrack User'}
+          userName={resolvedUserName}
+          onUpdateDisplayName={handleUpdateDisplayName}
+          userPhotoURL={user?.photoURL || user?.providerData?.find((p) => p?.photoURL)?.photoURL || null}
           archivedStatements={archivedStatements}
           updateStatementAutoMerge={updateStatementAutoMerge}
           onUpdateStatementAutoMerge={updateStatementAutoMerge}
           exportArchivedStatements={exportArchivedStatements}
           onExportArchivedStatements={exportArchivedStatements}
-          onLockBiometricSession={() => {
-            setBiometricSessionUnlocked(false);
-            setBiometricUnlocked(false);
-          }}
+          onLockBiometricSession={handleLockBiometricSession}
+          showTagChart={showTagChart}
+          onToggleTagChart={handleToggleTagChart}
         />
   )}
 
       {currentTab === 'daily_transactions' && (
-        <div className="space-y-4 no-select animate-reveal pb-24">
-          
-          {/* Header Row */}
-          <div className="flex items-center justify-between gap-3 shrink-0">
-            {/* Left side: Back Button & Title */}
-            <div className="flex items-center gap-3">
+        <div className="space-y-6 no-select animate-reveal pb-24">
+          {/* Open Editorial Date Header */}
+          <div className="flex items-center justify-between gap-3 pt-1">
+            <div className="flex items-center gap-3 min-w-0">
               <button
                 onClick={() => navigateTo('home')}
-                className="p-2.5 bg-slate-50 dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 rounded-lg hover:bg-slate-100 dark:hover:bg-[#1F1F1F] transition-colors cursor-pointer flex items-center justify-center"
+                className="touch-press w-10 h-10 surface-glass-interactive border rounded-full flex items-center justify-center cursor-pointer shrink-0"
               >
-                <ArrowLeft className="w-5 h-5 text-black dark:text-white" />
+                <ArrowLeft className="w-4 h-4 stroke-[1.25] text-slate-900 dark:text-white" />
               </button>
-              <div>
-                <p className="text-lg font-black text-black dark:text-white tracking-tight">
-                  {selectedDailyDate.toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+              <div className="min-w-0">
+                <span className={lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>
+                  {lang === 'bn' ? 'দৈনিক খাতা' : 'Daily Journal'}
+                </span>
+                <p className="text-xl sm:text-2xl font-display font-extrabold text-slate-950 dark:text-white tracking-tight truncate">
+                  {selectedDailyDate.toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })}
                 </p>
               </div>
             </div>
 
-            {/* Right side: Calendar Archive Button */}
             <div className="relative shrink-0">
-              <input 
-                ref={dateInputRef}
-                type="date"
+              <NativeDatePicker
                 value={getLocalDateString(selectedDailyDate)}
-                onChange={(e) => {
-                  if (e.target.value) {
-                    const [year, month, day] = e.target.value.split('-').map(Number);
+                onChange={(val) => {
+                  if (val) {
+                    const [year, month, day] = val.split('-').map(Number);
                     setSelectedDailyDate(new Date(year, month - 1, day));
                   }
                 }}
-                className="absolute pointer-events-none opacity-0 w-0 h-0"
-                style={{ top: 0, right: 0 }}
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  if (dateInputRef.current) {
-                    try {
-                      dateInputRef.current.showPicker();
-                    } catch (err) {
-                      dateInputRef.current.click();
-                    }
-                  }
-                }}
-                className="p-2.5 bg-slate-50 dark:bg-[#0F1623] border border-slate-200 dark:border-slate-800/80 rounded-lg hover:bg-slate-100 dark:hover:bg-[#1F1F1F] transition-colors flex items-center justify-center text-black dark:text-white cursor-pointer"
+                lang={lang}
+                iconOnly
                 title={lang === 'bn' ? 'আর্কাইভ তারিখ নির্বাচন' : 'Select Archive Date'}
-              >
-                <Calendar className="w-5 h-5" />
-              </button>
+              />
             </div>
           </div>
 
-          {/* Uber Base Horizontal Totals Summary Grid */}
-          <div className="surface-glass grid grid-cols-3 gap-0 rounded-2xl border divide-x divide-slate-200/70 dark:divide-white/[0.07] overflow-hidden text-center">
-            <div className="p-3.5 space-y-1">
-              <div className="text-[11px] font-bold uppercase text-[#757575] tracking-wider">
+          {/* Open Hairline Telemetry Totals */}
+          <div className="pt-2 pb-4 border-b border-slate-900/[0.08] dark:border-white/[0.08] grid grid-cols-3 gap-4">
+            <div className="space-y-1">
+              <div className={lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400' : 'micro-mono-label font-semibold'}>
                 {lang === 'bn' ? 'মোট বকেয়া' : 'Total Dues'}
               </div>
-              <div className="text-base sm:text-lg font-black text-ledger-red tabular-nums font-mono">
-                +৳ {formatNumber(dailyTransactions.filter(tx => tx.type === 'due').reduce((sum, tx) => sum + tx.amount, 0), lang)}
+              <div className="text-lg sm:text-xl font-display font-bold text-ledger-red tabular-nums">
+                +৳ {formatNumber(dailyTotals.dues, lang)}
               </div>
             </div>
-            <div className="p-3.5 space-y-1">
-              <div className="text-[11px] font-bold uppercase text-[#757575] tracking-wider">
+            <div className="space-y-1">
+              <div className={lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400' : 'micro-mono-label font-semibold'}>
                 {lang === 'bn' ? 'মোট আদায়' : 'Total Got'}
               </div>
-              <div className="text-base sm:text-lg font-black text-ledger-green tabular-nums font-mono">
-                -৳ {formatNumber(dailyTransactions.filter(tx => tx.type === 'payment').reduce((sum, tx) => sum + tx.amount, 0), lang)}
+              <div className="text-lg sm:text-xl font-display font-bold text-ledger-green tabular-nums">
+                -৳ {formatNumber(dailyTotals.got, lang)}
               </div>
             </div>
-            <div className="p-3.5 space-y-1">
-              <div className="text-[11px] font-bold uppercase text-[#757575] tracking-wider">
-                {lang === 'bn' ? 'মোট হিসাব' : 'Total Tx'}
+            <div className="space-y-1">
+              <div className={lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400' : 'micro-mono-label font-semibold'}>
+                {lang === 'bn' ? 'মোট হিসাব' : 'Entries'}
               </div>
-              <div className="text-base sm:text-lg font-black text-black dark:text-white tabular-nums font-mono">
-                {formatNumber(dailyTransactions.length, lang)}
+              <div className="text-lg sm:text-xl font-display font-bold text-slate-950 dark:text-white tabular-nums">
+                {formatNumber(dailyTotals.count, lang)}
               </div>
             </div>
           </div>
 
-          {/* Centered Reset to Today Button */}
           {selectedDailyDate.toDateString() !== new Date().toDateString() && (
             <div className="flex justify-center shrink-0">
               <button
                 onClick={() => setSelectedDailyDate(new Date())}
-                className="surface-glass-interactive py-2 px-4 text-black dark:text-white border border-slate-200/80 dark:border-white/10 text-xs font-bold rounded-xl cursor-pointer flex items-center justify-center gap-1.5"
+                className="touch-press surface-glass-interactive py-2 px-4 text-slate-950 dark:text-white border text-xs font-bold rounded-full cursor-pointer flex items-center justify-center gap-1.5"
               >
-                <Calendar className="w-3.5 h-3.5" />
+                <Calendar className="w-3.5 h-3.5 stroke-[1.25]" />
                 <span>{lang === 'bn' ? 'আজকের দিনে ফিরে যান' : 'Back to Today'}</span>
               </button>
             </div>
           )}
 
-          {/* Ledger Entries List */}
-          <div className="surface-glass border rounded-2xl overflow-hidden">
-            <div className="divide-y divide-slate-200/60 dark:divide-white/[0.06]">
+          {/* Hairline Journal Entries */}
+          <div className="surface-glass border rounded-[26px] overflow-hidden">
+            <div className="divide-y divide-slate-900/[0.06] dark:divide-white/[0.06]">
               {dailyTransactions.length === 0 ? (
-                <div className="py-16 text-center text-[#757575]">
+                <div className="py-16 text-center text-slate-500 dark:text-slate-400">
                   <div className="flex flex-col items-center gap-3">
-                    <ClipboardList className="w-10 h-10 stroke-[1.5]" />
+                    <ClipboardList className="w-8 h-8 stroke-[1.25] opacity-40" />
                     <p className="font-semibold text-sm">
                       {selectedDailyDate.toDateString() === new Date().toDateString()
                         ? (lang === 'bn' ? 'আজ কোন লেনদেন হয়নি' : 'No transactions recorded today')
@@ -1289,47 +2168,42 @@ updateSettings={updateSettings}
                 </div>
               ) : (
                 dailyTransactions.map(tx => (
-                  <div 
-                    key={tx.id} 
+                  <div
+                    key={tx.id}
                     onClick={() => navigateTo('customers', tx.customerId)}
-                    className="p-4 hover:bg-slate-900/[0.03] dark:hover:bg-white/[0.04] transition-colors cursor-pointer flex items-center justify-between gap-4 animate-reveal"
+                    className="px-4 py-3.5 sm:px-5 sm:py-4 hover:bg-slate-900/[0.025] dark:hover:bg-white/[0.03] transition-colors cursor-pointer flex items-center justify-between gap-4"
                   >
-                    {/* Left side details */}
                     <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                      <div className={`p-2 rounded-lg shrink-0 ${
-                        tx.type === 'due' 
-                          ? 'bg-ledger-red-subtle text-ledger-red' 
+                      <div className={`w-9 h-9 rounded-full shrink-0 flex items-center justify-center ${
+                        tx.type === 'due'
+                          ? 'bg-ledger-red-subtle text-ledger-red'
                           : 'bg-ledger-green-subtle text-ledger-green'
                       }`}>
-                        {tx.type === 'due' 
-                          ? <ArrowUpRight className="w-4 h-4 stroke-[2.5]" /> 
-                          : <ArrowDownLeft className="w-4 h-4 stroke-[2.5]" />
-                        }
+                        <TagIcon tag={tx.tag} type={tx.type} className="w-4 h-4 stroke-[1.25]" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="text-base font-bold text-black dark:text-white truncate">
+                        <div className="text-sm sm:text-base font-semibold text-slate-950 dark:text-white truncate">
                           {tx.customerName}
                         </div>
-                        <div className="text-xs text-[#757575] truncate mt-0.5" title={tx.description}>
+                        <div className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5" title={tx.description}>
                           {tx.description || (tx.type === 'due' ? t.dueTrigger : t.paymentTrigger)}
                         </div>
                       </div>
                     </div>
-                    
-                    {/* Right side details */}
+
                     <div className="text-right shrink-0">
-                      <div className={`font-black text-base sm:text-lg tabular-nums font-mono ${
+                      <div className={`font-bold text-base sm:text-lg tabular-nums font-mono ${
                         tx.type === 'due' ? 'text-ledger-red' : 'text-ledger-green'
                       }`}>
                         {tx.type === 'due' ? '+' : '-'} ৳{formatNumber(tx.amount, lang)}
                       </div>
-                      <div className="text-xs text-[#757575] mt-0.5 font-medium tabular-nums flex items-center justify-end gap-1.5">
+                      <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 font-mono tabular-nums flex items-center justify-end gap-1.5">
                         {tx.isEdited && (
-                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-500/10 dark:bg-slate-400/10 text-slate-500 dark:text-slate-400 leading-none">
-                            {lang === 'bn' ? 'সম্পাদিত' : 'Edited'}
+                          <span className="font-sans">
+                            {lang === 'bn' ? 'সম্পাদিত ·' : 'Edited ·'}
                           </span>
                         )}
-                        <span>{new Date(parseFirestoreDate(tx.date)).toLocaleTimeString(lang === 'bn' ? 'bn-BD' : 'en-US', { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span>{(lang === 'bn' ? APP_TIME_FORMATTER_BN : APP_TIME_FORMATTER_EN).format(parseFirestoreDate(tx.date))}</span>
                       </div>
                     </div>
                   </div>
@@ -1340,103 +2214,20 @@ updateSettings={updateSettings}
         </div>
       )}
     </div>
+  </ViewTransition>
   )}
   </main>
   </div>
 
-  {/* FLOATING QUICK ENTRY TRIGGER (Mobile Only) */}
-  {(currentTab === 'home' || (currentTab === 'customers' && !selectedCustomerIdForDetail)) && (
-    <button
-      onClick={openQuickEntry}
-      className="fixed w-13 h-13 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-950 rounded-2xl border-2 border-slate-900 dark:border-slate-100 flex items-center justify-center shadow-md transition-all cursor-pointer z-40 bottom-20 right-5 sm:bottom-24 active:scale-95 md:hidden"
-      title={t.recordEntry}
-      id="fab_entry_btn"
-    >
-      <Plus className="w-6 h-6 stroke-[3]" />
-    </button>
-  )}
-
-  {/* BOTTOM NAVIGATION TABS (Mobile Full-Width Frosted Dock) */}
-  <nav className="fixed bottom-0 inset-x-0 glass-chrome-bottom bg-white/80 dark:bg-[#121215]/80 backdrop-blur-xl backdrop-saturate-150 border-t border-slate-200/70 dark:border-white/[0.08] py-2.5 px-4 z-40 md:hidden transition-colors">
-    <div className="max-w-md mx-auto flex items-center justify-between">
-      
-      <button
-        onClick={() => navigateTo('home')}
-        className={`relative flex flex-col items-center justify-center gap-1 w-18 py-1 mx-auto cursor-pointer transition-colors ${
-          (currentTab === 'home' || currentTab === 'daily_transactions')
-            ? 'text-slate-950 dark:text-white font-black'
-            : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 font-semibold'
-        }`}
-      >
-        <LayoutDashboard className="w-4.5 h-4.5 stroke-[2.2]" />
-        <span className="text-[10px]">{t.dashboard}</span>
-        {(currentTab === 'home' || currentTab === 'daily_transactions') && (
-          <span 
-            className="absolute -bottom-1 w-1.5 h-1.5 rounded-full"
-            style={{ backgroundColor: 'var(--accent-color)' }}
-          />
-        )}
-      </button>
-
-      <button
-        onClick={() => navigateTo('customers')}
-        className={`relative flex flex-col items-center justify-center gap-1 w-18 py-1 mx-auto cursor-pointer transition-colors ${
-          currentTab === 'customers'
-            ? 'text-slate-950 dark:text-white font-black'
-            : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 font-semibold'
-        }`}
-        id="nav_customers_tab"
-      >
-        <Users className="w-4.5 h-4.5 stroke-[2.2]" />
-        <span className="text-[10px]">{t.clients}</span>
-        {currentTab === 'customers' && (
-          <span 
-            className="absolute -bottom-1 w-1.5 h-1.5 rounded-full"
-            style={{ backgroundColor: 'var(--accent-color)' }}
-          />
-        )}
-      </button>
-
-      <button
-        onClick={() => navigateTo('goals')}
-        className={`relative flex flex-col items-center justify-center gap-1 w-18 py-1 mx-auto cursor-pointer transition-colors ${
-          currentTab === 'goals'
-            ? 'text-slate-950 dark:text-white font-black'
-            : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 font-semibold'
-        }`}
-        id="nav_goals_tab"
-      >
-        <Goal className="w-4.5 h-4.5 stroke-[2.2]" />
-        <span className="text-[10px]">{t.goals}</span>
-        {currentTab === 'goals' && (
-          <span 
-            className="absolute -bottom-1 w-1.5 h-1.5 rounded-full"
-            style={{ backgroundColor: 'var(--accent-color)' }}
-          />
-        )}
-      </button>
-
-      <button
-        onClick={() => navigateTo('settings')}
-        className={`relative flex flex-col items-center justify-center gap-1 w-18 py-1 mx-auto cursor-pointer transition-colors ${
-          currentTab === 'settings'
-            ? 'text-slate-950 dark:text-white font-black'
-            : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 font-semibold'
-        }`}
-        id="nav_settings_tab"
-      >
-        <Settings className="w-4.5 h-4.5 stroke-[2.2]" />
-        <span className="text-[10px]">{t.settings}</span>
-        {currentTab === 'settings' && (
-          <span 
-            className="absolute -bottom-1 w-1.5 h-1.5 rounded-full"
-            style={{ backgroundColor: 'var(--accent-color)' }}
-          />
-        )}
-      </button>
-
-    </div>
-  </nav>
+  {/* MOBILE DYNAMIC-ISLAND FLOATING DOCK + DETACHED QUICK ENTRY ORB */}
+  <MobileBottomDock
+    syncedTab={currentTab}
+    syncedCustomerId={selectedCustomerIdForDetail}
+    onNavigate={navigateTo}
+    onOpenQuickEntry={openQuickEntry}
+    labels={dockLabels}
+    reducedMotion={reducedMotion}
+  />
 
   {/* RENDER MASTER QUICK_ADD FORM MODAL */}
   <QuickEntryModal 
@@ -1456,60 +2247,67 @@ updateSettings={updateSettings}
   {/* CUSTOM ACCENT COLOR PICKER MODAL */}
   <AccentColorPickerModal
     isOpen={isAccentModalOpen}
-    onClose={() => setIsAccentModalOpen(false)}
+    onClose={closeAccentModal}
     lang={lang}
   />
 
   {/* MOBILE / TABLET CALCULATOR NUMERIC KEYPAD (7-8-9 Top Row) */}
   <CalculatorKeypad lang={lang} />
 
-  {/* UBER BASE DIALOG & CONFIRMATION MODALS */}
+  {/* BASE DIALOG & CONFIRMATION MODALS */}
   {appDialog && appDialog.isOpen && (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div
-        onClick={() => { if (appDialog.type === 'alert') setAppDialog(null); }}
-        className="absolute inset-0 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md"
-      />
-      
-      {/* Modal Dialog Body */}
-      <motion.div
-        initial={{ opacity: 0, scale: 0.96, y: 10 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="glass-modal border rounded-2xl p-6 w-full max-w-sm relative z-10 text-center space-y-5"
-      >
-        <div className="space-y-2">
-          <h3 className="text-xl font-bold text-slate-950 dark:text-white tracking-tight">
-            {appDialog.title}
-          </h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            {appDialog.message}
-          </p>
-        </div>
+    <ModalPortal>
+      <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-hidden no-select">
+        {/* Backdrop */}
+        <div
+          onClick={() => {
+            if (appDialog.onCancel) appDialog.onCancel();
+            setAppDialog(null);
+          }}
+          className="animate-backdrop-blur absolute inset-0 bg-slate-950/60 dark:bg-black/75"
+        />
 
-        <div className="flex items-center gap-2.5">
-          {appDialog.type === 'confirm' && (
+        {/* Modal Dialog Body */}
+        <div
+          onClick={e => e.stopPropagation()}
+          className="animate-slide-up glass-modal border rounded-t-[2rem] sm:rounded-3xl p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:pb-6 w-full sm:max-w-sm relative z-10 text-center space-y-5 max-h-[90dvh] overflow-y-auto hide-scrollbar shadow-2xl"
+        >
+          <div className="sm:hidden flex justify-center -mt-1 pb-1.5">
+            <div className="w-10 h-1 bg-slate-400/40 dark:bg-white/20 rounded-full" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="font-display text-xl font-bold text-slate-950 dark:text-white tracking-tight">
+              {appDialog.title}
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+              {appDialog.message}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            {appDialog.type === 'confirm' && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (appDialog.onCancel) appDialog.onCancel();
+                  setAppDialog(null);
+                }}
+                className="touch-press flex-1 py-3 surface-subcard text-slate-900 dark:text-white font-bold rounded-full text-xs transition-colors cursor-pointer border"
+              >
+                {lang === 'bn' ? 'বাতিল' : 'Cancel'}
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => {
-                if (appDialog.onCancel) appDialog.onCancel();
-                setAppDialog(null);
-              }}
-              className="flex-1 py-3 bg-white hover:bg-slate-50 dark:bg-[#0D121D] dark:hover:bg-slate-800 text-slate-900 dark:text-white font-bold rounded-xl text-xs transition-colors cursor-pointer border-2 border-slate-300 dark:border-slate-700 shadow-2xs"
+              onClick={appDialog.onConfirm}
+              className="touch-press flex-1 py-3 bg-slate-950 dark:bg-white text-white dark:text-slate-950 font-bold rounded-full text-xs transition-colors cursor-pointer"
             >
-              {lang === 'bn' ? 'বাতিল' : 'Cancel'}
+              {lang === 'bn' ? 'ঠিক আছে' : 'OK'}
             </button>
-          )}
-          <button
-            type="button"
-            onClick={appDialog.onConfirm}
-            className="flex-1 py-3 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-xl text-xs transition-colors cursor-pointer border-2 border-slate-950 dark:border-white shadow-xs"
-          >
-            {lang === 'bn' ? 'ঠিক আছে' : 'OK'}
-          </button>
+          </div>
         </div>
-      </motion.div>
-    </div>
+      </div>
+    </ModalPortal>
   )}
 
   </div>

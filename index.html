@@ -21,27 +21,37 @@
           } else {
             document.documentElement.classList.remove('dark');
           }
+          var savedLang = localStorage.getItem('lang') || 'en';
+          document.documentElement.lang = savedLang;
+          if (localStorage.getItem('challan_disable_transitions') === 'true') {
+            document.documentElement.classList.add('reduce-motion');
+          }
         } catch (e) {}
       })();
     </script>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0, viewport-fit=cover" />
     <title>Easy Due Tracker</title>
     <meta name="description" content="A minimalist, offline-ready due tracking ledger designed with very large buttons and highly clear text. Makes tracking and calculating customer dues simple and intuitive for parents and senior business owners. Syncs seamlessly across devices with robust backup support." />
     <meta property="og:title" content="Easy Due Tracker" />
     <meta property="og:description" content="A minimalist, offline-ready due tracking ledger designed with very large buttons and highly clear text. Makes tracking and calculating customer dues simple and intuitive for parents and senior business owners. Syncs seamlessly across devices with robust backup support." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Challan Track" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="apple-touch-startup-image" href="/apple-splash.png" />
     <link rel="manifest" href="/manifest.json" />
-    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#070B13" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Lato:wght@300;400;700;900&family=Noto+Sans+Bengali:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300;12..96,400;12..96,600;12..96,700;12..96,800&family=Geist+Mono:wght@300;400;500;600;700&family=Hind+Siliguri:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=Lato:wght@400;700;900&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Bengali:wght@400;500;600;700;800&family=Noto+Serif+Bengali:wght@400;500;600;700&display=swap" rel="stylesheet">
   </head>
-  <body class="bg-white dark:bg-black text-black dark:text-white antialiased selection:bg-black selection:text-white dark:selection:bg-white dark:selection:text-black">
+  <body class="bg-white dark:bg-[#070B13] text-black dark:text-white antialiased selection:bg-black selection:text-white dark:selection:bg-white dark:selection:text-black">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
