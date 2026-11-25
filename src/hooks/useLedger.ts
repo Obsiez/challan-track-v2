@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { 
  collection, 
  doc, 
+ documentId,
  setDoc,
  updateDoc, 
  deleteDoc, 
@@ -19,6 +20,7 @@ import {
 import { db, auth, OperationType } from '../firebase';
 import { Customer, Transaction, Reminder, UserSettings, SavingGoal, GoalContribution, ImportProgress, TransactionAuditEntry, UserTagConfig } from '../types';
 import { cleanBangladeshiPhone } from '../lib/phoneUtils';
+import { isSafeCustomerPhotoDataUrl } from '../lib/imageOptimizer';
 import { DEFAULT_TAG_CONFIG, sanitizeTagConfig, setUserTagConfigState, resetUserTagConfigState } from '../lib/tagSystem';
 
 export function useLedger(
@@ -33,6 +35,64 @@ export function useLedger(
   const [allCustomerTxs, setAllCustomerTxs] = useState<Transaction[]>([]);
   const [archiveTransactions, setArchiveTransactions] = useState<Transaction[]>([]);
     const [monthlySummaries, setMonthlySummaries] = useState<any[]>([]);
+    const [sixMonthChartData, setSixMonthChartData] = useState<Array<{ id: string; dues: number; payments: number; count: number }>>([]);
+
+  const getLast6MonthKeys = (): string[] => {
+    const now = new Date();
+    const keys: string[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+    return keys;
+  };
+
+  const buildSixMonthSnapshots = (sourceList: any[]) => {
+    const keys = getLast6MonthKeys();
+    const byId = new Map<string, any>();
+    (sourceList || []).forEach((item) => {
+      if (item?.id) byId.set(item.id, item);
+    });
+    return keys.map((key) => {
+      const found = byId.get(key);
+      const count = Math.max(0, Number(found?.count) || 0);
+      return {
+        id: key,
+        dues: count > 0 ? Math.max(0, Number(found?.dues) || 0) : 0,
+        payments: count > 0 ? Math.max(0, Number(found?.payments) || 0) : 0,
+        count,
+      };
+    });
+  };
+
+  const persistSixMonthChartSnapshots = (snapshots: Array<{ id: string; dues: number; payments: number; count: number }>, syncRemote = false) => {
+    if (!userId) return;
+    try {
+      localStorage.setItem(`easy_due_analytics_6m_${userId}`, JSON.stringify(snapshots));
+    } catch {}
+    if (syncRemote && userId !== 'local-guest-session' && !isOfflineFallback) {
+      const monthsRecord: Record<string, { id: string; dues: number; payments: number; count: number }> = {};
+      snapshots.forEach((s) => {
+        monthsRecord[s.id] = {
+          id: s.id,
+          dues: Math.max(0, Number(s.dues) || 0),
+          payments: Math.max(0, Number(s.payments) || 0),
+          count: Math.max(0, Number(s.count) || 0),
+        };
+      });
+      const chartDocRef = doc(db, 'users', userId, 'analytics', 'six_month_chart');
+      setDoc(
+        chartDocRef,
+        {
+          months: monthsRecord,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: false }
+      ).catch((err) => {
+        console.warn('Failed to persist 6-month analytics chart:', err);
+      });
+    }
+  };
 
   // Robust date parser to handle Firestore plain-serialized, timestamp and Date formats safely
   const parseTxDate = (dateField: any): Date => {
@@ -126,6 +186,9 @@ export function useLedger(
 
       const filteredList = list.filter(s => s.count > 0);
       localStorage.setItem(`easy_due_monthly_summaries_${userId}`, JSON.stringify(filteredList));
+      const next6m = buildSixMonthSnapshots(list);
+      setSixMonthChartData(next6m);
+      persistSixMonthChartSnapshots(next6m, true);
       return filteredList;
     });
   };
@@ -271,6 +334,7 @@ const lastSubmitRef = useRef<{
  const storedReminders = localStorage.getItem(`easy_due_reminders_${userId}`);
  const storedSettings = localStorage.getItem(`easy_due_settings_${userId}`);
       const storedSummaries = localStorage.getItem(`easy_due_monthly_summaries_${userId}`);
+      const storedSixMonthChart = localStorage.getItem(`easy_due_analytics_6m_${userId}`);
       const storedGoals = localStorage.getItem(`easy_due_goals_${userId}`);
       const storedArchived = localStorage.getItem(`easy_due_archived_statements_${userId}`);
 
@@ -298,10 +362,26 @@ const lastSubmitRef = useRef<{
  setReminders([]);
       }
 
+      const parsedSummaries = storedSummaries ? JSON.parse(storedSummaries) : [];
       if (storedSummaries) {
-        setMonthlySummaries(JSON.parse(storedSummaries));
+        setMonthlySummaries(parsedSummaries);
       } else {
         setMonthlySummaries([]);
+      }
+
+      if (storedSixMonthChart) {
+        try {
+          const parsed6m = JSON.parse(storedSixMonthChart);
+          if (Array.isArray(parsed6m)) {
+            setSixMonthChartData(buildSixMonthSnapshots(parsed6m));
+          } else {
+            setSixMonthChartData(buildSixMonthSnapshots(parsedSummaries));
+          }
+        } catch {
+          setSixMonthChartData(buildSixMonthSnapshots(parsedSummaries));
+        }
+      } else {
+        setSixMonthChartData(buildSixMonthSnapshots(parsedSummaries));
       }
 
       if (storedGoals) {
@@ -467,6 +547,8 @@ const lastSubmitRef = useRef<{
     } else {
       setCustomers([]);
       setTransactions([]);
+      setMonthlySummaries([]);
+      setSixMonthChartData([]);
       setTagIntelligenceTransactions([]);
       setTagConfig(DEFAULT_TAG_CONFIG);
       resetUserTagConfigState();
@@ -881,13 +963,32 @@ const lastSubmitRef = useRef<{
     });
   }, [transactions, archiveTransactions]);
 
-  // 3c. Sync Monthly Summaries (retention last 6 months)
+  // 3c. Sync Monthly Summaries (ordered newest first) & Dedicated 6-Month Analytics Chart Store
   useEffect(() => {
     if (!userId || userId === 'local-guest-session' || isOfflineFallback) {
       return;
     }
+
+    const chartDocRef = doc(db, 'users', userId, 'analytics', 'six_month_chart');
+    const unsubChart = onSnapshot(
+      chartDocRef,
+      (docSnap) => {
+        if (!docSnap.exists()) return;
+        const data = docSnap.data();
+        const monthsObj = data?.months && typeof data.months === 'object' ? data.months : null;
+        if (!monthsObj) return;
+        const incoming = Object.values(monthsObj) as Array<{ id: string; dues: number; payments: number; count: number }>;
+        const normalized = buildSixMonthSnapshots(incoming);
+        setSixMonthChartData(normalized);
+        persistSixMonthChartSnapshots(normalized, false);
+      },
+      (err) => {
+        console.warn('Firestore error syncing 6-month analytics chart:', err);
+      }
+    );
+
     const summariesRef = collection(db, 'users', userId, 'monthly_summaries');
-    const q = query(summariesRef, limit(12));
+    const q = query(summariesRef, orderBy(documentId(), 'desc'), limit(12));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const incomingList: any[] = [];
@@ -898,14 +999,11 @@ const lastSubmitRef = useRef<{
         });
       });
 
-      // Bars data: Monthly bars data will get loaded once and will never be forgotten. Only get replaced by newer data.
       setMonthlySummaries(prev => {
         const mergedMap = new Map<string, any>();
-        // Keep all previously loaded bars data
         (prev || []).forEach(item => {
           if (item?.id) mergedMap.set(item.id, item);
         });
-        // Replace with newer data from incoming snapshot
         incomingList.forEach(item => {
           if (item?.id) mergedMap.set(item.id, item);
         });
@@ -913,13 +1011,19 @@ const lastSubmitRef = useRef<{
         try {
           localStorage.setItem(`easy_due_monthly_summaries_${userId}`, JSON.stringify(merged));
         } catch {}
+        const synced6m = buildSixMonthSnapshots(merged);
+        setSixMonthChartData(synced6m);
+        persistSixMonthChartSnapshots(synced6m, false);
         return merged;
       });
     }, (error) => {
       console.warn("Firestore error syncing monthly summaries:", error);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubChart();
+      unsubscribe();
+    };
   }, [userId, isOfflineFallback]);
 
   const effectiveMonthlySummaries = useMemo(() => {
@@ -1186,6 +1290,7 @@ const lastSubmitRef = useRef<{
           type: c.type,
           name: c.name,
           color: c.color,
+          iconName: c.iconName || null,
           logoDataUrl: c.logoDataUrl || null,
           imageOnly: Boolean(c.imageOnly && c.logoDataUrl),
           enabled: Boolean(c.enabled),
@@ -1566,7 +1671,7 @@ const lastSubmitRef = useRef<{
  const createCustomer = async (
    name: string,
    phone: string,
-   options?: { accountType?: 'standard' | 'credit_card'; billingDay?: number }
+   options?: { accountType?: 'standard' | 'credit_card'; billingDay?: number; photoUrl?: string | null }
  ) => {
  if (!userId) return null;
  
@@ -1583,12 +1688,14 @@ const lastSubmitRef = useRef<{
    acctType === 'credit_card'
      ? Math.min(31, Math.max(1, Math.round(options?.billingDay || 15)))
      : undefined;
+ const safePhotoUrl = isSafeCustomerPhotoDataUrl(options?.photoUrl) ? options!.photoUrl! : null;
 
  const newCustomer: Customer = {
  id: customId,
  userId,
  name: trimmedName,
  phone: cleanBangladeshiPhone(phone),
+ ...(safePhotoUrl ? { photoUrl: safePhotoUrl } : {}),
  outstandingDue: 0,
  createdAt: new Date(),
  updatedAt: new Date(),
@@ -1782,7 +1889,25 @@ const lastSubmitRef = useRef<{
         });
       });
 
+      const rebuiltList = Object.entries(summaries).map(([id, val]) => ({ id, ...val }));
+      const next6m = buildSixMonthSnapshots(rebuiltList);
+      const monthsRecord: Record<string, { id: string; dues: number; payments: number; count: number }> = {};
+      next6m.forEach((s) => {
+        monthsRecord[s.id] = s;
+      });
+      batch.set(doc(db, 'users', uid, 'analytics', 'six_month_chart'), {
+        months: monthsRecord,
+        updatedAt: serverTimestamp()
+      });
+
       await batch.commit();
+
+      setMonthlySummaries(rebuiltList.sort((a, b) => b.id.localeCompare(a.id)));
+      try {
+        localStorage.setItem(`easy_due_monthly_summaries_${uid}`, JSON.stringify(rebuiltList));
+      } catch {}
+      setSixMonthChartData(next6m);
+      persistSixMonthChartSnapshots(next6m, false);
       
       // Update local settings count
       if (settings) {
@@ -2283,7 +2408,7 @@ const lastSubmitRef = useRef<{
     customerId: string,
     name: string,
     phone: string,
-    options?: { accountType?: 'standard' | 'credit_card'; billingDay?: number }
+    options?: { accountType?: 'standard' | 'credit_card'; billingDay?: number; photoUrl?: string | null }
   ) => {
     if (!userId) return;
     const trimmedName = name.trim();
@@ -2294,6 +2419,11 @@ const lastSubmitRef = useRef<{
     if (isDuplicate) {
       throw new Error('DUPLICATE_NAME');
     }
+
+    const hasPhotoUpdate = options?.photoUrl !== undefined;
+    const nextSafePhoto = hasPhotoUpdate
+      ? (isSafeCustomerPhotoDataUrl(options?.photoUrl) ? options!.photoUrl! : null)
+      : undefined;
 
     const updatedList = customers.map(c => {
       if (c.id !== customerId) return c;
@@ -2306,6 +2436,7 @@ const lastSubmitRef = useRef<{
         ...c,
         name: trimmedName,
         phone: trimmedPhone,
+        ...(hasPhotoUpdate ? { photoUrl: nextSafePhoto } : {}),
         accountType: nextAcctType,
         billingDay: nextBillingDay,
         updatedAt: new Date()
@@ -2327,6 +2458,9 @@ const lastSubmitRef = useRef<{
         accountType: targetCust?.accountType || 'standard',
         updatedAt: serverTimestamp()
       };
+      if (hasPhotoUpdate) {
+        firestoreUpdates.photoUrl = nextSafePhoto ?? null;
+      }
       if (targetCust?.accountType === 'credit_card' && targetCust.billingDay) {
         firestoreUpdates.billingDay = targetCust.billingDay;
       }
@@ -2745,11 +2879,13 @@ const lastSubmitRef = useRef<{
             ? Number(bc.billingDay)
             : undefined;
 
+        const safePhoto = isSafeCustomerPhotoDataUrl(bc.photoUrl) ? bc.photoUrl : null;
         const customerObj: Customer = {
           id: customId,
           userId,
           name: bc.name.trim(),
           phone: (bc.phone || '').trim(),
+          ...(safePhoto ? { photoUrl: safePhoto } : {}),
           outstandingDue: Number(bc.outstandingDue) || 0,
           createdAt: cDate,
           updatedAt: new Date(),
@@ -2765,6 +2901,7 @@ const lastSubmitRef = useRef<{
             userId,
             name: bc.name.trim(),
             phone: (bc.phone || '').trim(),
+            ...(safePhoto ? { photoUrl: safePhoto } : {}),
             outstandingDue: Number(bc.outstandingDue) || 0,
             createdAt: cDate,
             updatedAt: new Date(),
@@ -2954,6 +3091,11 @@ const lastSubmitRef = useRef<{
               updatePayload.phone = backupPhone;
               hasCustChanges = true;
             }
+            if (isSafeCustomerPhotoDataUrl(bc.photoUrl) && existing.photoUrl !== bc.photoUrl) {
+              existing.photoUrl = bc.photoUrl;
+              updatePayload.photoUrl = bc.photoUrl;
+              hasCustChanges = true;
+            }
             if (bc.accountType && existing.accountType !== acctType) {
               existing.accountType = acctType;
               updatePayload.accountType = acctType;
@@ -2981,11 +3123,13 @@ const lastSubmitRef = useRef<{
           // Brand new customer from backup: retain master balance & credit card config
           const customId = doc(collection(db, 'temp')).id;
           const cDate = bc.createdAt ? new Date(bc.createdAt) : new Date();
+          const safePhoto = isSafeCustomerPhotoDataUrl(bc.photoUrl) ? bc.photoUrl : null;
           const customerObj: Customer = {
             id: customId,
             userId,
             name: bc.name.trim(),
             phone: (bc.phone || '').trim(),
+            ...(safePhoto ? { photoUrl: safePhoto } : {}),
             outstandingDue: Number(bc.outstandingDue) || 0,
             createdAt: cDate,
             updatedAt: new Date(),
@@ -3002,6 +3146,7 @@ const lastSubmitRef = useRef<{
               userId,
               name: bc.name.trim(),
               phone: (bc.phone || '').trim(),
+              ...(safePhoto ? { photoUrl: safePhoto } : {}),
               outstandingDue: Number(bc.outstandingDue) || 0,
               createdAt: cDate,
               updatedAt: new Date(),
@@ -3980,6 +4125,7 @@ const lastSubmitRef = useRef<{
       customers: customers.map(c => ({
         name: c.name,
         phone: c.phone,
+        ...(isSafeCustomerPhotoDataUrl(c.photoUrl) ? { photoUrl: c.photoUrl } : {}),
         outstandingDue: c.outstandingDue,
         accountType: c.accountType || 'standard',
         ...(c.accountType === 'credit_card' || c.billingDay !== undefined
@@ -4102,6 +4248,12 @@ const lastSubmitRef = useRef<{
     loadMoreCustomerTransactions: () => setCustomerTxLimit(prev => prev + 10),
     resetCustomerTxLimit: () => setCustomerTxLimit(5),
     monthlySummaries: effectiveMonthlySummaries,
+    sixMonthChartData: useMemo(() => {
+      if (userId === 'local-guest-session' || isOfflineFallback) {
+        return buildSixMonthSnapshots(effectiveMonthlySummaries);
+      }
+      return sixMonthChartData.length === 6 ? sixMonthChartData : buildSixMonthSnapshots(effectiveMonthlySummaries);
+    }, [userId, isOfflineFallback, sixMonthChartData, effectiveMonthlySummaries]),
     goals,
     goalsSynced,
     createGoal,

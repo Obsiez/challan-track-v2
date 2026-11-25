@@ -5,8 +5,8 @@
  */
 export function showNotification(title: string, options?: NotificationOptions) {
   const mergedOptions: NotificationOptions = {
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
+    icon: './icon-192.png',
+    badge: './icon-192.png',
     ...options
   };
 

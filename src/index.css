@@ -412,6 +412,10 @@ html[data-bg-texture="none"] .app-ambient-grid::before {
   background-color: rgba(var(--theme-light-surface-rgb, 255, 255, 255), 0.60);
   -webkit-backdrop-filter: blur(36px) saturate(200%);
   backdrop-filter: blur(36px) saturate(200%);
+  isolation: isolate;
+  transform: translate3d(0, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
   border-color: rgba(15, 23, 42, 0.08);
   box-shadow:
     0 24px 52px -18px rgba(15, 23, 42, 0.11),
@@ -433,6 +437,10 @@ html[data-bg-texture="none"] .app-ambient-grid::before {
   background-color: rgba(var(--theme-light-surface-rgb, 255, 255, 255), 0.58);
   -webkit-backdrop-filter: blur(32px) saturate(195%);
   backdrop-filter: blur(32px) saturate(195%);
+  isolation: isolate;
+  transform: translate3d(0, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
   border-color: rgba(15, 23, 42, 0.08);
   box-shadow:
     0 14px 32px -14px rgba(15, 23, 42, 0.08),
@@ -452,6 +460,10 @@ html[data-bg-texture="none"] .app-ambient-grid::before {
   background-color: rgba(var(--theme-light-surface-rgb, 255, 255, 255), 0.62);
   -webkit-backdrop-filter: blur(30px) saturate(195%);
   backdrop-filter: blur(30px) saturate(195%);
+  isolation: isolate;
+  transform: translate3d(0, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
   box-shadow:
     0 10px 24px -12px rgba(15, 23, 42, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.92);
@@ -484,6 +496,10 @@ html[data-bg-texture="none"] .app-ambient-grid::before {
   background-color: rgba(var(--theme-light-surface-rgb, 255, 255, 255), 0.91);
   -webkit-backdrop-filter: blur(22px) saturate(180%);
   backdrop-filter: blur(22px) saturate(180%);
+  isolation: isolate;
+  transform: translate3d(0, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
   border-color: rgba(15, 23, 42, 0.08);
   box-shadow:
     0 8px 20px -12px rgba(15, 23, 42, 0.07),
@@ -524,6 +540,10 @@ html[data-bg-texture="none"] .app-ambient-grid::before {
   background-color: rgba(var(--theme-light-surface-rgb, 248, 250, 252), 0.48);
   -webkit-backdrop-filter: blur(22px) saturate(175%);
   backdrop-filter: blur(22px) saturate(175%);
+  isolation: isolate;
+  transform: translate3d(0, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
@@ -593,6 +613,15 @@ html[data-bg-texture="none"] .app-ambient-grid::before {
   .dark .glass-dropdown {
     border-color: rgba(255, 255, 255, 0.11);
   }
+}
+
+/* Clean minimal border frame for Contact Avatars */
+.contact-avatar-ring {
+  border: 1.5px solid rgba(15, 23, 42, 0.12);
+}
+
+.dark .contact-avatar-ring {
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 /* Extreme Editorial Typography Scale Contrast */
@@ -902,10 +931,6 @@ button, a, input, select, textarea {
 
 .motion-view-enter {
   animation: viewEnter 200ms cubic-bezier(0.16, 1, 0.3, 1);
-  transform: translate3d(0, 0, 0);
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  will-change: transform, opacity;
 }
 
 @keyframes shellFadeIn {

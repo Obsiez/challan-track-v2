@@ -2152,16 +2152,44 @@ export default function GoalsManager({
                             </span>
                           </button>
                         ) : selectedGoal.installmentAmount && selectedGoal.installmentAmount > 0 ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              triggerHaptic('single');
-                              setInstallmentInput(formatIndianNumberString(String(selectedGoal.installmentAmount)));
-                            }}
-                            className="text-xs font-bold text-slate-900 dark:text-white hover:underline flex items-center gap-1 pt-1 cursor-pointer"
-                          >
-                            <span>{lang === 'bn' ? 'নির্ধারিত কিস্তি বসান' : 'Fill regular installment'} (৳{formatNumber(selectedGoal.installmentAmount, lang)})</span>
-                          </button>
+                          (() => {
+                            const regularAmount = selectedGoal.installmentAmount;
+                            const isRegularFilled = parseAmount(installmentInput) === regularAmount;
+                            return (
+                              <label
+                                htmlFor="fill_regular_installment_checkbox"
+                                className="w-full flex items-center text-left gap-2.5 mt-2 p-3 rounded-2xl surface-subcard hover:bg-slate-200/50 dark:hover:bg-white/[0.06] border-[1.5px] border-slate-300/85 dark:border-white/[0.16] cursor-pointer transition-colors select-none touch-press"
+                              >
+                                <input
+                                  id="fill_regular_installment_checkbox"
+                                  type="checkbox"
+                                  checked={isRegularFilled}
+                                  onChange={(e) => {
+                                    triggerHaptic('single');
+                                    if (e.target.checked) {
+                                      setInstallmentInput(formatIndianNumberString(String(regularAmount)));
+                                    } else {
+                                      setInstallmentInput('');
+                                    }
+                                  }}
+                                  className="sr-only"
+                                />
+                                <span
+                                  aria-hidden="true"
+                                  className={`w-4 h-4 rounded-md border-[1.5px] flex items-center justify-center shrink-0 transition-colors ${
+                                    isRegularFilled
+                                      ? 'bg-emerald-600 border-emerald-600 text-white'
+                                      : 'border-emerald-600/65 dark:border-emerald-400/65 bg-white/70 dark:bg-white/[0.05]'
+                                  }`}
+                                >
+                                  {isRegularFilled && <Check className="w-3 h-3 stroke-[2.5]" />}
+                                </span>
+                                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 select-none">
+                                  {lang === 'bn' ? 'নির্ধারিত কিস্তি বসান' : 'Fill regular installment'} (৳{formatNumber(regularAmount, lang)})
+                                </span>
+                              </label>
+                            );
+                          })()
                         ) : null}
 
                         <div className="flex flex-wrap gap-1.5 pt-1.5">

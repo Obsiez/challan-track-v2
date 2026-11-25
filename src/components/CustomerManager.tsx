@@ -5,7 +5,7 @@ import {
 	MessageSquare, MessageCircleMore, CircleEllipsis, Trash2, Pencil, RefreshCw, X, UserMinus, Plus, Minus, ShieldCheck, 
 	AlertTriangle, ArrowLeftRight, Check, Trash, Users, Send, ArrowLeft, ArrowUpDown, Delete,
 	BookUser, Download, Share2, Copy, MoreHorizontal, Archive, RotateCcw,
-	History, FileText, Info, CreditCard, Calendar
+	History, FileText, Info, CreditCard, Calendar, Camera, UserRound
 } from 'lucide-react';
 import { 
   generateReceiptPng, 
@@ -31,6 +31,8 @@ import { StaggerReveal, SpotlightCard, ScrollParallaxStage, ClientCardStage } fr
 import ModalPortal, { useModalScrollLock } from './ModalPortal';
 import LoadingSpinner from './LoadingSpinner';
 import { TagIcon, TagPickerBar, getTagDefaultDescription, getTagMeta, EXPENSE_TAGS, PAYMENT_TAGS, useHorizontalDragWheelScroll } from '../lib/tagSystem';
+import { OptimizedPhotoResult } from '../lib/imageOptimizer';
+import ContactPhotoCropModal from './ContactPhotoCropModal';
 
 const WhatsAppIcon = () => (
 	<svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" className="shrink-0">
@@ -56,6 +58,90 @@ const ListClockIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
 		<path d="M17 13v2l1.5 1" />
 	</svg>
 );
+
+const AppleContactPhotoPicker = ({
+	photoUrl,
+	displayName,
+	lang,
+	inputRef,
+	onFileChange,
+	onRemove,
+}: {
+	photoUrl: string | null;
+	displayName: string;
+	lang: Language;
+	inputRef: React.RefObject<HTMLInputElement | null>;
+	onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+	onRemove: () => void;
+}) => {
+	const trimmedName = displayName.trim();
+	return (
+		<div className="flex items-center gap-3.5 p-3.5 rounded-2xl surface-subcard border border-slate-900/[0.08] dark:border-white/[0.09]">
+			<button
+				type="button"
+				onClick={() => inputRef.current?.click()}
+				aria-label={photoUrl ? (lang === 'bn' ? 'ছবি পরিবর্তন করুন' : 'Change contact photo') : (lang === 'bn' ? 'ছবি যোগ করুন' : 'Add contact photo')}
+				className="relative shrink-0 p-[2px] rounded-full contact-avatar-ring cursor-pointer touch-press group transition-transform"
+			>
+				<span className="w-14 h-14 sm:w-16 sm:h-16 rounded-full overflow-hidden flex items-center justify-center bg-slate-100 dark:bg-white/[0.06]">
+					{photoUrl ? (
+						<img
+							src={photoUrl}
+							alt={displayName || 'Contact photo'}
+							className="w-full h-full object-cover"
+							draggable={false}
+						/>
+					) : (
+						<UserRound className="w-7 h-7 text-slate-500 dark:text-slate-300 group-hover:text-slate-950 dark:group-hover:text-white transition-colors stroke-[1.4]" />
+					)}
+				</span>
+				<span
+					aria-hidden="true"
+					className="absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full bg-white dark:bg-zinc-900 border border-slate-900/15 dark:border-white/20 shadow-xs flex items-center justify-center group-hover:scale-105 transition-transform"
+				>
+					<Camera className="w-3.5 h-3.5 text-slate-800 dark:text-white stroke-[1.75]" />
+				</span>
+			</button>
+
+			<div className="flex-1 min-w-0 text-left">
+				<div className="text-sm font-bold text-slate-950 dark:text-white truncate">
+					{trimmedName || (lang === 'bn' ? 'কন্টাক্ট ছবি' : 'Contact Photo')}
+				</div>
+				<p className="text-xs text-slate-500 dark:text-slate-400 leading-snug mt-0.5">
+					{photoUrl
+						? (lang === 'bn' ? 'পরিবর্তন করতে ছবিতে ট্যাপ করুন' : 'Tap photo to replace or reframe')
+						: (lang === 'bn' ? 'ছবি যোগ করতে আইকনে ট্যাপ করুন' : 'Tap icon to add a contact photo')}
+				</p>
+			</div>
+
+			{photoUrl ? (
+				<button
+					type="button"
+					onClick={onRemove}
+					className="shrink-0 px-4 py-2 rounded-full bg-slate-100/90 hover:bg-rose-500/15 text-slate-700 hover:text-rose-600 dark:bg-white/[0.08] dark:hover:bg-rose-500/20 dark:text-slate-200 dark:hover:text-rose-400 font-bold text-xs border border-slate-200/80 dark:border-white/[0.1] transition-colors cursor-pointer touch-press"
+				>
+					{lang === 'bn' ? 'মুছুন' : 'Remove'}
+				</button>
+			) : (
+				<button
+					type="button"
+					onClick={() => inputRef.current?.click()}
+					className="shrink-0 px-4 py-2 rounded-full surface-glass-interactive border text-slate-900 dark:text-white font-bold text-xs transition-colors cursor-pointer touch-press"
+				>
+					{lang === 'bn' ? 'বাছাই' : 'Choose'}
+				</button>
+			)}
+
+			<input
+				ref={inputRef}
+				type="file"
+				accept="image/png,image/jpeg,image/webp,image/heic,image/heif"
+				onChange={onFileChange}
+				className="hidden"
+			/>
+		</div>
+	);
+};
 
 
 interface SwipeableCustomerItemProps {
@@ -363,6 +449,11 @@ const CustomerCardGridItem = React.memo(({
     .join('')
     .toUpperCase() || 'C';
 
+  const [imgError, setImgError] = React.useState(false);
+  React.useEffect(() => {
+    setImgError(false);
+  }, [c.photoUrl]);
+
   const isDue = c.outstandingDue > 0;
   const isOverpaid = c.outstandingDue < 0;
   const cleanedPhone = c.phone ? cleanBangladeshiPhone(c.phone) : '';
@@ -394,15 +485,29 @@ const CustomerCardGridItem = React.memo(({
         >
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0 pr-2">
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center font-display font-bold text-xs shrink-0 ${
-                isDue
-                  ? 'bg-ledger-red-subtle text-ledger-red'
-                  : isOverpaid
-                  ? 'bg-ledger-green-subtle text-ledger-green'
-                  : 'bg-slate-900/[0.06] dark:bg-white/[0.08] text-slate-600 dark:text-slate-300'
-              }`}>
-                {initials}
-              </div>
+              {c.photoUrl && !imgError ? (
+                <div className="p-[1.5px] rounded-full contact-avatar-ring shrink-0">
+                  <img
+                    src={c.photoUrl}
+                    alt={c.name}
+                    loading="lazy"
+                    decoding="async"
+                    onError={() => setImgError(true)}
+                    className="w-10 h-10 rounded-full object-cover block"
+                    draggable={false}
+                  />
+                </div>
+              ) : (
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-display font-bold text-xs shrink-0 ${
+                  isDue
+                    ? 'bg-ledger-red-subtle text-ledger-red'
+                    : isOverpaid
+                    ? 'bg-ledger-green-subtle text-ledger-green'
+                    : 'bg-slate-900/[0.06] dark:bg-white/[0.08] text-slate-600 dark:text-slate-300'
+                }`}>
+                  {initials}
+                </div>
+              )}
 
               <div className="min-w-0">
                 <div
@@ -553,7 +658,7 @@ interface CustomerManagerProps {
  createCustomer: (
    name: string,
    phone: string,
-   options?: { accountType?: 'standard' | 'credit_card'; billingDay?: number }
+   options?: { accountType?: 'standard' | 'credit_card'; billingDay?: number; photoUrl?: string | null }
  ) => Promise<string | null | undefined>;
  addTransaction: (
  customerId: string, 
@@ -568,7 +673,7 @@ interface CustomerManagerProps {
    customerId: string,
    name: string,
    phone: string,
-   options?: { accountType?: 'standard' | 'credit_card'; billingDay?: number }
+   options?: { accountType?: 'standard' | 'credit_card'; billingDay?: number; photoUrl?: string | null }
  ) => Promise<void>;
  editTransaction?: (transactionId: string, newType: 'due' | 'payment', newAmount: number, newDescription: string, newTag?: string | null) => Promise<void>;
  deleteTransaction?: (transactionId: string) => Promise<void>;
@@ -647,7 +752,49 @@ const CustomerManager = React.memo(function CustomerManager({
    setCardCycleTab('unbilled');
    setActionTargetCycle('unbilled');
    setLedgerTagFilter(null);
+   setDetailAvatarError(false);
  }, [selectedCustomerId]);
+
+ const [pendingPhotoCrop, setPendingPhotoCrop] = useState<{ file: File; target: 'new' | 'edit' } | null>(null);
+
+ const handleCustomerPhotoSelect = (
+   e: React.ChangeEvent<HTMLInputElement>,
+   target: 'new' | 'edit'
+ ) => {
+   const file = e.target.files?.[0];
+   e.target.value = '';
+   if (!file) return;
+
+   if (!file.type || !file.type.startsWith('image/')) {
+     triggerHaptic('double');
+     toast.error(lang === 'bn' ? 'দয়া করে একটি ছবি নির্বাচন করুন' : 'Please choose an image file');
+     return;
+   }
+   if (file.size > 12 * 1024 * 1024) {
+     triggerHaptic('double');
+     toast.error(lang === 'bn' ? 'ছবির সাইজ ১২ এমবি-র কম হতে হবে' : 'Please choose a photo smaller than 12 MB');
+     return;
+   }
+
+   triggerHaptic('single');
+   setPendingPhotoCrop({ file, target });
+ };
+
+ const handleCropComplete = (result: OptimizedPhotoResult) => {
+   if (!pendingPhotoCrop) return;
+   if (pendingPhotoCrop.target === 'new') {
+     setNewPhotoUrl(result.dataUrl);
+   } else {
+     setEditPhotoUrl(result.dataUrl);
+     setDetailAvatarError(false);
+   }
+   setPendingPhotoCrop(null);
+ };
+
+ const handleCropError = () => {
+   setPendingPhotoCrop(null);
+   toast.error(lang === 'bn' ? 'এই ছবিটি ব্যবহার করা যাচ্ছে না, অন্য ছবি দিন' : 'Couldn’t use that photo. Please try another one.');
+ };
 
  const [searchQuery, setSearchQuery] = useState('');
   const [searchBanglaInEnglish, setSearchBanglaInEnglish] = useState(() => isPhoneticSearchEnabled());
@@ -673,6 +820,8 @@ const CustomerManager = React.memo(function CustomerManager({
  const [showAddForm, setShowAddForm] = useState(false);
  const [newName, setNewName] = useState('');
  const [newPhone, setNewPhone] = useState('');
+ const [newPhotoUrl, setNewPhotoUrl] = useState<string | null>(null);
+ const newPhotoInputRef = useRef<HTMLInputElement>(null);
  const [newAccountType, setNewAccountType] = useState<'standard' | 'credit_card'>('standard');
  const [newBillingDay, setNewBillingDay] = useState<string>('');
  const [pendingContactChoice, setPendingContactChoice] = useState<{
@@ -746,6 +895,9 @@ const CustomerManager = React.memo(function CustomerManager({
  const [isEditingCustomer, setIsEditingCustomer] = useState(false);
  const [editName, setEditName] = useState('');
  const [editPhone, setEditPhone] = useState('');
+ const [editPhotoUrl, setEditPhotoUrl] = useState<string | null>(null);
+ const editPhotoInputRef = useRef<HTMLInputElement>(null);
+ const [detailAvatarError, setDetailAvatarError] = useState(false);
  const [editAccountType, setEditAccountType] = useState<'standard' | 'credit_card'>('standard');
  const [editBillingDay, setEditBillingDay] = useState<string>('');
  const [editError, setEditError] = useState('');
@@ -946,8 +1098,8 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
    // Handle history for modals (mobile back gesture)
   React.useEffect(() => {
     const handlePopState = (e: PopStateEvent) => {
-      // Ignore popstate events restoring into another modal or quickEntry
-      if (e.state?.modal === 'accentPalette' || e.state?.quickEntry || e.state?.dialogOpen) {
+      // Ignore popstate events restoring into another modal, quickEntry, or active photo cropper
+      if (e.state?.modal === 'accentPalette' || e.state?.quickEntry || e.state?.dialogOpen || e.state?.photoCropper) {
         return;
       }
       // Close edit mode first (one back press = exit edit)
@@ -1285,13 +1437,15 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       const [newId] = await Promise.all([
         createCustomer(trimmedName, phone, {
           accountType: newAccountType,
-          billingDay: newAccountType === 'credit_card' ? parsedBillingDay : undefined
+          billingDay: newAccountType === 'credit_card' ? parsedBillingDay : undefined,
+          photoUrl: newPhotoUrl
         }),
         new Promise(resolve => setTimeout(resolve, 300))
       ]);
       if (newId) {
         setNewName('');
         setNewPhone('');
+        setNewPhotoUrl(null);
         setNewAccountType('standard');
         setNewBillingDay('');
         setShowAddForm(false);
@@ -1690,11 +1844,13 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  try {
  const newId = await createCustomer(newName, newPhone, {
    accountType: newAccountType,
-   billingDay: newAccountType === 'credit_card' ? parsedBillingDay : undefined
+   billingDay: newAccountType === 'credit_card' ? parsedBillingDay : undefined,
+   photoUrl: newPhotoUrl
  });
  if (newId) {
  setNewName('');
  setNewPhone('');
+ setNewPhotoUrl(null);
  setNewAccountType('standard');
  setNewBillingDay('');
  setShowAddForm(false);
@@ -1982,6 +2138,16 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                     </div>
                   </div>
                 </div>
+
+                {/* Apple-style Contact Photo Picker */}
+                <AppleContactPhotoPicker
+                  photoUrl={newPhotoUrl}
+                  displayName={newName}
+                  lang={lang}
+                  inputRef={newPhotoInputRef}
+                  onFileChange={(e) => handleCustomerPhotoSelect(e, 'new')}
+                  onRemove={() => setNewPhotoUrl(null)}
+                />
 
                 <AnimatePresence>
                   {newAccountType === 'credit_card' && (
@@ -2308,6 +2474,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           triggerHaptic('single');
           setEditName(selectedCustomer.name);
           setEditPhone(cleanBangladeshiPhone(selectedCustomer.phone || ''));
+          setEditPhotoUrl(selectedCustomer.photoUrl || null);
           setEditAccountType(selectedCustomer.accountType || 'standard');
           setEditBillingDay(selectedCustomer.billingDay ? String(selectedCustomer.billingDay) : '');
           setEditError('');
@@ -2333,6 +2500,16 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
    transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
    className="flex-1 space-y-3.5 max-w-md"
  >
+ {/* Apple-style Contact Photo Picker in Edit Mode */}
+ <AppleContactPhotoPicker
+   photoUrl={editPhotoUrl}
+   displayName={editName || selectedCustomer.name}
+   lang={lang}
+   inputRef={editPhotoInputRef}
+   onFileChange={(e) => handleCustomerPhotoSelect(e, 'edit')}
+   onRemove={() => setEditPhotoUrl(null)}
+ />
+
  {/* Account Type Selector in Edit Mode */}
  <div>
    <label className={`block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1.5 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>
@@ -2427,7 +2604,8 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             const parsedBilling = rawBilling ? Math.min(31, Math.max(1, rawBilling)) : (selectedCustomer.billingDay || 15);
             await updateCustomerDetails(selectedCustomer.id, editName.trim() || selectedCustomer.name, pickedPhone, {
               accountType: editAccountType,
-              billingDay: editAccountType === 'credit_card' ? parsedBilling : undefined
+              billingDay: editAccountType === 'credit_card' ? parsedBilling : undefined,
+              photoUrl: editPhotoUrl
             });
             setIsEditingCustomer(false);
             triggerHaptic('single');
@@ -2509,7 +2687,8 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  const parsedBilling = rawBilling ? Math.min(31, Math.max(1, rawBilling)) : undefined;
  await updateCustomerDetails(selectedCustomer.id, editName, editPhone, {
    accountType: editAccountType,
-   billingDay: editAccountType === 'credit_card' ? parsedBilling : undefined
+   billingDay: editAccountType === 'credit_card' ? parsedBilling : undefined,
+   photoUrl: editPhotoUrl
  });
  setIsEditingCustomer(false);
  toast.success(lang === 'bn' ? 'তথ্য আপডেট করা হয়েছে' : 'Profile updated');
@@ -2547,8 +2726,38 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
    animate={{ opacity: 1, y: 0 }}
    exit={{ opacity: 0, y: -4 }}
    transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+   className="flex items-start gap-3.5 min-w-0 pr-28"
  >
- <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-slate-950 dark:text-white pr-28">{selectedCustomer.name}</h2>
+ {selectedCustomer.photoUrl && !detailAvatarError ? (
+   <div className="p-[2px] rounded-full contact-avatar-ring shrink-0 mt-0.5">
+     <img
+       src={selectedCustomer.photoUrl}
+       alt={selectedCustomer.name}
+       decoding="async"
+       onError={() => setDetailAvatarError(true)}
+       className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover block"
+       draggable={false}
+     />
+   </div>
+ ) : (
+   <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center font-display font-bold text-base sm:text-lg shrink-0 mt-0.5 ${
+     selectedCustomer.outstandingDue > 0
+       ? 'bg-ledger-red-subtle text-ledger-red'
+       : selectedCustomer.outstandingDue < 0
+       ? 'bg-ledger-green-subtle text-ledger-green'
+       : 'bg-slate-900/[0.06] dark:bg-white/[0.08] text-slate-600 dark:text-slate-300'
+   }`}>
+     {selectedCustomer.name
+       .split(' ')
+       .map(n => n[0])
+       .filter(Boolean)
+       .slice(0, 2)
+       .join('')
+       .toUpperCase() || 'C'}
+   </div>
+ )}
+ <div className="min-w-0">
+ <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-slate-950 dark:text-white truncate">{selectedCustomer.name}</h2>
  {selectedCustomer.phone ? (
  <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-2 font-mono">
  <Phone className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[1.5]" />
@@ -2598,6 +2807,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
      </span>
    </p>
  )}
+ </div>
  </motion.div>
  )}
  </AnimatePresence>
@@ -3088,18 +3298,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                         setActionAmount('');
                       }
                     }}
-                    className={`w-full flex items-center text-left gap-2.5 mt-2 p-3 rounded-2xl border cursor-pointer transition-colors select-none ${
-                      isChecked
-                        ? 'bg-amber-500/18 border-amber-500/50 dark:bg-amber-500/20 dark:border-amber-400/50'
-                        : 'bg-amber-500/[0.09] hover:bg-amber-500/[0.15] border-amber-500/30'
-                    }`}
+                    className="w-full flex items-center text-left gap-2.5 mt-2 p-3 rounded-2xl surface-subcard hover:bg-slate-200/50 dark:hover:bg-white/[0.06] border-[1.5px] border-slate-300/85 dark:border-white/[0.16] cursor-pointer transition-colors select-none"
                   >
                     <span
                       aria-hidden="true"
-                      className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                      className={`w-4 h-4 rounded-md border-[1.5px] flex items-center justify-center shrink-0 transition-colors ${
                         isChecked
                           ? 'bg-amber-500 border-amber-500 text-white'
-                          : 'border-amber-500/60 bg-white/70 dark:bg-white/[0.05]'
+                          : 'border-amber-500/70 bg-white/70 dark:bg-white/[0.05]'
                       }`}
                     >
                       {isChecked && <Check className="w-3 h-3 stroke-[2.5]" />}
@@ -3134,18 +3340,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                         setActionAmount('');
                       }
                     }}
-                    className={`w-full flex items-center text-left gap-2.5 mt-2 p-3 rounded-2xl border cursor-pointer transition-colors select-none ${
-                      isChecked
-                        ? 'bg-emerald-500/14 border-emerald-500/45 dark:bg-emerald-500/18 dark:border-emerald-400/45'
-                        : 'surface-subcard hover:bg-slate-200/50 dark:hover:bg-white/[0.06] border-slate-200/70 dark:border-white/[0.08]'
-                    }`}
+                    className="w-full flex items-center text-left gap-2.5 mt-2 p-3 rounded-2xl surface-subcard hover:bg-slate-200/50 dark:hover:bg-white/[0.06] border-[1.5px] border-slate-300/85 dark:border-white/[0.16] cursor-pointer transition-colors select-none"
                   >
                     <span
                       aria-hidden="true"
-                      className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                      className={`w-4 h-4 rounded-md border-[1.5px] flex items-center justify-center shrink-0 transition-colors ${
                         isChecked
                           ? 'bg-emerald-600 border-emerald-600 text-white'
-                          : 'border-emerald-600/55 dark:border-emerald-400/55 bg-white/70 dark:bg-white/[0.05]'
+                          : 'border-emerald-600/65 dark:border-emerald-400/65 bg-white/70 dark:bg-white/[0.05]'
                       }`}
                     >
                       {isChecked && <Check className="w-3 h-3 stroke-[2.5]" />}
@@ -3259,7 +3461,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       {selectedCustomer.accountType === 'credit_card' && creditCardCycleData ? (
         <div className="flex items-center gap-2">
           {/* Segmented Cycle Switcher Capsule (Clearly distinct from Tag Filter pills below) */}
-          <div className="relative inline-grid grid-cols-2 p-1 rounded-full surface-subcard border border-slate-200/75 dark:border-white/[0.08]">
+          <div className="relative inline-grid grid-cols-2 p-1 rounded-full surface-subcard overflow-hidden border border-slate-200/75 dark:border-white/[0.08]">
             <div
               aria-hidden="true"
               className="pointer-events-none absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-slate-950 dark:bg-white shadow-xs will-change-transform transition-transform duration-200 ease-[cubic-bezier(0.22,1.12,0.36,1)]"
@@ -4914,6 +5116,15 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       </div>
       </div>
     </ModalPortal>
+  )}
+  {pendingPhotoCrop && (
+    <ContactPhotoCropModal
+      file={pendingPhotoCrop.file}
+      lang={lang}
+      onConfirm={handleCropComplete}
+      onCancel={() => setPendingPhotoCrop(null)}
+      onError={handleCropError}
+    />
   )}
  </div>
  );

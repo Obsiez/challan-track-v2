@@ -24,6 +24,56 @@ import {
   ArrowDownLeft,
   ChevronLeft,
   ChevronRight,
+  Coffee,
+  Pizza,
+  Apple,
+  ShoppingCart,
+  Fuel,
+  Bus,
+  Train,
+  Bike,
+  Wrench,
+  Hammer,
+  Scissors,
+  Shirt,
+  Watch,
+  Gem,
+  Camera,
+  Music,
+  Film,
+  Gamepad2,
+  Book,
+  Briefcase,
+  Laptop,
+  Tv,
+  Wifi,
+  Zap,
+  Flame,
+  Droplets,
+  Sun,
+  Moon,
+  Umbrella,
+  Stethoscope,
+  Pill,
+  Dumbbell,
+  Baby,
+  Cake,
+  Wine,
+  Package,
+  Truck,
+  Store,
+  Wallet,
+  Coins,
+  PiggyBank,
+  Calculator,
+  FileText,
+  Folder,
+  Key,
+  Lock,
+  Bell,
+  Star,
+  Heart,
+  Award,
   LucideIcon
 } from 'lucide-react';
 import { Language } from './translations';
@@ -74,16 +124,82 @@ export const ALL_TAGS: TagMeta[] = [...EXPENSE_TAGS, ...PAYMENT_TAGS.filter(p =>
 
 export const TAG_LIMITS = {
   due: {
-    maxEnabled: 15,
-    maxTotal: 20,
+    maxEnabled: 25,
+    maxTotal: 50,
     defaultCount: EXPENSE_TAGS.length,
   },
   payment: {
-    maxEnabled: 10,
-    maxTotal: 15,
+    maxEnabled: 25,
+    maxTotal: 50,
     defaultCount: PAYMENT_TAGS.length,
   },
 } as const;
+
+// 50 native Lucide icons distinct from all default due & payment tag icons
+export const CUSTOM_TAG_ICONS: ReadonlyArray<{ id: string; icon: LucideIcon; label: string }> = [
+  { id: 'Coffee', icon: Coffee, label: 'Coffee' },
+  { id: 'Pizza', icon: Pizza, label: 'Pizza' },
+  { id: 'Apple', icon: Apple, label: 'Groceries' },
+  { id: 'ShoppingCart', icon: ShoppingCart, label: 'Cart' },
+  { id: 'Fuel', icon: Fuel, label: 'Fuel' },
+  { id: 'Bus', icon: Bus, label: 'Bus' },
+  { id: 'Train', icon: Train, label: 'Train' },
+  { id: 'Bike', icon: Bike, label: 'Bike' },
+  { id: 'Wrench', icon: Wrench, label: 'Repair' },
+  { id: 'Hammer', icon: Hammer, label: 'Hardware' },
+  { id: 'Scissors', icon: Scissors, label: 'Salon' },
+  { id: 'Shirt', icon: Shirt, label: 'Apparel' },
+  { id: 'Watch', icon: Watch, label: 'Watch' },
+  { id: 'Gem', icon: Gem, label: 'Jewelry' },
+  { id: 'Camera', icon: Camera, label: 'Photo' },
+  { id: 'Music', icon: Music, label: 'Music' },
+  { id: 'Film', icon: Film, label: 'Cinema' },
+  { id: 'Gamepad2', icon: Gamepad2, label: 'Gaming' },
+  { id: 'Book', icon: Book, label: 'Books' },
+  { id: 'Briefcase', icon: Briefcase, label: 'Work' },
+  { id: 'Laptop', icon: Laptop, label: 'Tech' },
+  { id: 'Tv', icon: Tv, label: 'Media' },
+  { id: 'Wifi', icon: Wifi, label: 'Internet' },
+  { id: 'Zap', icon: Zap, label: 'Electric' },
+  { id: 'Flame', icon: Flame, label: 'Gas' },
+  { id: 'Droplets', icon: Droplets, label: 'Water' },
+  { id: 'Sun', icon: Sun, label: 'Day' },
+  { id: 'Moon', icon: Moon, label: 'Night' },
+  { id: 'Umbrella', icon: Umbrella, label: 'Insurance' },
+  { id: 'Stethoscope', icon: Stethoscope, label: 'Clinic' },
+  { id: 'Pill', icon: Pill, label: 'Medicine' },
+  { id: 'Dumbbell', icon: Dumbbell, label: 'Fitness' },
+  { id: 'Baby', icon: Baby, label: 'Baby' },
+  { id: 'Cake', icon: Cake, label: 'Bakery' },
+  { id: 'Wine', icon: Wine, label: 'Drinks' },
+  { id: 'Package', icon: Package, label: 'Parcel' },
+  { id: 'Truck', icon: Truck, label: 'Delivery' },
+  { id: 'Store', icon: Store, label: 'Shop' },
+  { id: 'Wallet', icon: Wallet, label: 'Wallet' },
+  { id: 'Coins', icon: Coins, label: 'Coins' },
+  { id: 'PiggyBank', icon: PiggyBank, label: 'Savings' },
+  { id: 'Calculator', icon: Calculator, label: 'Tax' },
+  { id: 'FileText', icon: FileText, label: 'Invoice' },
+  { id: 'Folder', icon: Folder, label: 'Files' },
+  { id: 'Key', icon: Key, label: 'Rent/Key' },
+  { id: 'Lock', icon: Lock, label: 'Security' },
+  { id: 'Bell', icon: Bell, label: 'Alert' },
+  { id: 'Star', icon: Star, label: 'VIP' },
+  { id: 'Heart', icon: Heart, label: 'Care' },
+  { id: 'Award', icon: Award, label: 'Bonus' },
+];
+
+const CUSTOM_TAG_ICON_MAP: Record<string, LucideIcon> = {};
+CUSTOM_TAG_ICONS.forEach((entry) => {
+  CUSTOM_TAG_ICON_MAP[entry.id] = entry.icon;
+});
+
+export function getCustomTagIconComponent(iconName?: string | null): LucideIcon {
+  if (iconName && CUSTOM_TAG_ICON_MAP[iconName]) {
+    return CUSTOM_TAG_ICON_MAP[iconName];
+  }
+  return CircleDotDashed;
+}
 
 export const CUSTOM_TAG_COLORS = [
   '#059669',
@@ -126,7 +242,7 @@ function customDefToMeta(def: CustomTagDefinition): TagMeta {
     bn: def.name,
     shortDescEn: def.name,
     shortDescBn: def.name,
-    icon: CircleDotDashed,
+    icon: getCustomTagIconComponent(def.iconName),
     color: def.color || '#059669',
     isCustom: true,
     logoDataUrl: def.logoDataUrl || null,
@@ -179,6 +295,10 @@ export function sanitizeTagConfig(raw?: Partial<UserTagConfig> | null): UserTagC
     seenIds.add(id.toLowerCase());
 
     const safeLogo = isSafeLogoDataUrl(item.logoDataUrl) ? item.logoDataUrl : null;
+    const safeIconName =
+      typeof item.iconName === 'string' && CUSTOM_TAG_ICON_MAP[item.iconName]
+        ? item.iconName
+        : null;
     const color =
       typeof item.color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(item.color.trim())
         ? item.color.trim()
@@ -189,6 +309,7 @@ export function sanitizeTagConfig(raw?: Partial<UserTagConfig> | null): UserTagC
       type,
       name,
       color,
+      iconName: safeIconName,
       logoDataUrl: safeLogo,
       imageOnly: Boolean(item.imageOnly && safeLogo),
       enabled: item.enabled !== false,

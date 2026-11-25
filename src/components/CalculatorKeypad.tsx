@@ -350,22 +350,72 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
     []
   );
 
-  // Swallows any synthetic click or pointerup events during keyboard dismissal to prevent ghost clicks on underlying elements
+  const ghostShieldRef = useRef<HTMLDivElement | null>(null);
+  const ghostCleanupTimerRef = useRef<number | null>(null);
+  const ghostSwallowRef = useRef<((ev: Event) => void) | null>(null);
+
+  // Mounts an invisible top-layer shield and swallows trailing synthetic pointer/mouse/click
+  // events during keypad dismissal so elements revealed underneath never register a ghost press.
   const suppressGhostClicks = useCallback(() => {
+    const events: Array<keyof WindowEventMap> = [
+      'click',
+      'pointerdown',
+      'pointerup',
+      'pointercancel',
+      'touchstart',
+      'touchend',
+      'mousedown',
+      'mouseup',
+      'contextmenu',
+    ];
+
+    if (ghostCleanupTimerRef.current !== null) {
+      window.clearTimeout(ghostCleanupTimerRef.current);
+      ghostCleanupTimerRef.current = null;
+    }
+    if (ghostSwallowRef.current) {
+      for (const evt of events) {
+        window.removeEventListener(evt, ghostSwallowRef.current, { capture: true });
+      }
+      ghostSwallowRef.current = null;
+    }
+    if (ghostShieldRef.current && ghostShieldRef.current.parentNode) {
+      ghostShieldRef.current.parentNode.removeChild(ghostShieldRef.current);
+      ghostShieldRef.current = null;
+    }
+
+    if (typeof document !== 'undefined' && document.body) {
+      const shield = document.createElement('div');
+      shield.setAttribute('aria-hidden', 'true');
+      shield.dataset.keypadShield = 'true';
+      shield.style.cssText =
+        'position:fixed;inset:0;z-index:2147483647;background:transparent;pointer-events:auto;touch-action:none;';
+      document.body.appendChild(shield);
+      ghostShieldRef.current = shield;
+    }
+
     const swallow = (ev: Event) => {
       ev.preventDefault();
       ev.stopPropagation();
       ev.stopImmediatePropagation();
     };
-    window.addEventListener('click', swallow, { capture: true });
-    window.addEventListener('pointerup', swallow, { capture: true });
-    window.addEventListener('touchend', swallow, { capture: true });
-    window.addEventListener('mouseup', swallow, { capture: true });
-    setTimeout(() => {
-      window.removeEventListener('click', swallow, { capture: true });
-      window.removeEventListener('pointerup', swallow, { capture: true });
-      window.removeEventListener('touchend', swallow, { capture: true });
-      window.removeEventListener('mouseup', swallow, { capture: true });
+    ghostSwallowRef.current = swallow;
+    for (const evt of events) {
+      window.addEventListener(evt, swallow, { capture: true, passive: false } as AddEventListenerOptions);
+    }
+
+    ghostCleanupTimerRef.current = window.setTimeout(() => {
+      for (const evt of events) {
+        window.removeEventListener(evt, swallow, { capture: true });
+      }
+      if (ghostSwallowRef.current === swallow) {
+        ghostSwallowRef.current = null;
+      }
+      if (ghostShieldRef.current && ghostShieldRef.current.parentNode) {
+        ghostShieldRef.current.parentNode.removeChild(ghostShieldRef.current);
+      }
+      ghostShieldRef.current = null;
+      ghostCleanupTimerRef.current = null;
     }, 450);
   }, []);
 
@@ -1057,6 +1107,7 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
   // Delete button: Immediate delete on pointerdown + Hold (360ms) to clear entire input while keeping focus & cursor inside input
   const handleDeletePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
+    e.stopPropagation();
     markPressed(e.currentTarget);
     handleBackspace();
 
@@ -1071,6 +1122,8 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
   };
 
   const handleDeletePointerEnd = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
     unmarkPressed(e.currentTarget);
     if (deleteHoldTimerRef.current) {
       clearTimeout(deleteHoldTimerRef.current);
@@ -1144,39 +1197,70 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
 
   if (typeof document === 'undefined') return null;
 
+  const stopBubble = (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
   return createPortal(
     <div
       ref={keypadRef}
       data-keypad-root="true"
-      onPointerDown={(e) => {
-        e.preventDefault();
-      }}
-      onMouseDown={(e) => e.preventDefault()}
-      onContextMenu={(e) => e.preventDefault()}
+      onPointerDown={stopBubble}
+      onPointerUp={stopBubble}
+      onMouseDown={stopBubble}
+      onMouseUp={stopBubble}
+      onClick={stopBubble}
+      onContextMenu={stopBubble}
       className="fixed inset-x-0 bottom-0 z-[99999] sm:max-w-md sm:mx-auto no-select animate-keypad-up select-none pointer-events-none touch-none"
     >
-      {/* Hide Keypad Icon Button OUTSIDE the keyboard — adapts to Theme & Accent Palette */}
+      {/* Hide Keypad Icon Button OUTSIDE the keyboard — dismisses on pointerup after mounting ghost-click shield */}
       <div className="flex justify-end px-3.5 pb-2 pointer-events-none">
         <button
           type="button"
           onPointerDown={(e) => {
             e.preventDefault();
+            e.stopPropagation();
             markPressed(e.currentTarget);
-            handleDone();
           }}
-          onPointerUp={(e) => unmarkPressed(e.currentTarget)}
-          onPointerLeave={(e) => unmarkPressed(e.currentTarget)}
-          onPointerCancel={(e) => unmarkPressed(e.currentTarget)}
+          onPointerUp={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const wasPressed = e.currentTarget.getAttribute('data-pressed') === 'true';
+            unmarkPressed(e.currentTarget);
+            if (wasPressed) handleDone();
+          }}
+          onPointerLeave={(e) => {
+            e.stopPropagation();
+            unmarkPressed(e.currentTarget);
+          }}
+          onPointerCancel={(e) => {
+            e.stopPropagation();
+            unmarkPressed(e.currentTarget);
+          }}
+          onMouseDown={stopBubble}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.detail === 0) handleDone();
+          }}
           className="numpad-key numpad-hide-btn pointer-events-auto touch-none h-8 px-3.5 rounded-full border shadow-md backdrop-blur-md flex items-center gap-1 text-xs font-semibold cursor-pointer"
           aria-label="Hide Keypad"
         >
-          <ChevronDown className="w-3.5 h-3.5 stroke-[1.25]" style={{ color: 'var(--accent-color)' }} />
-          <span>{lang === 'bn' ? 'লুকান' : 'Hide'}</span>
+          <ChevronDown className="w-3.5 h-3.5 stroke-[1.25] pointer-events-none" style={{ color: 'var(--accent-color)' }} />
+          <span className="pointer-events-none">{lang === 'bn' ? 'লুকান' : 'Hide'}</span>
         </button>
       </div>
 
       {/* Main Refined Keypad Body — dynamically styled by Theme Surface Palette, Intensity Slider & Accent Color */}
-      <div className="numpad-surface pointer-events-auto touch-none rounded-t-[2rem] border-t sm:border-x shadow-[0_-12px_40px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.14)] px-3.5 pt-3.5 pb-6">
+      <div
+        onPointerDown={stopBubble}
+        onPointerUp={stopBubble}
+        onMouseDown={stopBubble}
+        onMouseUp={stopBubble}
+        onClick={stopBubble}
+        className="numpad-surface pointer-events-auto touch-none rounded-t-[2rem] border-t sm:border-x shadow-[0_-12px_40px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.14)] px-3.5 pt-3.5 pb-6"
+      >
         <div className="grid grid-cols-4 gap-2">
           {/* ROW 1: 7 8 9 Backspace (Hold to Clear) */}
           {['7', '8', '9'].map((d) => (
@@ -1185,12 +1269,19 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
               type="button"
               onPointerDown={(e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 markPressed(e.currentTarget);
                 handleDigit(d);
               }}
-              onPointerUp={(e) => unmarkPressed(e.currentTarget)}
+              onPointerUp={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                unmarkPressed(e.currentTarget);
+              }}
               onPointerLeave={(e) => unmarkPressed(e.currentTarget)}
               onPointerCancel={(e) => unmarkPressed(e.currentTarget)}
+              onMouseDown={stopBubble}
+              onClick={stopBubble}
               className="numpad-key numpad-digit h-[58px] rounded-2xl border font-display text-[22px] font-semibold flex items-center justify-center cursor-pointer"
             >
               {d}
@@ -1202,6 +1293,8 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
             onPointerUp={handleDeletePointerEnd}
             onPointerLeave={handleDeletePointerEnd}
             onPointerCancel={handleDeletePointerEnd}
+            onMouseDown={stopBubble}
+            onClick={stopBubble}
             title={lang === 'bn' ? 'মুছতে ট্যাপ করুন, সম্পূর্ণ মুছতে চেপে ধরুন' : 'Tap to delete, hold to clear'}
             className="numpad-key numpad-action h-[58px] rounded-2xl border flex items-center justify-center cursor-pointer"
             aria-label="Backspace (Hold to clear)"
@@ -1216,12 +1309,19 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
               type="button"
               onPointerDown={(e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 markPressed(e.currentTarget);
                 handleDigit(d);
               }}
-              onPointerUp={(e) => unmarkPressed(e.currentTarget)}
+              onPointerUp={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                unmarkPressed(e.currentTarget);
+              }}
               onPointerLeave={(e) => unmarkPressed(e.currentTarget)}
               onPointerCancel={(e) => unmarkPressed(e.currentTarget)}
+              onMouseDown={stopBubble}
+              onClick={stopBubble}
               className="numpad-key numpad-digit h-[58px] rounded-2xl border font-display text-[22px] font-semibold flex items-center justify-center cursor-pointer"
             >
               {d}
@@ -1231,12 +1331,19 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
             type="button"
             onPointerDown={(e) => {
               e.preventDefault();
+              e.stopPropagation();
               markPressed(e.currentTarget);
               handleClear();
             }}
-            onPointerUp={(e) => unmarkPressed(e.currentTarget)}
+            onPointerUp={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              unmarkPressed(e.currentTarget);
+            }}
             onPointerLeave={(e) => unmarkPressed(e.currentTarget)}
             onPointerCancel={(e) => unmarkPressed(e.currentTarget)}
+            onMouseDown={stopBubble}
+            onClick={stopBubble}
             className="numpad-key h-[58px] rounded-2xl bg-rose-500/10 border border-rose-500/20 text-[var(--ledger-red)] font-display text-base font-bold flex items-center justify-center cursor-pointer"
           >
             C
@@ -1249,12 +1356,19 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
               type="button"
               onPointerDown={(e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 markPressed(e.currentTarget);
                 handleDigit(d);
               }}
-              onPointerUp={(e) => unmarkPressed(e.currentTarget)}
+              onPointerUp={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                unmarkPressed(e.currentTarget);
+              }}
               onPointerLeave={(e) => unmarkPressed(e.currentTarget)}
               onPointerCancel={(e) => unmarkPressed(e.currentTarget)}
+              onMouseDown={stopBubble}
+              onClick={stopBubble}
               className="numpad-key numpad-digit h-[58px] rounded-2xl border font-display text-[22px] font-semibold flex items-center justify-center cursor-pointer"
             >
               {d}
@@ -1265,20 +1379,29 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
+              if (e.detail === 0) handleNextInput();
             }}
             onPointerDown={(e) => {
               e.preventDefault();
               e.stopPropagation();
               markPressed(e.currentTarget);
-              handleNextInput();
             }}
             onPointerUp={(e) => {
               e.preventDefault();
               e.stopPropagation();
+              const wasPressed = e.currentTarget.getAttribute('data-pressed') === 'true';
+              unmarkPressed(e.currentTarget);
+              if (wasPressed) handleNextInput();
+            }}
+            onPointerLeave={(e) => {
+              e.stopPropagation();
               unmarkPressed(e.currentTarget);
             }}
-            onPointerLeave={(e) => unmarkPressed(e.currentTarget)}
-            onPointerCancel={(e) => unmarkPressed(e.currentTarget)}
+            onPointerCancel={(e) => {
+              e.stopPropagation();
+              unmarkPressed(e.currentTarget);
+            }}
+            onMouseDown={stopBubble}
             className="numpad-key numpad-action h-[58px] rounded-2xl border font-semibold text-xs flex flex-col items-center justify-center gap-0.5 cursor-pointer"
             title={lang === 'bn' ? 'পরবর্তী ঘরে যান' : 'Next Input Field'}
           >
@@ -1293,12 +1416,19 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
             type="button"
             onPointerDown={(e) => {
               e.preventDefault();
+              e.stopPropagation();
               markPressed(e.currentTarget);
               handleDigit('00');
             }}
-            onPointerUp={(e) => unmarkPressed(e.currentTarget)}
+            onPointerUp={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              unmarkPressed(e.currentTarget);
+            }}
             onPointerLeave={(e) => unmarkPressed(e.currentTarget)}
             onPointerCancel={(e) => unmarkPressed(e.currentTarget)}
+            onMouseDown={stopBubble}
+            onClick={stopBubble}
             className="numpad-key numpad-digit h-[58px] rounded-2xl border font-display text-lg font-semibold flex items-center justify-center cursor-pointer"
           >
             00
@@ -1307,12 +1437,19 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
             type="button"
             onPointerDown={(e) => {
               e.preventDefault();
+              e.stopPropagation();
               markPressed(e.currentTarget);
               handleDigit('0');
             }}
-            onPointerUp={(e) => unmarkPressed(e.currentTarget)}
+            onPointerUp={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              unmarkPressed(e.currentTarget);
+            }}
             onPointerLeave={(e) => unmarkPressed(e.currentTarget)}
             onPointerCancel={(e) => unmarkPressed(e.currentTarget)}
+            onMouseDown={stopBubble}
+            onClick={stopBubble}
             className="numpad-key numpad-digit h-[58px] rounded-2xl border font-display text-[22px] font-semibold flex items-center justify-center cursor-pointer"
           >
             0
@@ -1322,13 +1459,20 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
             disabled={!allowDecimals}
             onPointerDown={(e) => {
               e.preventDefault();
+              e.stopPropagation();
               if (!allowDecimals) return;
               markPressed(e.currentTarget);
               handleDigit('.');
             }}
-            onPointerUp={(e) => unmarkPressed(e.currentTarget)}
+            onPointerUp={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              unmarkPressed(e.currentTarget);
+            }}
             onPointerLeave={(e) => unmarkPressed(e.currentTarget)}
             onPointerCancel={(e) => unmarkPressed(e.currentTarget)}
+            onMouseDown={stopBubble}
+            onClick={stopBubble}
             className="numpad-key numpad-digit h-[58px] rounded-2xl border font-display text-2xl font-bold flex items-center justify-center cursor-pointer disabled:opacity-35"
           >
             .
@@ -1337,12 +1481,30 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
             type="button"
             onPointerDown={(e) => {
               e.preventDefault();
+              e.stopPropagation();
               markPressed(e.currentTarget);
-              handleDone();
             }}
-            onPointerUp={(e) => unmarkPressed(e.currentTarget)}
-            onPointerLeave={(e) => unmarkPressed(e.currentTarget)}
-            onPointerCancel={(e) => unmarkPressed(e.currentTarget)}
+            onPointerUp={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const wasPressed = e.currentTarget.getAttribute('data-pressed') === 'true';
+              unmarkPressed(e.currentTarget);
+              if (wasPressed) handleDone();
+            }}
+            onPointerLeave={(e) => {
+              e.stopPropagation();
+              unmarkPressed(e.currentTarget);
+            }}
+            onPointerCancel={(e) => {
+              e.stopPropagation();
+              unmarkPressed(e.currentTarget);
+            }}
+            onMouseDown={stopBubble}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (e.detail === 0) handleDone();
+            }}
             className="numpad-key numpad-done h-[58px] rounded-2xl border font-semibold text-xs flex items-center justify-center gap-1 cursor-pointer"
           >
             <Check className="w-4 h-4 stroke-[1.25] pointer-events-none" />

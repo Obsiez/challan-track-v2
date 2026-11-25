@@ -10,6 +10,7 @@ import { StaggerReveal } from './MotionPrimitives';
 interface TagDistributionChartProps {
   transactions: Transaction[];
   lang: Language;
+  onManageTags?: () => void;
 }
 
 interface TagSegment {
@@ -24,7 +25,8 @@ interface TagSegment {
 
 export const TagDistributionChart: React.FC<TagDistributionChartProps> = ({
   transactions,
-  lang
+  lang,
+  onManageTags
 }) => {
   const [viewType, setViewType] = useState<'due' | 'payment'>('due');
   const [activeTagId, setActiveTagId] = useState<string | null>(null);
@@ -453,6 +455,22 @@ export const TagDistributionChart: React.FC<TagDistributionChartProps> = ({
           </AnimatePresence>
         </div>
       </StaggerReveal>
+
+      {onManageTags && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            id="dashboard_manage_tags_btn"
+            onClick={() => {
+              triggerHaptic('single');
+              onManageTags();
+            }}
+            className="bg-transparent border-0 p-0 text-xs font-semibold text-slate-600 hover:text-slate-950 dark:text-slate-400 dark:hover:text-white transition-colors cursor-pointer"
+          >
+            {lang === 'bn' ? 'ট্যাগ পরিচালনা' : 'Manage tags'}
+          </button>
+        </div>
+      )}
     </section>
   );
 };

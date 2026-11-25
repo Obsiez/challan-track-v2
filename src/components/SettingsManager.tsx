@@ -527,7 +527,77 @@ const SettingsManager = React.memo(function SettingsManager({
   };
 
   const [isDismissed, setIsDismissed] = useState(() => localStorage.getItem('install_card_dismissed') === 'true');
-  const isStandalone = typeof window !== 'undefined' && (window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true);
+  const [isInstallingApp, setIsInstallingApp] = useState(false);
+  const [isAppInstalledNow, setIsAppInstalledNow] = useState(false);
+  const isStandalone = isAppInstalledNow || (typeof window !== 'undefined' && (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.matchMedia('(display-mode: minimal-ui)').matches ||
+    (window.navigator as any).standalone === true
+  ));
+
+  useEffect(() => {
+    const onInstalled = () => {
+      setIsAppInstalledNow(true);
+      onInstallComplete();
+    };
+    window.addEventListener('appinstalled', onInstalled);
+    window.addEventListener('challan-app-installed', onInstalled);
+    return () => {
+      window.removeEventListener('appinstalled', onInstalled);
+      window.removeEventListener('challan-app-installed', onInstalled);
+    };
+  }, [onInstallComplete]);
+
+  const handleInstallAppClick = async () => {
+    triggerHaptic('single');
+    const promptEvent = deferredPrompt || (typeof window !== 'undefined' ? (window as any).__deferredInstallPrompt : null);
+    if (promptEvent && typeof promptEvent.prompt === 'function') {
+      setIsInstallingApp(true);
+      try {
+        await promptEvent.prompt();
+        const choice = await promptEvent.userChoice;
+        onInstallComplete();
+        if (choice?.outcome === 'accepted') {
+          setIsAppInstalledNow(true);
+          triggerHaptic('double');
+          toast.success(
+            lang === 'bn'
+              ? 'অ্যাপ ইনস্টল শুরু হয়েছে! কিছুক্ষণের মধ্যে হোম স্ক্রিনে অ্যাপ তৈরি হবে।'
+              : 'App installation started! Challan Track will appear on your home screen.'
+          );
+        } else {
+          toast.info(
+            lang === 'bn'
+              ? 'ইনস্টল বাতিল করা হয়েছে। আপনি চাইলে আবার চেষ্টা করতে পারেন।'
+              : 'Install cancelled. You can install anytime from Settings or browser menu.'
+          );
+        }
+      } catch (err) {
+        console.warn('PWA install prompt error:', err);
+        onInstallComplete();
+        toast.info(
+          lang === 'bn'
+            ? 'ব্রাউজার মেনু (⋮) থেকে "Install app" বা "Add to Home screen" নির্বাচন করুন।'
+            : 'Open your browser menu (⋮) and tap "Install app" or "Add to Home screen".'
+        );
+      } finally {
+        setIsInstallingApp(false);
+      }
+      return;
+    }
+
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+    const isIos = /iPhone|iPad|iPod/i.test(ua);
+    toast.info(
+      isIos
+        ? (lang === 'bn'
+            ? 'Safari-তে নিচের Share বোতামে ট্যাপ করে "Add to Home Screen" নির্বাচন করুন।'
+            : 'In Safari, tap Share and choose "Add to Home Screen".')
+        : (lang === 'bn'
+            ? 'Chrome মেনু (⋮) খুলে "Install app" বা "Add to Home screen" চাপুন।'
+            : 'Open your browser menu (⋮) and tap "Install app" or "Add to Home screen".')
+    );
+  };
 
   const toggleHaptics = () => {
     const newVal = !hapticsOn;
@@ -1699,7 +1769,7 @@ const SettingsManager = React.memo(function SettingsManager({
           {lang === 'bn' ? 'অ্যাপ ও রিকভারি' : 'App & Recovery'}
         </div>
 
-        {!isDismissed && !isStandalone && deferredPrompt && (
+        {!isDismissed && !isStandalone && (
           <div>
             <SpotlightCard className="relative surface-glass border p-5 rounded-[28px] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <button
@@ -1718,10 +1788,12 @@ const SettingsManager = React.memo(function SettingsManager({
                   {lang === 'bn' ? 'অ্যাপ ইনস্টল করুন' : 'Install App'}
                 </div>
                 <div className="font-display text-sm font-bold text-slate-950 dark:text-white mt-0.5">
-                  {lang === 'bn' ? 'হোম স্ক্রিনে যুক্ত করুন' : 'Add to Home Screen'}
+                  {lang === 'bn' ? 'হোম স্ক্রিনে অ্যাপ ইনস্টল করুন' : 'Install Challan Track App'}
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  {lang === 'bn' ? 'দ্রুত অ্যাক্সেস এবং ফুলস্ক্রিন অভিজ্ঞতার জন্য অ্যাপটি ইনস্টল করুন।' : 'Install the app for quick access and a fullscreen experience.'}
+                  {deferredPrompt
+                    ? (lang === 'bn' ? 'দ্রুত অ্যাক্সেস, অফলাইন সাপোর্ট এবং ফুলস্ক্রিন অ্যাপের জন্য ইনস্টল করুন।' : 'Install as a standalone app with offline support and instant launch.')
+                    : (lang === 'bn' ? 'হোম স্ক্রিনে অ্যাপ হিসেবে যোগ করতে ইনস্টল বা ব্রাউজার মেনু ব্যবহার করুন।' : 'Install to your home screen for a native fullscreen app experience.')}
                 </p>
               </div>
 
@@ -1738,18 +1810,14 @@ const SettingsManager = React.memo(function SettingsManager({
                 </button>
                 <button
                   type="button"
-                  onClick={async () => {
-                    if (!deferredPrompt) return;
-                    deferredPrompt.prompt();
-                    const { outcome } = await deferredPrompt.userChoice;
-                    if (outcome === 'accepted') {
-                      onInstallComplete();
-                    }
-                  }}
-                  className="flex-1 sm:flex-none px-5 py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-semibold rounded-full text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors shrink-0 touch-press"
+                  disabled={isInstallingApp}
+                  onClick={handleInstallAppClick}
+                  className="flex-1 sm:flex-none px-5 py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-semibold rounded-full text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors shrink-0 touch-press disabled:opacity-60"
                 >
                   <Download className="w-3.5 h-3.5 stroke-[1.25]" />
-                  {lang === 'bn' ? 'ইনস্টল' : 'Install'}
+                  {isInstallingApp
+                    ? (lang === 'bn' ? 'ইনস্টল হচ্ছে...' : 'Installing...')
+                    : (lang === 'bn' ? 'ইনস্টল' : 'Install')}
                 </button>
               </div>
             </SpotlightCard>

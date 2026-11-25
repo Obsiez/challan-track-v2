@@ -90,6 +90,7 @@ function compactChart(val: number, lang: Language): string {
 interface AnalyticsManagerProps {
   customers: Customer[];
   monthlySummaries: any[];
+  sixMonthChartData?: Array<{ id: string; dues: number; payments: number; count?: number }>;
   lang: Language;
   animateOnDesktop?: boolean;
   onSelectCustomer?: (id: string) => void;
@@ -170,48 +171,39 @@ function buildSmoothSplinePath(points: Point[], minY: number, maxY: number): str
 export default function AnalyticsManager({
   customers,
   monthlySummaries,
+  sixMonthChartData,
   lang,
   animateOnDesktop = true,
   onSelectCustomer
 }: AnalyticsManagerProps) {
   const t = translations[lang];
 
-  // Bars data: Monthly bars data will get loaded once and will never be forgotten. Only get replaced by newer data.
-  const [persistedSummaries, setPersistedSummaries] = useState<any[]>(() => {
-    try {
-      const cached = localStorage.getItem('easy_due_monthly_bars_permanent');
-      if (cached) return JSON.parse(cached);
-    } catch {}
-    return [];
-  });
-
-  useEffect(() => {
-    if (!monthlySummaries || monthlySummaries.length === 0) return;
-    setPersistedSummaries(prev => {
-      const map = new Map<string, any>();
-      // Retain previously loaded months forever
-      (prev || []).forEach(item => {
-        if (item?.id) map.set(item.id, item);
-      });
-      // Replace with newer incoming data
-      monthlySummaries.forEach(item => {
-        if (item?.id) map.set(item.id, item);
-      });
-      const updated = Array.from(map.values()).sort((a, b) => b.id.localeCompare(a.id));
-      try {
-        localStorage.setItem('easy_due_monthly_bars_permanent', JSON.stringify(updated));
-      } catch {}
-      return updated;
+  const activeSummaries = useMemo(() => {
+    const map = new Map<string, any>();
+    (monthlySummaries || []).forEach((item) => {
+      if (item?.id) map.set(item.id, item);
     });
-  }, [monthlySummaries]);
-
-  const activeSummaries = persistedSummaries.length > 0 ? persistedSummaries : monthlySummaries;
+    (sixMonthChartData || []).forEach((item) => {
+      if (!item?.id) return;
+      const existing = map.get(item.id);
+      map.set(item.id, {
+        ...(existing || {}),
+        id: item.id,
+        dues: Math.max(0, Number(item.dues) || 0),
+        payments: Math.max(0, Number(item.payments) || 0),
+        count: Math.max(0, Number(item.count) || 0),
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => b.id.localeCompare(a.id));
+  }, [monthlySummaries, sixMonthChartData]);
 
   const availableMonths = useMemo(() => {
     const monthsSet = new Set<string>();
     const now = new Date();
-    const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    monthsSet.add(currentMonthKey);
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      monthsSet.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
 
     activeSummaries.forEach(s => {
       if (s.id) monthsSet.add(s.id);
@@ -261,7 +253,17 @@ export default function AnalyticsManager({
     const EN_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const BN_SHORT = ['জানু', 'ফেব্রু', 'মার্চ', 'এপ্রি', 'মে', 'জুন', 'জুলা', 'আগ', 'সেপ্টে', 'অক্টো', 'নভে', 'ডিসে'];
     const now = new Date();
-    const list: { key: string; label: string; dues: number; payments: number }[] = [];
+    const list: { key: string; label: string; fullLabel: string; dues: number; payments: number }[] = [];
+
+    const sixMonthMap = new Map<string, { dues: number; payments: number }>();
+    (sixMonthChartData || []).forEach((s) => {
+      if (s?.id) {
+        sixMonthMap.set(s.id, {
+          dues: Math.max(0, Number(s.dues) || 0),
+          payments: Math.max(0, Number(s.payments) || 0),
+        });
+      }
+    });
 
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -269,17 +271,22 @@ export default function AnalyticsManager({
       const mo = d.getMonth();
       const key = `${yr}-${String(mo + 1).padStart(2, '0')}`;
 
+      const dedicated = sixMonthMap.get(key);
       const summary = activeSummaries.find(s => s.id === key);
+      const duesVal = dedicated ? dedicated.dues : Math.max(0, Number(summary?.dues) || 0);
+      const paymentsVal = dedicated ? dedicated.payments : Math.max(0, Number(summary?.payments) || 0);
+
       list.push({
         key,
         label: lang === 'bn' ? BN_SHORT[mo] : EN_SHORT[mo],
-        dues: summary?.dues || 0,
-        payments: summary?.payments || 0
+        fullLabel: getMonthName(key),
+        dues: duesVal,
+        payments: paymentsVal
       });
     }
 
     return list;
-  }, [activeSummaries, lang]);
+  }, [sixMonthChartData, activeSummaries, lang]);
 
   const maxChartValue = useMemo(() => {
     let max = 0;
@@ -287,32 +294,31 @@ export default function AnalyticsManager({
       if (d.dues > max) max = d.dues;
       if (d.payments > max) max = d.payments;
     });
-    return max > 0 ? max * 1.25 : 1000;
+    return max > 0 ? max * 1.2 : 1000;
   }, [chartData]);
 
   const hasAnyData = chartData.some(d => d.dues > 0 || d.payments > 0);
   const now = new Date();
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-  // Smooth SVG spline coordinates with strictly bounded layout (never overflows fixed height)
+  // Smooth SVG spline coordinates aligned dead-center over the 6 month columns
   const svgChart = useMemo(() => {
     const width = 600;
     const height = 180;
-    const padX = 28;
-    const padTop = 20;
-    const padBottom = 16;
+    const colW = width / Math.max(1, chartData.length);
+    const padX = colW / 2;
+    const padTop = 18;
+    const padBottom = 14;
     const baselineY = height - padBottom;
-    const plotW = width - padX * 2;
     const plotH = baselineY - padTop;
-    const n = Math.max(1, chartData.length - 1);
 
     const duePts: Point[] = chartData.map((d, i) => ({
-      x: padX + (i / n) * plotW,
-      y: padTop + plotH - (Math.min(d.dues, maxChartValue) / maxChartValue) * plotH
+      x: padX + i * colW,
+      y: padTop + plotH - (Math.min(Math.max(0, d.dues), maxChartValue) / maxChartValue) * plotH
     }));
     const payPts: Point[] = chartData.map((d, i) => ({
-      x: padX + (i / n) * plotW,
-      y: padTop + plotH - (Math.min(d.payments, maxChartValue) / maxChartValue) * plotH
+      x: padX + i * colW,
+      y: padTop + plotH - (Math.min(Math.max(0, d.payments), maxChartValue) / maxChartValue) * plotH
     }));
 
     const dueLine = buildSmoothSplinePath(duePts, padTop, baselineY);
@@ -324,7 +330,7 @@ export default function AnalyticsManager({
       ? `${payLine} L ${payPts[payPts.length - 1].x.toFixed(1)} ${baselineY} L ${payPts[0].x.toFixed(1)} ${baselineY} Z`
       : '';
 
-    return { width, height, baselineY, padTop, plotH, duePts, payPts, dueLine, payLine, dueArea, payArea };
+    return { width, height, baselineY, padTop, plotH, colW, duePts, payPts, dueLine, payLine, dueArea, payArea };
   }, [chartData, maxChartValue]);
 
   const activePointIdx = useMemo(() => {
@@ -530,11 +536,11 @@ export default function AnalyticsManager({
                 {activePointData && (
                   <div className="surface-subcard rounded-2xl px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
                     <span className="font-mono font-bold text-slate-900 dark:text-white">
-                      {activePointData.label}
+                      {activePointData.fullLabel}
                     </span>
                     <div className="flex items-center gap-3 sm:gap-4 font-mono tabular-nums">
                       <span className="text-ledger-red font-bold">
-                        {lang === 'bn' ? 'বাকি' : 'Due'}: ৳{compactChart(activePointData.dues, lang)}
+                        {lang === 'bn' ? 'বাকি' : 'Credit'}: ৳{compactChart(activePointData.dues, lang)}
                       </span>
                       <span className="text-ledger-green font-bold">
                         {lang === 'bn' ? 'আদায়' : 'Cash'}: ৳{compactChart(activePointData.payments, lang)}
@@ -549,7 +555,7 @@ export default function AnalyticsManager({
                 {/* Smooth Dual-Series SVG Area/Spline Chart */}
                 <div className="relative flex items-stretch gap-1.5 sm:gap-2 min-w-0 w-full overflow-hidden">
                   {/* Y-axis ticks */}
-                  <div className="flex flex-col justify-between py-2 text-[10px] font-mono text-slate-400 dark:text-slate-500 text-right w-8 sm:w-9 shrink-0 select-none">
+                  <div className="flex flex-col justify-between pt-3 pb-7 text-[10px] font-mono text-slate-400 dark:text-slate-500 text-right w-8 sm:w-9 shrink-0 select-none">
                     <span className="truncate">{compactChart(Math.round(maxChartValue), lang)}</span>
                     <span className="truncate">{compactChart(Math.round(maxChartValue * 0.5), lang)}</span>
                     <span>{lang === 'bn' ? '০' : '0'}</span>
@@ -558,7 +564,7 @@ export default function AnalyticsManager({
                   <div className="flex-1 min-w-0 overflow-hidden">
                     <svg
                       viewBox={`0 0 ${svgChart.width} ${svgChart.height}`}
-                      className="w-full h-[164px] sm:h-[180px] block select-none overflow-hidden"
+                      className="w-full aspect-[10/3] min-h-[135px] max-h-[190px] block select-none overflow-hidden"
                       role="img"
                       aria-label={t.salesVsCollections}
                     >
@@ -705,11 +711,11 @@ export default function AnalyticsManager({
                 {activePointData && (
                   <div className="surface-subcard rounded-2xl px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
                     <span className="font-mono font-bold text-slate-900 dark:text-white">
-                      {activePointData.label}
+                      {activePointData.fullLabel}
                     </span>
                     <div className="flex items-center gap-3 sm:gap-4 font-mono tabular-nums">
                       <span className="text-ledger-red font-bold">
-                        {lang === 'bn' ? 'বাকি' : 'Due'}: ৳{compactChart(activePointData.dues, lang)}
+                        {lang === 'bn' ? 'বাকি' : 'Credit'}: ৳{compactChart(activePointData.dues, lang)}
                       </span>
                       <span className="text-ledger-green font-bold">
                         {lang === 'bn' ? 'আদায়' : 'Cash'}: ৳{compactChart(activePointData.payments, lang)}

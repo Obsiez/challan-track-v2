@@ -103,6 +103,7 @@ interface DashboardProps {
   tagTransactions?: Transaction[];
   transactionsCount: number;
   monthlySummaries: any[];
+  sixMonthChartData?: Array<{ id: string; dues: number; payments: number; count?: number }>;
   onOpenQuickEntry: () => void;
   onSelectCustomer: (id: string) => void;
   lang: Language;
@@ -113,6 +114,7 @@ interface DashboardProps {
   showDashboardReminders?: boolean;
   showTagChart?: boolean;
   onOpenReminders?: () => void;
+  onOpenManageTags?: () => void;
 }
 
 const Dashboard = React.memo(function Dashboard({
@@ -121,6 +123,7 @@ const Dashboard = React.memo(function Dashboard({
   tagTransactions,
   transactionsCount,
   monthlySummaries,
+  sixMonthChartData,
   onOpenQuickEntry,
   onSelectCustomer,
   lang,
@@ -130,7 +133,8 @@ const Dashboard = React.memo(function Dashboard({
   reminders = [],
   showDashboardReminders = true,
   showTagChart = true,
-  onOpenReminders
+  onOpenReminders,
+  onOpenManageTags
 }: DashboardProps) {
   const t = translations[lang];
   const [journalFilter, setJournalFilter] = useState<'all' | 'due' | 'payment'>('all');
@@ -693,6 +697,7 @@ const Dashboard = React.memo(function Dashboard({
         <TagDistributionChart
           transactions={tagTransactions ?? transactions}
           lang={lang}
+          onManageTags={onOpenManageTags}
         />
       )}
 
@@ -826,9 +831,22 @@ const Dashboard = React.memo(function Dashboard({
                       onClick={() => onSelectCustomer(debtor.id)}
                       className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer group"
                     >
-                      <div className="w-10 h-10 rounded-full bg-ledger-red-subtle border border-ledger-red-subtle flex items-center justify-center font-display font-bold text-sm text-ledger-red shrink-0">
-                        {initial}
-                      </div>
+                      {debtor.photoUrl ? (
+                        <div className="p-[1.5px] rounded-full contact-avatar-ring shrink-0">
+                          <img
+                            src={debtor.photoUrl}
+                            alt={debtor.name}
+                            loading="lazy"
+                            decoding="async"
+                            className="w-10 h-10 rounded-full object-cover block"
+                            draggable={false}
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-ledger-red-subtle border border-ledger-red-subtle flex items-center justify-center font-display font-bold text-sm text-ledger-red shrink-0">
+                          {initial}
+                        </div>
+                      )}
                       <div className="min-w-0">
                         <div className="text-sm font-semibold text-slate-950 dark:text-white truncate group-hover:underline">
                           {debtor.name}
@@ -1052,6 +1070,7 @@ const Dashboard = React.memo(function Dashboard({
           <AnalyticsManager
             customers={customers}
             monthlySummaries={monthlySummaries}
+            sixMonthChartData={sixMonthChartData}
             lang={lang}
             animateOnDesktop={true}
             onSelectCustomer={onSelectCustomer}

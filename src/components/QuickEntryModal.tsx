@@ -24,7 +24,7 @@ interface QuickEntryModalProps {
   createCustomer: (
     name: string,
     phone: string,
-    options?: { accountType?: 'standard' | 'credit_card'; billingDay?: number }
+    options?: { accountType?: 'standard' | 'credit_card'; billingDay?: number; photoUrl?: string | null }
   ) => Promise<string | null | undefined>;
   addTransaction: (
     customerId: string, 
@@ -701,9 +701,18 @@ function QuickEntryModalInner({
                           }`}
                         >
                           <span className="truncate flex items-center gap-1.5 min-w-0">
-                            {c.accountType === 'credit_card' && (
+                            {c.photoUrl ? (
+                              <span className="p-[1px] rounded-full contact-avatar-ring shrink-0">
+                                <img
+                                  src={c.photoUrl}
+                                  alt={c.name}
+                                  className="w-5 h-5 rounded-full object-cover block"
+                                  draggable={false}
+                                />
+                              </span>
+                            ) : c.accountType === 'credit_card' ? (
                               <CreditCard className="w-3.5 h-3.5 shrink-0 opacity-75 stroke-[1.25]" />
-                            )}
+                            ) : null}
                             <span className="truncate">{c.name}</span>
                           </span>
                           {selectedCustomerId === c.id && <Check className="w-3.5 h-3.5 shrink-0 ml-1 stroke-[1.5]" />}
@@ -935,18 +944,14 @@ function QuickEntryModalInner({
                         setAmountInput('');
                       }
                     }}
-                    className={`w-full flex items-center text-left gap-2.5 mt-2 p-3 rounded-2xl border cursor-pointer transition-colors select-none ${
-                      isChecked
-                        ? 'bg-amber-500/18 border-amber-500/50 dark:bg-amber-500/20 dark:border-amber-400/50'
-                        : 'bg-amber-500/[0.09] hover:bg-amber-500/[0.15] border-amber-500/30'
-                    }`}
+                    className="w-full flex items-center text-left gap-2.5 mt-2 p-3 rounded-2xl surface-subcard hover:bg-slate-200/50 dark:hover:bg-white/[0.06] border-[1.5px] border-slate-300/85 dark:border-white/[0.16] cursor-pointer transition-colors select-none"
                   >
                     <span
                       aria-hidden="true"
-                      className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                      className={`w-4 h-4 rounded-md border-[1.5px] flex items-center justify-center shrink-0 transition-colors ${
                         isChecked
                           ? 'bg-amber-500 border-amber-500 text-white'
-                          : 'border-amber-500/60 bg-white/70 dark:bg-white/[0.05]'
+                          : 'border-amber-500/70 bg-white/70 dark:bg-white/[0.05]'
                       }`}
                     >
                       {isChecked && <Check className="w-3 h-3 stroke-[2.5]" />}
@@ -981,18 +986,14 @@ function QuickEntryModalInner({
                         setAmountInput('');
                       }
                     }}
-                    className={`w-full flex items-center text-left gap-2.5 mt-2 p-3 rounded-2xl border cursor-pointer transition-colors select-none ${
-                      isChecked
-                        ? 'bg-emerald-500/14 border-emerald-500/45 dark:bg-emerald-500/18 dark:border-emerald-400/45'
-                        : 'bg-slate-900/[0.03] dark:bg-white/[0.04] border-slate-900/[0.07] dark:border-white/[0.08] hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.07]'
-                    }`}
+                    className="w-full flex items-center text-left gap-2.5 mt-2 p-3 rounded-2xl surface-subcard hover:bg-slate-200/50 dark:hover:bg-white/[0.06] border-[1.5px] border-slate-300/85 dark:border-white/[0.16] cursor-pointer transition-colors select-none"
                   >
                     <span
                       aria-hidden="true"
-                      className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                      className={`w-4 h-4 rounded-md border-[1.5px] flex items-center justify-center shrink-0 transition-colors ${
                         isChecked
                           ? 'bg-emerald-600 border-emerald-600 text-white'
-                          : 'border-emerald-600/55 dark:border-emerald-400/55 bg-white/70 dark:bg-white/[0.05]'
+                          : 'border-emerald-600/65 dark:border-emerald-400/65 bg-white/70 dark:bg-white/[0.05]'
                       }`}
                     >
                       {isChecked && <Check className="w-3 h-3 stroke-[2.5]" />}

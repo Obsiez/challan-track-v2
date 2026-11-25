@@ -21,6 +21,7 @@ import ChallanTrackLogo, { ChallanTrackMark } from './components/ChallanTrackLog
 import AccentColorPickerModal from './components/AccentColorPickerModal';
 import BiometricLockScreen from './components/BiometricLockScreen';
 import CalculatorKeypad from './components/CalculatorKeypad';
+import ManageTagsModal from './components/ManageTagsModal';
 import ModalPortal from './components/ModalPortal';
 import LoadingSpinner from './components/LoadingSpinner';
 import { NativeDatePicker } from './components/NativePickers';
@@ -515,7 +516,7 @@ const MobileBottomDock = React.memo(({
                       transition: tabButtonTransition,
                     }}
                   >
-                    <span className="w-full h-full flex flex-col items-center justify-center gap-0.5 transition-transform duration-150 active:scale-90">
+                    <span className="w-full h-full flex flex-col items-center justify-center gap-0.5">
                       <Icon className="w-4.5 h-4.5 stroke-[1.35]" style={iconSpringStyle(isActive)} />
                       <span className="text-[10px] leading-tight" style={labelSpringStyle(isActive)}>{label}</span>
                     </span>
@@ -549,7 +550,7 @@ const MobileBottomDock = React.memo(({
           title={labels.recordEntry}
           id="fab_entry_btn"
         >
-          <span className="w-full h-full rounded-full flex items-center justify-center transition-transform duration-150 active:scale-90">
+          <span className="w-full h-full rounded-full flex items-center justify-center transition-transform duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-[0.86] hover:scale-[1.03]">
             <Plus className="w-6 h-6 stroke-[1.5]" />
           </span>
         </button>
@@ -575,13 +576,16 @@ function AppContent({ reducedMotion }: { reducedMotion: boolean }) {
   const navRafRef = React.useRef<number | null>(null);
   const navTimerRef = React.useRef<number | null>(null);
   const [isQuickEntryOpen, setIsQuickEntryOpen] = useState(false);
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(() =>
+    typeof window !== 'undefined' ? (window as any).__deferredInstallPrompt || null : null
+  );
   const [googleLoading, setGoogleLoading] = useState(false);
   const [swipeGesturesEnabled, setSwipeGesturesEnabled] = useState(() => localStorage.getItem('swipe_gestures_enabled') !== 'false');
   const [showDashboardReminders, setShowDashboardReminders] = useState(() => localStorage.getItem('show_dashboard_reminders') !== 'false');
   const [showTagChart, setShowTagChart] = useState(() => localStorage.getItem('show_tag_chart') !== 'false');
   const [highlightedTxId, setHighlightedTxId] = useState<string | null>(null);
   const [isAccentModalOpen, setIsAccentModalOpen] = useState(false);
+  const [isManageTagsOpen, setIsManageTagsOpen] = useState(false);
   const [activeAccentHex, setActiveAccentHex] = useState(getSavedAccentColor);
   const [biometricUnlocked, setBiometricUnlocked] = useState<boolean>(() => isBiometricSessionUnlocked());
 
@@ -614,6 +618,9 @@ function AppContent({ reducedMotion }: { reducedMotion: boolean }) {
   }, [user]);
 
   const handleInstallComplete = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).__deferredInstallPrompt = null;
+    }
     setDeferredPrompt(null);
   }, []);
 
@@ -645,12 +652,33 @@ function AppContent({ reducedMotion }: { reducedMotion: boolean }) {
   }, [currentTab, selectedCustomerIdForDetail]);
 
  useEffect(() => {
+   if ((window as any).__deferredInstallPrompt) {
+     setDeferredPrompt((window as any).__deferredInstallPrompt);
+   }
    const handleBeforeInstallPrompt = (e: any) => {
      e.preventDefault();
+     (window as any).__deferredInstallPrompt = e;
      setDeferredPrompt(e);
    };
+   const handleEarlyPromptReady = () => {
+     if ((window as any).__deferredInstallPrompt) {
+       setDeferredPrompt((window as any).__deferredInstallPrompt);
+     }
+   };
+   const handleAppInstalled = () => {
+     (window as any).__deferredInstallPrompt = null;
+     setDeferredPrompt(null);
+   };
    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-   return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+   window.addEventListener('challan-install-prompt-ready', handleEarlyPromptReady);
+   window.addEventListener('appinstalled', handleAppInstalled);
+   window.addEventListener('challan-app-installed', handleAppInstalled);
+   return () => {
+     window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+     window.removeEventListener('challan-install-prompt-ready', handleEarlyPromptReady);
+     window.removeEventListener('appinstalled', handleAppInstalled);
+     window.removeEventListener('challan-app-installed', handleAppInstalled);
+   };
  }, []);
 
   const reducedMotionRef = React.useRef<boolean>(reducedMotion);
@@ -955,6 +983,7 @@ function AppContent({ reducedMotion }: { reducedMotion: boolean }) {
     loadMoreCustomerTransactions,
     resetCustomerTxLimit,
     monthlySummaries,
+    sixMonthChartData,
     activeCustomerTxCount,
     exportBackup,
     rebuildMonthlySummaries,
@@ -1993,6 +2022,7 @@ function AppContent({ reducedMotion }: { reducedMotion: boolean }) {
   tagTransactions={tagIntelligenceTransactions}
   transactionsCount={settings?.transactionsCount || 0}
   monthlySummaries={monthlySummaries}
+  sixMonthChartData={sixMonthChartData}
   onOpenQuickEntry={openQuickEntry}
   onSelectCustomer={navigateToCustomer}
   lang={lang}
@@ -2002,6 +2032,7 @@ function AppContent({ reducedMotion }: { reducedMotion: boolean }) {
   reminders={reminders}
   showDashboardReminders={showDashboardReminders}
   onOpenReminders={handleOpenReminders}
+  onOpenManageTags={() => setIsManageTagsOpen(true)}
   showTagChart={showTagChart}
   />
  )}
@@ -2279,6 +2310,15 @@ updateSettings={updateSettings}
     isOpen={isAccentModalOpen}
     onClose={closeAccentModal}
     lang={lang}
+  />
+
+  {/* DASHBOARD MANAGE TAGS MODAL */}
+  <ManageTagsModal
+    isOpen={isManageTagsOpen}
+    onClose={() => setIsManageTagsOpen(false)}
+    lang={lang}
+    tagConfig={tagConfig}
+    onSaveTagConfig={saveTagConfig}
   />
 
   {/* MOBILE / TABLET CALCULATOR NUMERIC KEYPAD (7-8-9 Top Row) */}

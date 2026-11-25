@@ -27,6 +27,19 @@
             document.documentElement.classList.add('reduce-motion');
           }
         } catch (e) {}
+        try {
+          window.__deferredInstallPrompt = null;
+          window.addEventListener('beforeinstallprompt', function(e) {
+            e.preventDefault();
+            window.__deferredInstallPrompt = e;
+            window.dispatchEvent(new CustomEvent('challan-install-prompt-ready'));
+          });
+          window.addEventListener('appinstalled', function() {
+            window.__deferredInstallPrompt = null;
+            window.__pwaInstalled = true;
+            window.dispatchEvent(new CustomEvent('challan-app-installed'));
+          });
+        } catch (e) {}
       })();
     </script>
     <meta charset="UTF-8" />
@@ -38,13 +51,14 @@
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Challan Track" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-    <link rel="apple-touch-startup-image" href="/apple-splash.png" />
-    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
+    <link rel="apple-touch-startup-image" href="./apple-splash.png" />
+    <link rel="manifest" href="./manifest.json" />
     <meta name="theme-color" content="#070B13" media="(prefers-color-scheme: dark)" />
     <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)" />
     <link rel="preconnect" href="https://fonts.googleapis.com">

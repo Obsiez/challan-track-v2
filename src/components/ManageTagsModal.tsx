@@ -23,7 +23,9 @@ import {
   EXPENSE_TAGS,
   PAYMENT_TAGS,
   CUSTOM_TAG_COLORS,
+  CUSTOM_TAG_ICONS,
   TAG_LIMITS,
+  getCustomTagIconComponent,
   getTagCounts,
   optimizeTagLogoImage,
   sanitizeTagConfig,
@@ -42,6 +44,7 @@ interface CustomTagDraft {
   type: 'due' | 'payment';
   name: string;
   color: string;
+  iconName: string | null;
   logoDataUrl: string | null;
   imageOnly: boolean;
   enabled: boolean;
@@ -57,6 +60,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
   const [activeTab, setActiveTab] = useState<'due' | 'payment'>('due');
   const [searchQuery, setSearchQuery] = useState('');
   const [draft, setDraft] = useState<CustomTagDraft | null>(null);
+  const [isIconPickerOpen, setIsIconPickerOpen] = useState(false);
   const [autoPickedHex, setAutoPickedHex] = useState<string | null>(null);
   const [deleteConfirmTag, setDeleteConfirmTag] = useState<CustomTagDefinition | null>(null);
   const [optimizingImg, setOptimizingImg] = useState(false);
@@ -67,9 +71,108 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
     height: number;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingHistoryPopsRef = useRef(0);
+  const hasListHistoryRef = useRef(false);
+  const hasDraftHistoryRef = useRef(false);
+  const hasIconsHistoryRef = useRef(false);
+  const hasDeleteHistoryRef = useRef(false);
+
+  const isOpenRef = useRef(isOpen);
+  isOpenRef.current = isOpen;
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const iconPickerOpenRef = useRef(isIconPickerOpen);
+  iconPickerOpenRef.current = isIconPickerOpen;
+  const deleteConfirmRef = useRef(deleteConfirmTag);
+  deleteConfirmRef.current = deleteConfirmTag;
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  const pushTagsHistory = (stage: 'list' | 'draft' | 'delete' | 'icons') => {
+    try {
+      window.history.pushState({ ...window.history.state, manageTagsModal: stage }, '');
+      if (stage === 'list') hasListHistoryRef.current = true;
+      if (stage === 'draft') hasDraftHistoryRef.current = true;
+      if (stage === 'delete') hasDeleteHistoryRef.current = true;
+      if (stage === 'icons') hasIconsHistoryRef.current = true;
+    } catch {}
+  };
+
+  const openIconPicker = () => {
+    triggerHaptic('single');
+    pushTagsHistory('icons');
+    setIsIconPickerOpen(true);
+  };
+
+  const closeIconPicker = () => {
+    setIsIconPickerOpen(false);
+    if (hasIconsHistoryRef.current && window.history.state?.manageTagsModal === 'icons') {
+      hasIconsHistoryRef.current = false;
+      pendingHistoryPopsRef.current += 1;
+      window.history.back();
+      setTimeout(() => {
+        if (pendingHistoryPopsRef.current > 0) pendingHistoryPopsRef.current -= 1;
+      }, 450);
+    } else {
+      hasIconsHistoryRef.current = false;
+    }
+  };
+
+  const closeDraftToManageList = () => {
+    setIsIconPickerOpen(false);
+    setDraft(null);
+    setLogoInfo(null);
+    setAutoPickedHex(null);
+    let steps = 0;
+    if (hasIconsHistoryRef.current) {
+      hasIconsHistoryRef.current = false;
+      steps += 1;
+    }
+    if (hasDraftHistoryRef.current) {
+      hasDraftHistoryRef.current = false;
+      steps += 1;
+    }
+    if (steps > 0 && (window.history.state?.manageTagsModal === 'draft' || window.history.state?.manageTagsModal === 'icons')) {
+      pendingHistoryPopsRef.current += 1;
+      window.history.go(-steps);
+      setTimeout(() => {
+        if (pendingHistoryPopsRef.current > 0) pendingHistoryPopsRef.current -= 1;
+      }, 450);
+    }
+  };
+
+  const closeModalCleanly = () => {
+    let steps = 0;
+    if (hasIconsHistoryRef.current) steps += 1;
+    if (hasDeleteHistoryRef.current) steps += 1;
+    if (hasDraftHistoryRef.current) steps += 1;
+    if (hasListHistoryRef.current) steps += 1;
+    hasIconsHistoryRef.current = false;
+    hasDeleteHistoryRef.current = false;
+    hasDraftHistoryRef.current = false;
+    hasListHistoryRef.current = false;
+    setIsIconPickerOpen(false);
+    if (steps > 0) {
+      pendingHistoryPopsRef.current += 1;
+      window.history.go(-steps);
+      setTimeout(() => {
+        if (pendingHistoryPopsRef.current > 0) pendingHistoryPopsRef.current -= 1;
+      }, 450);
+    }
+    onClose();
+  };
 
   useEffect(() => {
-    if (!isOpen) {
+    if (isOpen) {
+      if (!hasListHistoryRef.current) {
+        pushTagsHistory('list');
+      }
+    } else {
+      hasListHistoryRef.current = false;
+      hasDraftHistoryRef.current = false;
+      hasIconsHistoryRef.current = false;
+      hasDeleteHistoryRef.current = false;
+      setIsIconPickerOpen(false);
       setDraft(null);
       setSearchQuery('');
       setLogoInfo(null);
@@ -79,24 +182,71 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
     }
   }, [isOpen]);
 
+  // Android / browser Back gesture support: Native Icons -> New/Edit Tag -> Manage Tags -> Close popup
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      if (pendingHistoryPopsRef.current > 0) {
+        pendingHistoryPopsRef.current -= 1;
+        return;
+      }
+      if (!isOpenRef.current) return;
+      const stage = e.state?.manageTagsModal;
+
+      if (iconPickerOpenRef.current && stage !== 'icons') {
+        hasIconsHistoryRef.current = false;
+        setIsIconPickerOpen(false);
+        return;
+      }
+      if (deleteConfirmRef.current && stage !== 'delete') {
+        hasDeleteHistoryRef.current = false;
+        setDeleteConfirmTag(null);
+        return;
+      }
+      if (draftRef.current && stage !== 'draft' && stage !== 'icons') {
+        hasDraftHistoryRef.current = false;
+        hasIconsHistoryRef.current = false;
+        setIsIconPickerOpen(false);
+        setDraft(null);
+        setLogoInfo(null);
+        setAutoPickedHex(null);
+        return;
+      }
+      if (stage !== 'list' && stage !== 'draft' && stage !== 'delete' && stage !== 'icons') {
+        hasListHistoryRef.current = false;
+        hasDraftHistoryRef.current = false;
+        hasIconsHistoryRef.current = false;
+        hasDeleteHistoryRef.current = false;
+        setIsIconPickerOpen(false);
+        onCloseRef.current();
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   // Close with Escape cleanly
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || saving || optimizingImg) return;
-      if (deleteConfirmTag) {
+      if (isIconPickerOpen) {
+        closeIconPicker();
+      } else if (deleteConfirmTag) {
         setDeleteConfirmTag(null);
+        if (hasDeleteHistoryRef.current && window.history.state?.manageTagsModal === 'delete') {
+          hasDeleteHistoryRef.current = false;
+          pendingHistoryPopsRef.current += 1;
+          window.history.back();
+        }
       } else if (draft) {
-        setDraft(null);
-        setLogoInfo(null);
-        setAutoPickedHex(null);
+        closeDraftToManageList();
       } else {
-        onClose();
+        closeModalCleanly();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, saving, optimizingImg, deleteConfirmTag, draft, onClose]);
+  }, [isOpen, saving, optimizingImg, isIconPickerOpen, deleteConfirmTag, draft]);
 
   const defaultTags = activeTab === 'due' ? EXPENSE_TAGS : PAYMENT_TAGS;
   const customTagsForTab = useMemo(
@@ -199,6 +349,11 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
     const targetId = deleteConfirmTag.id;
     triggerHaptic('double');
     setDeleteConfirmTag(null);
+    if (hasDeleteHistoryRef.current && window.history.state?.manageTagsModal === 'delete') {
+      hasDeleteHistoryRef.current = false;
+      pendingHistoryPopsRef.current += 1;
+      window.history.back();
+    }
     await persistConfig({
       ...tagConfig,
       customTags: tagConfig.customTags.filter((c) => c.id !== targetId),
@@ -219,11 +374,13 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
     triggerHaptic('single');
     setLogoInfo(null);
     setAutoPickedHex(null);
+    pushTagsHistory('draft');
     setDraft({
       id: null,
       type: activeTab,
       name: '',
       color: CUSTOM_TAG_COLORS[customTagsForTab.length % CUSTOM_TAG_COLORS.length],
+      iconName: CUSTOM_TAG_ICONS[customTagsForTab.length % CUSTOM_TAG_ICONS.length].id,
       logoDataUrl: null,
       imageOnly: false,
       enabled: counts.enabledCount < limits.maxEnabled,
@@ -234,11 +391,13 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
     triggerHaptic('single');
     setLogoInfo(null);
     setAutoPickedHex(null);
+    pushTagsHistory('draft');
     setDraft({
       id: tag.id,
       type: tag.type,
       name: tag.name,
       color: tag.color || '#059669',
+      iconName: tag.iconName || null,
       logoDataUrl: tag.logoDataUrl || null,
       imageOnly: Boolean(tag.imageOnly && tag.logoDataUrl),
       enabled: tag.enabled,
@@ -315,6 +474,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
               ...c,
               name: trimmedName,
               color: draft.color,
+              iconName: draft.iconName,
               logoDataUrl: draft.logoDataUrl,
               imageOnly: Boolean(draft.imageOnly && draft.logoDataUrl),
               enabled: draft.enabled,
@@ -345,6 +505,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
           type: draft.type,
           name: trimmedName,
           color: draft.color,
+          iconName: draft.iconName,
           logoDataUrl: draft.logoDataUrl,
           imageOnly: Boolean(draft.imageOnly && draft.logoDataUrl),
           enabled: shouldEnable,
@@ -367,9 +528,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
       ...tagConfig,
       customTags: nextCustomTags,
     });
-    setDraft(null);
-    setLogoInfo(null);
-    setAutoPickedHex(null);
+    closeDraftToManageList();
     toast.success(
       draft.id
         ? isBn
@@ -403,9 +562,14 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
             if (saving || optimizingImg) return;
             if (deleteConfirmTag) {
               setDeleteConfirmTag(null);
+              if (hasDeleteHistoryRef.current && window.history.state?.manageTagsModal === 'delete') {
+                hasDeleteHistoryRef.current = false;
+                pendingHistoryPopsRef.current += 1;
+                window.history.back();
+              }
               return;
             }
-            onClose();
+            closeModalCleanly();
           }}
           className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
         />
@@ -430,9 +594,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                   type="button"
                   onClick={() => {
                     triggerHaptic('tick');
-                    setDraft(null);
-                    setLogoInfo(null);
-                    setAutoPickedHex(null);
+                    closeDraftToManageList();
                   }}
                   aria-label={isBn ? 'ফিরে যান' : 'Back to tags'}
                   className="w-9 h-9 rounded-full surface-subcard border flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.1] transition-colors cursor-pointer shrink-0 touch-press"
@@ -478,7 +640,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
               type="button"
               onClick={() => {
                 triggerHaptic('medium');
-                onClose();
+                closeModalCleanly();
               }}
               className="w-9 h-9 rounded-full bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-600 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer shrink-0 touch-press"
               aria-label="Close"
@@ -614,7 +776,10 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                         draggable={false}
                       />
                     ) : (
-                      <CircleDotDashed className="w-3.5 h-3.5 shrink-0" style={{ color: draft.color }} />
+                      (() => {
+                        const PreviewIcon = getCustomTagIconComponent(draft.iconName);
+                        return <PreviewIcon className="w-3.5 h-3.5 shrink-0" style={{ color: draft.color }} />;
+                      })()
                     )}
                     {!(draft.imageOnly && draft.logoDataUrl) && (
                       <span className="truncate">{draft.name.trim() || (isBn ? 'ট্যাগের নাম' : 'Tag Name')}</span>
@@ -647,19 +812,28 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                   />
                 </div>
 
-                {/* Logo Upload & Size Limit */}
+                {/* Logo or Icon Section */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between px-0.5">
                     <span className={isBn ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400' : 'micro-mono-label font-semibold'}>
-                      {isBn ? 'লোগো / ছবি (ঐচ্ছিক)' : 'Tag Logo Image (Optional)'}
+                      {isBn ? 'আইকন বা লোগো' : 'Icon or Logo'}
                     </span>
                     <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">
-                      {isBn ? 'সর্বোচ্চ ৫ এমবি · অটো অপ্টিমাইজ' : 'Max 5MB · Auto-optimized'}
+                      {draft.logoDataUrl
+                        ? (isBn ? 'সর্বোচ্চ ৫ এমবি' : 'Max 5MB')
+                        : draft.iconName || ''}
                     </span>
                   </div>
 
                   <div className="flex items-center gap-3.5 p-3.5 rounded-2xl surface-subcard border">
-                    <div className="w-14 h-14 rounded-2xl border border-slate-900/[0.08] dark:border-white/[0.09] bg-white/70 dark:bg-white/[0.04] flex items-center justify-center shrink-0 overflow-hidden p-1">
+                    {/* Colored Icon / Logo Preview Tile with Edit Trigger */}
+                    <button
+                      type="button"
+                      onClick={openIconPicker}
+                      title={isBn ? 'আইকন পরিবর্তন করুন' : 'Change icon'}
+                      aria-label={isBn ? 'আইকন পরিবর্তন করুন' : 'Change icon'}
+                      className="relative w-14 h-14 rounded-2xl border border-slate-900/[0.08] dark:border-white/[0.09] bg-white/70 dark:bg-white/[0.04] flex items-center justify-center shrink-0 cursor-pointer touch-press group"
+                    >
                       {draft.logoDataUrl ? (
                         <img
                           src={draft.logoDataUrl}
@@ -668,9 +842,18 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                           draggable={false}
                         />
                       ) : (
-                        <CircleDotDashed className="w-5 h-5 stroke-[1.5]" style={{ color: draft.color }} />
+                        (() => {
+                          const DraftIcon = getCustomTagIconComponent(draft.iconName);
+                          return <DraftIcon className="w-5 h-5 stroke-[1.5]" style={{ color: draft.color }} />;
+                        })()
                       )}
-                    </div>
+                      <span
+                        aria-hidden="true"
+                        className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-slate-950 dark:bg-white text-white dark:text-slate-950 border border-white/80 dark:border-zinc-900 flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform"
+                      >
+                        <Pencil className="w-2.5 h-2.5 stroke-[2]" />
+                      </span>
+                    </button>
 
                     <div className="flex-1 min-w-0 space-y-1.5">
                       <div className="flex flex-wrap items-center gap-2">
@@ -688,11 +871,11 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                                 : 'Optimizing...'
                               : draft.logoDataUrl
                               ? isBn
-                                ? 'ছবি পরিবর্তন'
+                                ? 'লোগো পরিবর্তন'
                                 : 'Change Image'
                               : isBn
-                              ? 'ছবি নির্বাচন'
-                              : 'Upload Logo'}
+                              ? 'ছবি আপলোড'
+                              : 'Upload Image'}
                           </span>
                         </button>
 
@@ -716,11 +899,11 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                           ? `${logoInfo.width}×${logoInfo.height}px · ${(logoInfo.byteSize / 1024).toFixed(1)} KB`
                           : draft.logoDataUrl
                           ? isBn
-                            ? 'অপ্টিমাইজড লোগো সংযুক্ত আছে'
-                            : 'Optimized logo attached'
+                            ? 'কাস্টম লোগো যুক্ত আছে'
+                            : 'Custom logo attached'
                           : isBn
-                          ? 'PNG, JPG বা WebP — স্বয়ংক্রিয়ভাবে ছোট ও রঙ বাছাই হবে'
-                          : 'PNG, JPG or WebP · resizes cleanly & auto-picks color'}
+                          ? 'আইকন বদলাতে বামে ট্যাপ করুন, বা ছবি আপলোড করুন'
+                          : 'Tap the icon to change, or upload a custom logo'}
                       </p>
                     </div>
 
@@ -845,9 +1028,8 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      setDraft(null);
-                      setLogoInfo(null);
-                      setAutoPickedHex(null);
+                      triggerHaptic('tick');
+                      closeDraftToManageList();
                     }}
                     className="flex-1 h-11 rounded-full surface-subcard border text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer hover:bg-slate-900/[0.04] dark:hover:bg-white/[0.08] transition-colors"
                   >
@@ -972,7 +1154,10 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                                     draggable={false}
                                   />
                                 ) : (
-                                  <CircleDotDashed className="w-4 h-4 stroke-[1.6]" style={{ color: tag.color }} />
+                                  (() => {
+                                    const TagCustomIcon = getCustomTagIconComponent(tag.iconName);
+                                    return <TagCustomIcon className="w-4 h-4 stroke-[1.6]" style={{ color: tag.color }} />;
+                                  })()
                                 )}
                               </div>
                               <div className="min-w-0">
@@ -999,6 +1184,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                                 type="button"
                                 onClick={() => {
                                   triggerHaptic('single');
+                                  pushTagsHistory('delete');
                                   setDeleteConfirmTag(tag);
                                 }}
                                 className="w-9 h-9 rounded-full hover:bg-rose-500/12 flex items-center justify-center text-rose-600 dark:text-rose-400 cursor-pointer transition-colors"
@@ -1115,7 +1301,14 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
           {/* Delete Confirmation Overlay */}
           {deleteConfirmTag && (
             <div
-              onClick={() => setDeleteConfirmTag(null)}
+              onClick={() => {
+                setDeleteConfirmTag(null);
+                if (hasDeleteHistoryRef.current && window.history.state?.manageTagsModal === 'delete') {
+                  hasDeleteHistoryRef.current = false;
+                  pendingHistoryPopsRef.current += 1;
+                  window.history.back();
+                }
+              }}
               className="absolute inset-0 z-20 bg-slate-950/50 dark:bg-black/65 backdrop-blur-xs flex items-center justify-center p-5 animate-backdrop-blur"
             >
               <div
@@ -1152,7 +1345,14 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                   <button
                     type="button"
                     disabled={saving}
-                    onClick={() => setDeleteConfirmTag(null)}
+                    onClick={() => {
+                      setDeleteConfirmTag(null);
+                      if (hasDeleteHistoryRef.current && window.history.state?.manageTagsModal === 'delete') {
+                        hasDeleteHistoryRef.current = false;
+                        pendingHistoryPopsRef.current += 1;
+                        window.history.back();
+                      }
+                    }}
                     className="flex-1 h-10 rounded-full surface-subcard border text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer hover:bg-slate-900/[0.04] dark:hover:bg-white/[0.08] transition-colors"
                   >
                     {isBn ? 'বাতিল' : 'Cancel'}
@@ -1171,6 +1371,84 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* Native Icon Library Modal (monochrome icons; colored preview appears only in the tag editor) */}
+      {isIconPickerOpen && draft && (
+        <ModalPortal lockScroll={true}>
+          <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden overscroll-none">
+            <div
+              onClick={closeIconPicker}
+              className="fixed inset-0 bg-slate-950/60 dark:bg-black/75 backdrop-blur-sm animate-backdrop-blur"
+            />
+
+            <div
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label={isBn ? 'আইকন বাছাই করুন' : 'Choose Tag Icon'}
+              className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-md rounded-t-[2rem] sm:rounded-3xl border shadow-2xl max-h-[80dvh] flex flex-col overflow-hidden"
+            >
+              <div className="flex justify-center pt-3 pb-1 sm:hidden shrink-0">
+                <div className="w-10 h-1 bg-slate-400/40 dark:bg-white/20 rounded-full" />
+              </div>
+
+              <div className="px-5 py-3.5 border-b border-slate-900/[0.07] dark:border-white/[0.08] flex items-center justify-between gap-3 shrink-0">
+                <div className="min-w-0">
+                  <span className={isBn ? 'text-[10px] font-bold text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>
+                    {isBn ? 'নেটিভ আইকন লাইব্রেরি' : 'Native Icon Library'}
+                  </span>
+                  <h3 className="font-display text-base sm:text-lg font-bold text-slate-950 dark:text-white tracking-tight truncate">
+                    {isBn ? 'একটি আইকন নির্বাচন করুন (৫০টি)' : 'Choose an Icon (50)'}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeIconPicker}
+                  aria-label="Close icon library"
+                  className="w-8 h-8 rounded-full surface-subcard border flex items-center justify-center text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white cursor-pointer transition-colors shrink-0"
+                >
+                  <X className="w-4 h-4 stroke-[1.75]" />
+                </button>
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain hide-scrollbar p-4 sm:p-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+                <div className="grid grid-cols-5 sm:grid-cols-6 gap-2">
+                  {CUSTOM_TAG_ICONS.map(({ id: iconId, icon: IconItem, label }) => {
+                    const isSelected = !draft.logoDataUrl && draft.iconName === iconId;
+                    return (
+                      <button
+                        key={iconId}
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic('tick');
+                          setDraft({
+                            ...draft,
+                            iconName: iconId,
+                            logoDataUrl: null,
+                            imageOnly: false,
+                          });
+                          setLogoInfo(null);
+                          setAutoPickedHex(null);
+                          closeIconPicker();
+                        }}
+                        title={label}
+                        aria-label={`Select ${label} icon`}
+                        className={`h-12 rounded-2xl flex items-center justify-center border transition-all cursor-pointer touch-press ${
+                          isSelected
+                            ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 border-slate-950 dark:border-white shadow-sm'
+                            : 'surface-subcard hover:bg-slate-900/[0.05] dark:hover:bg-white/[0.08] text-slate-950 dark:text-white'
+                        }`}
+                      >
+                        <IconItem className="w-5 h-5 stroke-[1.6]" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
     </ModalPortal>
   );
 };

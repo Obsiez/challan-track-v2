@@ -16,6 +16,7 @@ export interface Customer {
   userId: string;
   name: string;
   phone: string;
+  photoUrl?: string | null;
   outstandingDue: number; // calculated balance sum
   createdAt: any;
   updatedAt: any;
@@ -125,6 +126,7 @@ export interface CustomTagDefinition {
   type: 'due' | 'payment';
   name: string;
   color: string;
+  iconName?: string | null;
   logoDataUrl?: string | null;
   imageOnly?: boolean;
   enabled: boolean;
