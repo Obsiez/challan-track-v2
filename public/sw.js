@@ -1,12 +1,10 @@
-const CACHE_NAME = 'challan-track-pwa-v3';
+const CACHE_NAME = 'challan-track-pwa-v4';
 const CORE_SHELL_ASSETS = [
   './',
   './index.html',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
-  './icon-192-maskable.png',
-  './icon-512-maskable.png',
   './apple-touch-icon.png',
   './apple-splash.png',
 ];
