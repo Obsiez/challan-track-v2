@@ -683,7 +683,11 @@ export function SpotlightCard({
       onPointerLeave={handlePointerLeave}
       onMouseLeave={handleMouseLeave}
       className={`spotlight-surface relative overflow-hidden ${className}`}
-      {...rest}
+      style={{ contain: 'layout paint', ...rest.style }}
+      {...(() => {
+        const { style: _ignored, ...other } = rest;
+        return other;
+      })()}
     >
       {children}
     </div>

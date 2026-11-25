@@ -210,6 +210,10 @@ html:not(.dark) .app-canvas-bg {
   pointer-events: none;
   z-index: 0;
   overflow: hidden;
+  contain: strict;
+  transform: translate3d(0, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
   background-image:
     radial-gradient(108% 72% at 50% -16%, rgba(var(--accent-rgb, 5, 150, 105), 0.21) 0%, rgba(var(--accent-rgb, 5, 150, 105), 0.11) 32%, rgba(var(--accent-rgb, 5, 150, 105), 0.036) 56%, transparent 80%),
     radial-gradient(82% 62% at 94% 12%, rgba(56, 189, 248, 0.115) 0%, rgba(56, 189, 248, 0.045) 42%, transparent 76%),
@@ -409,9 +413,10 @@ html[data-bg-texture="none"] .app-ambient-grid::before {
 
 /* Signature Hero Refractive Glass */
 .surface-hero-glass {
-  background-color: rgba(var(--theme-light-surface-rgb, 255, 255, 255), 0.60);
-  -webkit-backdrop-filter: blur(36px) saturate(200%);
-  backdrop-filter: blur(36px) saturate(200%);
+  background-color: rgba(var(--theme-light-surface-rgb, 255, 255, 255), 0.64);
+  -webkit-backdrop-filter: blur(24px) saturate(175%);
+  backdrop-filter: blur(24px) saturate(175%);
+  contain: layout style;
   isolation: isolate;
   transform: translate3d(0, 0, 0);
   -webkit-backface-visibility: hidden;
@@ -421,11 +426,10 @@ html[data-bg-texture="none"] .app-ambient-grid::before {
     0 24px 52px -18px rgba(15, 23, 42, 0.11),
     0 4px 12px -4px rgba(15, 23, 42, 0.04),
     inset 0 1px 0 rgba(255, 255, 255, 0.95);
-  transition: background-color 0.2s ease, box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .dark .surface-hero-glass {
-  background-color: rgba(var(--theme-bg-surface-rgb, 18, 18, 21), 0.46);
+  background-color: rgba(var(--theme-bg-surface-rgb, 18, 18, 21), 0.50);
   border-color: rgba(255, 255, 255, 0.10);
   box-shadow:
     0 28px 60px -18px rgba(0, 0, 0, 0.72),
@@ -434,9 +438,10 @@ html[data-bg-texture="none"] .app-ambient-grid::before {
 
 /* Standard Translucent Glass Surface */
 .surface-glass {
-  background-color: rgba(var(--theme-light-surface-rgb, 255, 255, 255), 0.58);
-  -webkit-backdrop-filter: blur(32px) saturate(195%);
-  backdrop-filter: blur(32px) saturate(195%);
+  background-color: rgba(var(--theme-light-surface-rgb, 255, 255, 255), 0.62);
+  -webkit-backdrop-filter: blur(22px) saturate(175%);
+  backdrop-filter: blur(22px) saturate(175%);
+  contain: layout style;
   isolation: isolate;
   transform: translate3d(0, 0, 0);
   -webkit-backface-visibility: hidden;
@@ -445,11 +450,10 @@ html[data-bg-texture="none"] .app-ambient-grid::before {
   box-shadow:
     0 14px 32px -14px rgba(15, 23, 42, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  transition: background-color 0.2s ease, box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .dark .surface-glass {
-  background-color: rgba(var(--theme-bg-surface-rgb, 18, 18, 21), 0.44);
+  background-color: rgba(var(--theme-bg-surface-rgb, 18, 18, 21), 0.48);
   border-color: rgba(255, 255, 255, 0.085);
   box-shadow:
     0 18px 38px -14px rgba(0, 0, 0, 0.62),
@@ -457,9 +461,10 @@ html[data-bg-texture="none"] .app-ambient-grid::before {
 }
 
 .surface-glass-interactive {
-  background-color: rgba(var(--theme-light-surface-rgb, 255, 255, 255), 0.62);
-  -webkit-backdrop-filter: blur(30px) saturate(195%);
-  backdrop-filter: blur(30px) saturate(195%);
+  background-color: rgba(var(--theme-light-surface-rgb, 255, 255, 255), 0.64);
+  -webkit-backdrop-filter: blur(22px) saturate(175%);
+  backdrop-filter: blur(22px) saturate(175%);
+  contain: layout style;
   isolation: isolate;
   transform: translate3d(0, 0, 0);
   -webkit-backface-visibility: hidden;
@@ -535,20 +540,14 @@ html[data-bg-texture="none"] .app-ambient-grid::before {
   contain-intrinsic-size: auto 134px;
 }
 
-/* Inset Translucent Sub-Track */
+/* Inset Translucent Sub-Track (nested-blur-free to eliminate Chromium bottom-edge blur bleed) */
 .surface-subcard {
-  background-color: rgba(var(--theme-light-surface-rgb, 248, 250, 252), 0.48);
-  -webkit-backdrop-filter: blur(22px) saturate(175%);
-  backdrop-filter: blur(22px) saturate(175%);
-  isolation: isolate;
-  transform: translate3d(0, 0, 0);
-  -webkit-backface-visibility: hidden;
-  backface-visibility: hidden;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  background-color: rgba(var(--theme-light-surface-rgb, 248, 250, 252), 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 
 .dark .surface-subcard {
-  background-color: rgba(var(--theme-bg-surface-rgb, 26, 26, 31), 0.38);
+  background-color: rgba(var(--theme-bg-surface-rgb, 26, 26, 31), 0.58);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
@@ -784,16 +783,12 @@ select:focus {
   box-shadow: 0 0 0 3px var(--accent-subtle, rgba(5, 150, 105, 0.14)) !important;
 }
 
-/* Tactile spring tap feedback on mobile */
+/* Tactile spring tap feedback */
 .touch-press {
   transition: transform 0.16s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.16s ease;
-  transform: translate3d(0, 0, 0);
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  will-change: transform;
 }
 .touch-press:active {
-  transform: translate3d(0, 0, 0) scale(0.965);
+  transform: scale(0.965);
 }
 
 /* Accent utilities dynamically linked to custom accent color */

@@ -298,6 +298,7 @@ function renderMedallionIcon(
   {
     mode, // 'circle-transparent' | 'full-bleed-apple'
     medallionRadiusRatio = 0.49,
+    surfaceScaleRatio = 1.0,
     iconScale = 0.45,
     iconOffsetY = 0.005,
   }
@@ -308,6 +309,7 @@ function renderMedallionIcon(
   const cx = size * 0.5;
   const cy = size * 0.5;
   const circleR = size * medallionRadiusRatio;
+  const surfaceSpan = size * surfaceScaleRatio;
   const iconPxSize = size * iconScale;
   const iconOffsetPxY = size * iconOffsetY;
   const rimInset = Math.max(1.25, size * 0.0045);
@@ -331,8 +333,8 @@ function renderMedallionIcon(
             for (let sx = 0; sx < 4; sx++) {
               const dx = dxC + SS_OFFSETS[sx];
               const dy = dyC + SS_OFFSETS[sy];
-              const mx = 0.5 + dx / size;
-              const my = 0.5 + dy / size;
+              const mx = 0.5 + dx / surfaceSpan;
+              const my = 0.5 + dy / surfaceSpan;
               let [r, g, b] = sampleMedallionSurface(mx, my);
               [r, g, b] = sampleBookMark(r, g, b, dx, dy, iconPxSize, iconOffsetPxY, halfStroke);
               sumR += r; sumG += g; sumB += b;
@@ -343,7 +345,7 @@ function renderMedallionIcon(
           rgba[idx + 2] = Math.round(clamp(sumB / 16, 0, 255));
           rgba[idx + 3] = 255;
         } else {
-          const [r, g, b] = sampleMedallionSurface(0.5 + dxC / size, 0.5 + dyC / size);
+          const [r, g, b] = sampleMedallionSurface(0.5 + dxC / surfaceSpan, 0.5 + dyC / surfaceSpan);
           rgba[idx] = Math.round(clamp(r, 0, 255));
           rgba[idx + 1] = Math.round(clamp(g, 0, 255));
           rgba[idx + 2] = Math.round(clamp(b, 0, 255));
@@ -465,9 +467,9 @@ function renderSplashScreen(width, height) {
 const targets = [
   { file: 'icon-512.png', size: 512, mode: 'circle-transparent', medallionRadiusRatio: 0.49, iconScale: 0.45, iconOffsetY: 0.005 },
   { file: 'icon-192.png', size: 192, mode: 'circle-transparent', medallionRadiusRatio: 0.49, iconScale: 0.45, iconOffsetY: 0.005 },
-  { file: 'icon-512-maskable.png', size: 512, mode: 'full-bleed-apple', medallionRadiusRatio: 0.5, iconScale: 0.38, iconOffsetY: 0.004 },
-  { file: 'icon-192-maskable.png', size: 192, mode: 'full-bleed-apple', medallionRadiusRatio: 0.5, iconScale: 0.38, iconOffsetY: 0.004 },
-  { file: 'apple-touch-icon.png', size: 180, mode: 'full-bleed-apple', medallionRadiusRatio: 0.5, iconScale: 0.46, iconOffsetY: 0.005 },
+  { file: 'icon-512-maskable.png', size: 512, mode: 'full-bleed-apple', medallionRadiusRatio: 0.5, surfaceScaleRatio: 0.78, iconScale: 0.36, iconOffsetY: 0.004 },
+  { file: 'icon-192-maskable.png', size: 192, mode: 'full-bleed-apple', medallionRadiusRatio: 0.5, surfaceScaleRatio: 0.78, iconScale: 0.36, iconOffsetY: 0.004 },
+  { file: 'apple-touch-icon.png', size: 180, mode: 'full-bleed-apple', medallionRadiusRatio: 0.5, surfaceScaleRatio: 0.96, iconScale: 0.45, iconOffsetY: 0.005 },
 ];
 
 for (const t of targets) {

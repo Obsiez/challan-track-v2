@@ -1,14 +1,14 @@
-const CACHE_NAME = 'challan-track-pwa-v2';
+const CACHE_NAME = 'challan-track-pwa-v3';
 const CORE_SHELL_ASSETS = [
   './',
   './index.html',
   './manifest.json',
-  './favicon.svg',
   './icon-192.png',
   './icon-512.png',
   './icon-192-maskable.png',
   './icon-512-maskable.png',
   './apple-touch-icon.png',
+  './apple-splash.png',
 ];
 
 self.addEventListener('install', (event) => {

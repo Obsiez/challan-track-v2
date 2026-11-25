@@ -2489,160 +2489,205 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     </div>
   )}
 
- <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10 pt-1">
- <AnimatePresence mode="wait" initial={false}>
+ <div className="relative z-10 pt-1">
  {isEditingCustomer ? (
- <motion.div
-   key="edit-customer-form"
-   initial={{ opacity: 0, y: -8, scale: 0.98 }}
-   animate={{ opacity: 1, y: 0, scale: 1 }}
-   exit={{ opacity: 0, y: -6, scale: 0.98 }}
-   transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-   className="flex-1 space-y-3.5 max-w-md"
+ <form
+   onSubmit={async (e) => {
+     e.preventDefault();
+     triggerHaptic('single');
+     if (!editName.trim()) {
+       setEditError(lang === 'bn' ? 'নাম অবশ্যই দিতে হবে' : 'Name is required');
+       return;
+     }
+     const rawBilling = parseInt(editBillingDay, 10);
+     if (editAccountType === 'credit_card' && (!rawBilling || rawBilling < 1 || rawBilling > 31)) {
+       setEditError(lang === 'bn' ? 'বিলিং তারিখ ১ থেকে ৩১ এর মধ্যে দিন' : 'Please enter a billing day between 1 and 31');
+       return;
+     }
+     setIsSavingEdit(true);
+     try {
+       const parsedBilling = rawBilling ? Math.min(31, Math.max(1, rawBilling)) : undefined;
+       await updateCustomerDetails(selectedCustomer.id, editName, editPhone, {
+         accountType: editAccountType,
+         billingDay: editAccountType === 'credit_card' ? parsedBilling : undefined,
+         photoUrl: editPhotoUrl
+       });
+       setIsEditingCustomer(false);
+       toast.success(lang === 'bn' ? 'তথ্য আপডেট করা হয়েছে' : 'Profile updated');
+     } catch (err) {
+       if (err && (err as any).message === 'DUPLICATE_NAME') {
+         setEditError(lang === 'bn' ? 'এই নামের গ্রাহক ইতিমধ্যে খতিয়ানে সংরক্ষিত আছে।' : 'A customer with this name already exists.');
+       } else {
+         setEditError(lang === 'bn' ? 'সংরক্ষণ করতে ব্যর্থ হয়েছে' : 'Failed to save changes');
+       }
+     } finally {
+       setIsSavingEdit(false);
+     }
+   }}
+   className="w-full space-y-4"
  >
- {/* Apple-style Contact Photo Picker in Edit Mode */}
- <AppleContactPhotoPicker
-   photoUrl={editPhotoUrl}
-   displayName={editName || selectedCustomer.name}
-   lang={lang}
-   inputRef={editPhotoInputRef}
-   onFileChange={(e) => handleCustomerPhotoSelect(e, 'edit')}
-   onRemove={() => setEditPhotoUrl(null)}
- />
-
- {/* Account Type Selector in Edit Mode */}
- <div>
-   <label className={`block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1.5 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>
-     {lang === 'bn' ? 'হিসাবের ধরন' : 'Account Type'}
-   </label>
-   <div className="relative grid grid-cols-2 p-1 rounded-full bg-slate-900/[0.045] dark:bg-white/[0.05] border border-slate-900/[0.08] dark:border-white/[0.09]">
-     <div
-       aria-hidden="true"
-       className="pointer-events-none absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-slate-950 dark:bg-white shadow-xs will-change-transform transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
-       style={{
-         transform: `translate3d(${editAccountType === 'credit_card' ? '100%' : '0%'}, 0, 0)`
-       }}
-     />
+   {/* Edit Header */}
+   <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-900/[0.06] dark:border-white/[0.07]">
+     <div>
+       <span className={lang === 'bn' ? 'text-[11px] text-slate-500 dark:text-slate-400 font-semibold block' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-semibold block'}>
+         {lang === 'bn' ? 'তথ্য সম্পাদনা' : 'Edit Profile'}
+       </span>
+       <h3 className="font-display text-lg font-bold text-slate-950 dark:text-white tracking-tight">
+         {selectedCustomer.name}
+       </h3>
+     </div>
      <button
        type="button"
+       disabled={isSavingEdit}
        onClick={() => {
-         triggerHaptic('tick');
-         setEditAccountType('standard');
+         triggerHaptic('single');
+         setIsEditingCustomer(false);
        }}
-       className={`relative z-10 py-2 px-3 rounded-full text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors duration-200 ${
-         editAccountType === 'standard'
-           ? 'text-white dark:text-slate-950'
-           : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-       }`}
+       aria-label={lang === 'bn' ? 'সম্পাদনা বন্ধ করুন' : 'Close edit'}
+       className="w-8 h-8 rounded-full bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.06] dark:hover:bg-white/[0.12] border border-slate-900/[0.08] dark:border-white/[0.08] flex items-center justify-center text-slate-600 dark:text-slate-300 transition-colors cursor-pointer shrink-0"
      >
-       <Users className="w-3.5 h-3.5 stroke-[1.25]" />
-       <span>{lang === 'bn' ? 'গ্রাহক খতিয়ান' : 'Customer Ledger'}</span>
-     </button>
-     <button
-       type="button"
-       onClick={() => {
-         triggerHaptic('tick');
-         setEditAccountType('credit_card');
-       }}
-       className={`relative z-10 py-2 px-3 rounded-full text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors duration-200 ${
-         editAccountType === 'credit_card'
-           ? 'text-white dark:text-slate-950'
-           : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-       }`}
-     >
-       <CreditCard className="w-3.5 h-3.5 stroke-[1.25]" />
-       <span>{lang === 'bn' ? 'ক্রেডিট কার্ড' : 'Credit Card'}</span>
+       <X className="w-4 h-4 stroke-[1.25]" />
      </button>
    </div>
- </div>
 
- <div>
- <label className={`block mb-1.5 overflow-hidden ${lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}`}>
-   <AnimatePresence mode="wait" initial={false}>
-     <motion.span
-       key={editAccountType}
-       initial={{ opacity: 0, y: 3 }}
-       animate={{ opacity: 1, y: 0 }}
-       exit={{ opacity: 0, y: -3 }}
-       transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
-       className="inline-block"
-     >
-       {editAccountType === 'credit_card' ? (lang === 'bn' ? 'কার্ড / হিসাবের নাম' : 'Card / Account Name') : (lang === 'bn' ? 'গ্রাহকের নাম' : 'Customer Name')}
-     </motion.span>
-   </AnimatePresence>
- </label>
- <input
- type="text"
- value={editName}
- onChange={(e) => setEditName(e.target.value)}
- className="w-full px-4 py-2.5 border border-slate-200/80 dark:border-white/[0.1] rounded-2xl bg-slate-50/80 dark:bg-white/[0.04] text-slate-950 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-white text-sm font-bold transition-colors"
- placeholder={editAccountType === 'credit_card' ? (lang === 'bn' ? 'যেমন: সিটি ব্যাংক অ্যামেক্স' : 'e.g. City Bank Amex') : (lang === 'bn' ? 'নাম লিখুন' : 'Enter name')}
- required
- />
- </div>
- <div>
- <label className={`block mb-1.5 ${lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}`}>
- {lang === 'bn' ? 'মোবাইল নম্বর' : 'Mobile Number'}
- </label>
- <div className="flex gap-2">
-    <input
-      type="tel"
-      id="edit_customer_phone"
-      value={editPhone}
-      onChange={(e) => setEditPhone(cleanBangladeshiPhone(e.target.value))}
-      className="flex-1 px-4 py-2.5 border border-slate-200/80 dark:border-white/[0.1] rounded-2xl bg-slate-50/80 dark:bg-white/[0.04] text-slate-950 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-white text-sm font-bold font-mono transition-colors"
-      placeholder={lang === 'bn' ? 'যেমন: ০১৭...' : 'e.g. 017...'}
-    />
-    <button
-      type="button"
-      onClick={() => handlePickContact(async (pickedPhone) => {
-        setEditPhone(pickedPhone);
-        if (selectedCustomer) {
-          setIsSavingEdit(true);
-          try {
-            const rawBilling = parseInt(editBillingDay, 10);
-            const parsedBilling = rawBilling ? Math.min(31, Math.max(1, rawBilling)) : (selectedCustomer.billingDay || 15);
-            await updateCustomerDetails(selectedCustomer.id, editName.trim() || selectedCustomer.name, pickedPhone, {
-              accountType: editAccountType,
-              billingDay: editAccountType === 'credit_card' ? parsedBilling : undefined,
-              photoUrl: editPhotoUrl
-            });
-            setIsEditingCustomer(false);
-            triggerHaptic('single');
-            toast.success(lang === 'bn' ? 'মোবাইল নম্বর ও প্রোফাইল স্বয়ংক্রিয়ভাবে সংরক্ষিত হয়েছে' : 'Profile saved automatically');
-          } catch (err: any) {
-            if (err && (err as any).message === 'DUPLICATE_NAME') {
-              setEditError(lang === 'bn' ? 'এই নামের গ্রাহক ইতিমধ্যে খতিয়ানে সংরক্ষিত আছে।' : 'A customer with this name already exists.');
-            } else {
-              setEditError(lang === 'bn' ? 'সংরক্ষণ করতে ব্যর্থ হয়েছে' : 'Failed to save changes');
-            }
-          } finally {
-            setIsSavingEdit(false);
-          }
-        }
-      })}
-      className="w-11 h-11 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25 rounded-2xl flex items-center justify-center cursor-pointer transition-all shrink-0 touch-press"
-      title={lang === 'bn' ? 'কন্টাক্ট নির্বাচন করুন' : 'Pick Contact'}
-    >
-      <BookUser className="w-5 h-5 text-emerald-600 dark:text-emerald-400 stroke-[1.25]" />
-    </button>
-  </div>
- </div>
+   {/* Desktop 2-Column Top Grid: Contact Portrait + Account Type */}
+   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+     <AppleContactPhotoPicker
+       photoUrl={editPhotoUrl}
+       displayName={editName || selectedCustomer.name}
+       lang={lang}
+       inputRef={editPhotoInputRef}
+       onFileChange={(e) => handleCustomerPhotoSelect(e, 'edit')}
+       onRemove={() => setEditPhotoUrl(null)}
+     />
 
- <AnimatePresence>
+     <div className="space-y-1.5">
+       <label className={`block text-[11px] font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>
+         {lang === 'bn' ? 'হিসাবের ধরন' : 'Account Type'}
+       </label>
+       <div className="relative grid grid-cols-2 p-1 rounded-full bg-slate-900/[0.045] dark:bg-white/[0.05] border border-slate-900/[0.08] dark:border-white/[0.09]">
+         <div
+           aria-hidden="true"
+           className="pointer-events-none absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-slate-950 dark:bg-white shadow-xs transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]"
+           style={{
+             transform: `translate3d(${editAccountType === 'credit_card' ? '100%' : '0%'}, 0, 0)`
+           }}
+         />
+         <button
+           type="button"
+           onClick={() => {
+             triggerHaptic('tick');
+             setEditAccountType('standard');
+           }}
+           className={`relative z-10 py-2.5 px-3 rounded-full text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors duration-150 ${
+             editAccountType === 'standard'
+               ? 'text-white dark:text-slate-950'
+               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+           }`}
+         >
+           <Users className="w-3.5 h-3.5 shrink-0 stroke-[1.25]" />
+           <span className="truncate">{lang === 'bn' ? 'গ্রাহক খতিয়ান' : 'Customer Ledger'}</span>
+         </button>
+         <button
+           type="button"
+           onClick={() => {
+             triggerHaptic('tick');
+             setEditAccountType('credit_card');
+           }}
+           className={`relative z-10 py-2.5 px-3 rounded-full text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors duration-150 ${
+             editAccountType === 'credit_card'
+               ? 'text-white dark:text-slate-950'
+               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+           }`}
+         >
+           <CreditCard className="w-3.5 h-3.5 shrink-0 stroke-[1.25]" />
+           <span className="truncate">{lang === 'bn' ? 'ক্রেডিট কার্ড' : 'Credit Card'}</span>
+         </button>
+       </div>
+     </div>
+   </div>
+
+   {/* Desktop 2-Column Fields Grid: Name + Mobile Number */}
+   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+     <div className="space-y-1.5">
+       <label className={`block ${lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}`}>
+         {editAccountType === 'credit_card' ? (lang === 'bn' ? 'কার্ড / হিসাবের নাম' : 'Card / Account Name') : (lang === 'bn' ? 'গ্রাহকের নাম' : 'Customer Name')}
+       </label>
+       <input
+         type="text"
+         value={editName}
+         onChange={(e) => setEditName(e.target.value)}
+         className="w-full px-4 py-2.5 border border-slate-200/80 dark:border-white/[0.1] rounded-2xl bg-slate-50/80 dark:bg-white/[0.04] text-slate-950 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-white text-sm font-bold transition-colors"
+         placeholder={editAccountType === 'credit_card' ? (lang === 'bn' ? 'যেমন: সিটি ব্যাংক অ্যামেক্স' : 'e.g. City Bank Amex') : (lang === 'bn' ? 'নাম লিখুন' : 'Enter name')}
+         required
+       />
+     </div>
+
+     <div className="space-y-1.5">
+       <label className={`block ${lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}`}>
+         {lang === 'bn' ? 'মোবাইল নম্বর' : 'Mobile Number'}
+       </label>
+       <div className="flex gap-2">
+         <input
+           type="tel"
+           id="edit_customer_phone"
+           value={editPhone}
+           onChange={(e) => setEditPhone(cleanBangladeshiPhone(e.target.value))}
+           className="flex-1 px-4 py-2.5 border border-slate-200/80 dark:border-white/[0.1] rounded-2xl bg-slate-50/80 dark:bg-white/[0.04] text-slate-950 dark:text-white focus:outline-none focus:border-slate-900 dark:focus:border-white text-sm font-bold font-mono transition-colors"
+           placeholder={lang === 'bn' ? 'যেমন: ০১৭...' : 'e.g. 017...'}
+         />
+         <button
+           type="button"
+           onClick={() => handlePickContact(async (pickedPhone) => {
+             setEditPhone(pickedPhone);
+             if (selectedCustomer) {
+               setIsSavingEdit(true);
+               try {
+                 const rawBilling = parseInt(editBillingDay, 10);
+                 const parsedBilling = rawBilling ? Math.min(31, Math.max(1, rawBilling)) : (selectedCustomer.billingDay || 15);
+                 await updateCustomerDetails(selectedCustomer.id, editName.trim() || selectedCustomer.name, pickedPhone, {
+                   accountType: editAccountType,
+                   billingDay: editAccountType === 'credit_card' ? parsedBilling : undefined,
+                   photoUrl: editPhotoUrl
+                 });
+                 setIsEditingCustomer(false);
+                 triggerHaptic('single');
+                 toast.success(lang === 'bn' ? 'মোবাইল নম্বর ও প্রোফাইল স্বয়ংক্রিয়ভাবে সংরক্ষিত হয়েছে' : 'Profile saved automatically');
+               } catch (err: any) {
+                 if (err && (err as any).message === 'DUPLICATE_NAME') {
+                   setEditError(lang === 'bn' ? 'এই নামের গ্রাহক ইতিমধ্যে খতিয়ানে সংরক্ষিত আছে।' : 'A customer with this name already exists.');
+                 } else {
+                   setEditError(lang === 'bn' ? 'সংরক্ষণ করতে ব্যর্থ হয়েছে' : 'Failed to save changes');
+                 }
+               } finally {
+                 setIsSavingEdit(false);
+               }
+             }
+           })}
+           className="px-3.5 bg-white/60 hover:bg-white/90 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-900 dark:text-white border border-slate-900/[0.08] dark:border-white/[0.08] rounded-2xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors shrink-0 font-semibold text-xs"
+           title={lang === 'bn' ? 'কন্টাক্ট নির্বাচন করুন' : 'Pick Contact'}
+         >
+           <BookUser className="w-3.5 h-3.5 text-slate-700 dark:text-slate-300 stroke-[1.25]" />
+           <span className="hidden sm:inline">{lang === 'bn' ? 'কন্টাক্ট' : 'Contacts'}</span>
+         </button>
+       </div>
+     </div>
+   </div>
+
    {editAccountType === 'credit_card' && (
-     <motion.div
-       key="edit-billing-day"
-       initial={{ opacity: 0, y: -8 }}
-       animate={{ opacity: 1, y: 0 }}
-       exit={{ opacity: 0, y: -8 }}
-       className="p-3.5 rounded-2xl surface-subcard border border-slate-200/70 dark:border-white/[0.08]"
-     >
-       <div className="flex items-center justify-between gap-2">
-         <label className={`flex items-center gap-1.5 ${lang === 'bn' ? 'text-[11px] font-bold text-slate-600 dark:text-slate-300 tracking-normal' : 'micro-mono-label text-slate-600 dark:text-slate-300 font-bold'}`}>
-           <Calendar className="w-3.5 h-3.5 stroke-[1.25]" />
-           <span>{lang === 'bn' ? 'স্টেটমেন্ট বিলিং তারিখ (১-৩১)' : 'Statement Billing Day (1–31)'}</span>
-         </label>
+     <div className="p-3.5 rounded-2xl surface-subcard border border-slate-200/70 dark:border-white/[0.08]">
+       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+         <div>
+           <label className={`flex items-center gap-1.5 ${lang === 'bn' ? 'text-[11px] font-bold text-slate-600 dark:text-slate-300 tracking-normal' : 'micro-mono-label text-slate-600 dark:text-slate-300 font-bold'}`}>
+             <Calendar className="w-3.5 h-3.5 stroke-[1.25]" />
+             <span>{lang === 'bn' ? 'স্টেটমেন্ট বিলিং তারিখ (১-৩১)' : 'Statement Billing Day (1–31)'}</span>
+           </label>
+           <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+             {lang === 'bn'
+               ? 'মাসের কোন তারিখে কার্ডের বিল তৈরি হয় তা লিখুন (যেমন: ১৫)'
+               : 'Enter the day of the month your statement generates (1–31)'}
+           </p>
+         </div>
          <input
            type="text"
            inputMode="numeric"
@@ -2657,77 +2702,39 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
              }
              setEditBillingDay(String(Math.min(31, Math.max(1, parseInt(clean, 10)))));
            }}
-           className="w-20 px-2.5 py-1.5 text-center border border-slate-200/80 dark:border-white/[0.1] rounded-xl bg-white/80 dark:bg-white/[0.06] text-slate-950 dark:text-white font-mono font-black text-sm focus:outline-none focus:border-slate-900 dark:focus:border-white placeholder:text-slate-400 placeholder:font-normal"
+           className="w-20 px-3 py-2 text-center border border-slate-200/80 dark:border-white/[0.1] rounded-full bg-white/80 dark:bg-white/[0.06] text-slate-950 dark:text-white font-mono font-bold text-sm focus:outline-none focus:border-slate-900 dark:focus:border-white placeholder:text-slate-400 placeholder:font-normal shrink-0"
          />
        </div>
-     </motion.div>
+     </div>
    )}
- </AnimatePresence>
 
- {editError && (
- <p className="text-xs font-bold text-rose-600 dark:text-rose-400">{editError}</p>
- )}
- <div className="flex items-center gap-2 pt-1">
- <button
- type="button"
- disabled={isSavingEdit}
- onClick={async () => {
- triggerHaptic('single');
- if (!editName.trim()) {
- setEditError(lang === 'bn' ? 'নাম অবশ্যই দিতে হবে' : 'Name is required');
- return;
- }
- const rawBilling = parseInt(editBillingDay, 10);
- if (editAccountType === 'credit_card' && (!rawBilling || rawBilling < 1 || rawBilling > 31)) {
-   setEditError(lang === 'bn' ? 'বিলিং তারিখ ১ থেকে ৩১ এর মধ্যে দিন' : 'Please enter a billing day between 1 and 31');
-   return;
- }
- setIsSavingEdit(true);
- try {
- const parsedBilling = rawBilling ? Math.min(31, Math.max(1, rawBilling)) : undefined;
- await updateCustomerDetails(selectedCustomer.id, editName, editPhone, {
-   accountType: editAccountType,
-   billingDay: editAccountType === 'credit_card' ? parsedBilling : undefined,
-   photoUrl: editPhotoUrl
- });
- setIsEditingCustomer(false);
- toast.success(lang === 'bn' ? 'তথ্য আপডেট করা হয়েছে' : 'Profile updated');
-     } catch (err) {
-      if (err && (err as any).message === 'DUPLICATE_NAME') {
-        setEditError(lang === 'bn' ? 'এই নামের গ্রাহক ইতিমধ্যে খতিয়ানে সংরক্ষিত আছে।' : 'A customer with this name already exists.');
-      } else {
-        setEditError(lang === 'bn' ? 'সংরক্ষণ করতে ব্যর্থ হয়েছে' : 'Failed to save changes');
-      }
-    } finally {
- setIsSavingEdit(false);
- }
- }}
- className="px-5 py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold text-xs rounded-full transition-colors cursor-pointer touch-press"
- >
- {isSavingEdit ? (lang === 'bn' ? 'সংরক্ষণ হচ্ছে...' : 'Saving...') : (lang === 'bn' ? 'সংরক্ষণ করুন' : 'Save')}
- </button>
- <button
- type="button"
- disabled={isSavingEdit}
- onClick={() => {
-   triggerHaptic('single');
-   setIsEditingCustomer(false);
- }}
- className="px-5 py-2.5 bg-slate-100/90 hover:bg-slate-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-800 dark:text-slate-200 font-bold text-xs rounded-full border border-slate-200/80 dark:border-white/[0.08] transition-colors cursor-pointer touch-press"
- >
- {lang === 'bn' ? 'বাতিল' : 'Cancel'}
- </button>
- </div>
- </motion.div>
+   {editError && (
+     <p className="text-xs font-bold text-rose-600 dark:text-rose-400">{editError}</p>
+   )}
+
+   <div className="flex items-center justify-end gap-2.5 pt-2">
+     <button
+       type="button"
+       disabled={isSavingEdit}
+       onClick={() => {
+         triggerHaptic('single');
+         setIsEditingCustomer(false);
+       }}
+       className="px-4 py-2 bg-slate-100/90 hover:bg-slate-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-800 dark:text-slate-200 font-bold text-xs rounded-full border border-slate-200/80 dark:border-white/[0.08] transition-colors cursor-pointer touch-press"
+     >
+       {lang === 'bn' ? 'বাতিল' : 'Cancel'}
+     </button>
+     <button
+       type="submit"
+       disabled={isSavingEdit}
+       className="px-5 py-2 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold text-xs rounded-full transition-colors cursor-pointer touch-press disabled:opacity-70"
+     >
+       {isSavingEdit ? (lang === 'bn' ? 'সংরক্ষণ হচ্ছে...' : 'Saving...') : (lang === 'bn' ? 'সংরক্ষণ করুন' : 'Save')}
+     </button>
+   </div>
+ </form>
  ) : (
- <motion.div
-   key="view-customer-info"
-   initial={{ opacity: 0, y: 6 }}
-   animate={{ opacity: 1, y: 0 }}
-   exit={{ opacity: 0, y: -4 }}
-   transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-   className="flex items-start gap-3.5 min-w-0 pr-28"
- >
+ <div className="flex items-start gap-3.5 min-w-0 pr-28">
  {selectedCustomer.photoUrl && !detailAvatarError ? (
    <div className="p-[2px] rounded-full contact-avatar-ring shrink-0 mt-0.5">
      <img
@@ -2808,10 +2815,8 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
    </p>
  )}
  </div>
- </motion.div>
+ </div>
  )}
- </AnimatePresence>
-
  </div>
  {/* CURRENT BALANCE CARD + SUBTLE LEFT ELLIPSIS TOGGLE FOR TOTAL BILLED & TOTAL PAID */}
  <div className="pt-3 border-t border-slate-900/[0.06] dark:border-white/[0.06] space-y-3 relative z-10">
