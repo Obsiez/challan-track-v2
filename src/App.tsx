@@ -84,6 +84,7 @@ const MobileBottomDock = React.memo(({
 }) => {
   const dockRef = React.useRef<HTMLDivElement>(null);
   const trackRef = React.useRef<HTMLDivElement>(null);
+  const trackLeftRef = React.useRef<number | null>(null);
   const [dockWidth, setDockWidth] = useState<number>(() => {
     if (typeof window === 'undefined') return 360;
     return Math.min(420, Math.max(260, window.innerWidth - 32));
@@ -96,6 +97,9 @@ const MobileBottomDock = React.memo(({
       const w = el.clientWidth;
       if (w > 0) {
         setDockWidth((prev) => (Math.abs(prev - w) > 0.5 ? w : prev));
+      }
+      if (trackRef.current) {
+        trackLeftRef.current = trackRef.current.getBoundingClientRect().left;
       }
     };
     measure();
@@ -256,9 +260,13 @@ const MobileBottomDock = React.memo(({
   const getIndexFromClientX = (clientX: number) => {
     const track = trackRef.current;
     if (!track) return { idx: activeNavIndex, pillCenterX: restingPillCenterX, relX: restingPillCenterX };
-    const rect = track.getBoundingClientRect();
+    let trackLeft = trackLeftRef.current;
+    if (trackLeft === null) {
+      trackLeft = track.getBoundingClientRect().left;
+      trackLeftRef.current = trackLeft;
+    }
     const colW = activeTrackWidth / 4;
-    const relX = clientX - rect.left;
+    const relX = clientX - trackLeft;
     const idx = Math.max(0, Math.min(3, Math.floor(relX / colW)));
     const clampedCenterX = Math.max(colW / 2, Math.min(activeTrackWidth - colW / 2, relX));
     return { idx, pillCenterX: clampedCenterX, relX };
@@ -409,7 +417,7 @@ const MobileBottomDock = React.memo(({
         {/* Glass Capsule Background (animates explicit width so semicircular pill ends never stretch horizontally) */}
         <div
           aria-hidden="true"
-          className="glass-chrome-bottom pointer-events-none absolute left-0 top-0 h-[56px] rounded-full will-change-[width]"
+          className="glass-chrome-bottom pointer-events-none absolute left-0 top-0 h-[56px] rounded-full"
           style={{
             width: `${showQuickEntryFab ? shrunkDockWidth : dockWidth}px`,
             transform: 'translate3d(0, 0, 0)',
@@ -456,6 +464,7 @@ const MobileBottomDock = React.memo(({
                 transform: isActive
                   ? 'translate3d(0, -1px, 0) scale(1.07)'
                   : 'translate3d(0, 0, 0) scale(1)',
+                willChange: 'transform',
                 backfaceVisibility: 'hidden',
                 WebkitBackfaceVisibility: 'hidden',
                 transition: reducedMotion
@@ -464,6 +473,7 @@ const MobileBottomDock = React.memo(({
               });
               const labelSpringStyle = (isActive: boolean): React.CSSProperties => ({
                 transform: isActive ? 'translate3d(0, 0, 0) scale(1.01)' : 'translate3d(0, 0.5px, 0) scale(0.99)',
+                willChange: 'transform',
                 backfaceVisibility: 'hidden',
                 WebkitBackfaceVisibility: 'hidden',
                 transition: reducedMotion
