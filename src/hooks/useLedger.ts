@@ -17,8 +17,9 @@ import {
  getDocs
 } from 'firebase/firestore';
 import { db, auth, OperationType } from '../firebase';
-import { Customer, Transaction, Reminder, UserSettings, SavingGoal, GoalContribution, ImportProgress, TransactionAuditEntry } from '../types';
+import { Customer, Transaction, Reminder, UserSettings, SavingGoal, GoalContribution, ImportProgress, TransactionAuditEntry, UserTagConfig } from '../types';
 import { cleanBangladeshiPhone } from '../lib/phoneUtils';
+import { DEFAULT_TAG_CONFIG, sanitizeTagConfig, setUserTagConfigState, resetUserTagConfigState } from '../lib/tagSystem';
 
 export function useLedger(
   userId: string | undefined, 
@@ -41,6 +42,16 @@ export function useLedger(
     if (typeof dateField.seconds === 'number') return new Date(dateField.seconds * 1000);
     const parsed = new Date(dateField);
     return isNaN(parsed.getTime()) ? new Date() : parsed;
+  };
+
+  const compareTxNewestFirst = (a: Transaction, b: Transaction): number => {
+    const dateDiff = parseTxDate(b.date).getTime() - parseTxDate(a.date).getTime();
+    if (dateDiff !== 0) return dateDiff;
+    const createdDiff =
+      parseTxDate(b.createdAt || b.date).getTime() -
+      parseTxDate(a.createdAt || a.date).getTime();
+    if (createdDiff !== 0) return createdDiff;
+    return String(b.id || '').localeCompare(String(a.id || ''));
   };
 
   const normalizeTxDescription = (desc: any): string => {
@@ -129,6 +140,7 @@ export function useLedger(
   const [archivedStatements, setArchivedStatements] = useState<Transaction[]>([]);
   const archivedTxIdsRef = useRef<Set<string>>(new Set());
   const [tagIntelligenceTransactions, setTagIntelligenceTransactions] = useState<Transaction[]>([]);
+  const [tagConfig, setTagConfig] = useState<UserTagConfig>(DEFAULT_TAG_CONFIG);
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const settingsRef = useRef<UserSettings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -335,7 +347,8 @@ const lastSubmitRef = useRef<{
             description: normalizeTxDescription(t.description),
             date: new Date(t.date),
             createdAt: new Date(t.createdAt)
-          }));
+          }))
+          .sort(compareTxNewestFirst);
         setTransactions(parsedLocalTxs);
       } else {
         setTransactions([]);
@@ -354,32 +367,47 @@ const lastSubmitRef = useRef<{
       }
       const seededTagIntel = mergeTagIntelligenceList(parsedTagIntel, parsedLocalTxs);
       setTagIntelligenceTransactions(seededTagIntel);
-      try {
-        localStorage.setItem(`easy_due_tag_intelligence_${userId}`, JSON.stringify(seededTagIntel));
-      } catch {}
+       try {
+         localStorage.setItem(`easy_due_tag_intelligence_${userId}`, JSON.stringify(seededTagIntel));
+       } catch {}
 
- if (storedSettings) {
-        const parsed = JSON.parse(storedSettings);
-        if (!parsed.theme || (parsed.theme !== 'light' && parsed.theme !== 'dark')) {
-          parsed.theme = 'dark';
+      const storedTagCfg = localStorage.getItem(`easy_due_tag_config_${userId}`);
+      if (storedTagCfg) {
+        try {
+          const parsedCfg = sanitizeTagConfig(JSON.parse(storedTagCfg));
+          setTagConfig(parsedCfg);
+          setUserTagConfigState(parsedCfg);
+        } catch {
+          setTagConfig(DEFAULT_TAG_CONFIG);
+          setUserTagConfigState(DEFAULT_TAG_CONFIG);
         }
-        setSettings(parsed);
- } else {
-        setSettings({
-          uid: userId,
-          email: auth.currentUser?.email || 'guest@challantrack.local',
-          theme: 'dark',
-          dailyReminderTime: '09:00',
-          autoMergeStatements: false,
-          statementKeepCount: 15,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        });
- }
- } catch (e) {
- console.warn("Failed to parse local stored ledger data:", e);
- }
- };
+      } else {
+        setTagConfig(DEFAULT_TAG_CONFIG);
+        setUserTagConfigState(DEFAULT_TAG_CONFIG);
+      }
+
+  if (storedSettings) {
+         const parsed = JSON.parse(storedSettings);
+         if (!parsed.theme || (parsed.theme !== 'light' && parsed.theme !== 'dark')) {
+           parsed.theme = 'dark';
+         }
+         setSettings(parsed);
+  } else {
+         setSettings({
+           uid: userId,
+           email: auth.currentUser?.email || 'guest@challantrack.local',
+           theme: 'dark',
+           dailyReminderTime: '09:00',
+           autoMergeStatements: false,
+           statementKeepCount: 15,
+           createdAt: new Date().toISOString(),
+           updatedAt: new Date().toISOString()
+         });
+  }
+  } catch (e) {
+  console.warn("Failed to parse local stored ledger data:", e);
+  }
+  };
 
  // Local storage save operations
  const saveLocalCustomers = (list: Customer[]) => {
@@ -393,6 +421,13 @@ const lastSubmitRef = useRef<{
  };
  const saveLocalSettings = (val: UserSettings) => {
  localStorage.setItem(`easy_due_settings_${userId}`, JSON.stringify(val));
+ };
+ const saveLocalTagConfig = (val: UserTagConfig) => {
+   try {
+     localStorage.setItem(`easy_due_tag_config_${userId}`, JSON.stringify(val));
+   } catch (e) {
+     console.warn('Failed to persist local tag config:', e);
+   }
  };
  const saveLocalArchivedStatements = (list: Transaction[]) => {
    localStorage.setItem(`easy_due_archived_statements_${userId}`, JSON.stringify(list));
@@ -433,6 +468,8 @@ const lastSubmitRef = useRef<{
       setCustomers([]);
       setTransactions([]);
       setTagIntelligenceTransactions([]);
+      setTagConfig(DEFAULT_TAG_CONFIG);
+      resetUserTagConfigState();
       setReminders([]);
       setSettings(null);
       setCustomersSynced(true);
@@ -440,6 +477,31 @@ const lastSubmitRef = useRef<{
       setLoading(false);
     }
   }, [userId]);
+
+  // 1b. Sync per-account custom tags & logos from Firestore
+  useEffect(() => {
+    if (!userId || userId === 'local-guest-session' || isOfflineFallback) {
+      return;
+    }
+
+    const tagCfgRef = doc(db, 'users', userId, 'tag_config', 'default');
+    const unsubscribe = onSnapshot(
+      tagCfgRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const sanitized = sanitizeTagConfig(docSnap.data() as Partial<UserTagConfig>);
+          setTagConfig(sanitized);
+          setUserTagConfigState(sanitized);
+          saveLocalTagConfig(sanitized);
+        }
+      },
+      (err) => {
+        console.warn('Firestore error syncing tag_config, keeping local cache:', err);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [userId, isOfflineFallback]);
 
  // 1. Sync User settings
  useEffect(() => {
@@ -551,7 +613,8 @@ const lastSubmitRef = useRef<{
             description: normalizeTxDescription(t.description),
             date: parseTxDate(t.date),
             createdAt: parseTxDate(t.createdAt)
-          }));
+          }))
+          .sort(compareTxNewestFirst);
         setAllCustomerTxs(parsed);
         setActiveCustomerTxCount(parsed.length);
       }
@@ -581,12 +644,8 @@ const lastSubmitRef = useRef<{
         } as Transaction);
       });
 
-      // Client-side sort descending by date (newest first)
-      list.sort((a, b) => {
-        const dateA = parseTxDate(a.date).getTime();
-        const dateB = parseTxDate(b.date).getTime();
-        return dateB - dateA;
-      });
+      // Client-side sort descending by date + createdAt tie-breaker (newest first)
+      list.sort(compareTxNewestFirst);
 
       const currentSettings = settingsRef.current;
       const rawKeep = Number(currentSettings?.statementKeepCount) || 15;
@@ -630,11 +689,7 @@ const lastSubmitRef = useRef<{
     if (userId === 'local-guest-session' || isOfflineFallback) {
       return transactions
         .filter(t => t.customerId === activeCustomerId && !archivedTxIdsRef.current.has(t.id))
-        .sort((a, b) => {
-          const dateA = parseTxDate(a.date).getTime();
-          const dateB = parseTxDate(b.date).getTime();
-          return dateB - dateA;
-        });
+        .sort(compareTxNewestFirst);
     }
     return allCustomerTxs;
   }, [userId, isOfflineFallback, activeCustomerId, transactions, allCustomerTxs]);
@@ -1106,6 +1161,44 @@ const lastSubmitRef = useRef<{
  }
  };
 
+  // Save per-account Tag Configuration (disabled defaults + custom tags & logos)
+  const saveTagConfig = async (nextConfig: UserTagConfig) => {
+    if (!userId) return;
+    const sanitized = sanitizeTagConfig({
+      ...nextConfig,
+      updatedAt: new Date().toISOString(),
+    });
+    setTagConfig(sanitized);
+    setUserTagConfigState(sanitized);
+    saveLocalTagConfig(sanitized);
+
+    if (userId === 'local-guest-session' || isOfflineFallback) {
+      return;
+    }
+
+    const tagCfgRef = doc(db, 'users', userId, 'tag_config', 'default');
+    try {
+      await setDoc(tagCfgRef, {
+        disabledDueTags: sanitized.disabledDueTags,
+        disabledPaymentTags: sanitized.disabledPaymentTags,
+        customTags: sanitized.customTags.map((c) => ({
+          id: c.id,
+          type: c.type,
+          name: c.name,
+          color: c.color,
+          logoDataUrl: c.logoDataUrl || null,
+          imageOnly: Boolean(c.imageOnly && c.logoDataUrl),
+          enabled: Boolean(c.enabled),
+          createdAt: c.createdAt || sanitized.updatedAt,
+          updatedAt: c.updatedAt || sanitized.updatedAt,
+        })),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.warn('Firestore saveTagConfig failed, saved locally:', err);
+    }
+  };
+
   // Sync Archived Statements collection (merging remote with local cache so local archives are never lost)
   useEffect(() => {
     if (!userId || userId === 'local-guest-session' || isOfflineFallback) return;
@@ -1220,9 +1313,7 @@ const lastSubmitRef = useRef<{
       }
     }
 
-    const custTxs = Array.from(txMap.values()).sort(
-      (a, b) => parseTxDate(b.date).getTime() - parseTxDate(a.date).getTime()
-    );
+    const custTxs = Array.from(txMap.values()).sort(compareTxNewestFirst);
 
     if (custTxs.length <= keepCount) {
       try {
@@ -1263,9 +1354,7 @@ const lastSubmitRef = useRef<{
 
     setArchivedStatements(prev => {
       const existingFiltered = prev.filter(a => !archiveIds.has(a.id));
-      const merged = [...toArchive, ...existingFiltered].sort(
-        (a, b) => parseTxDate(b.date).getTime() - parseTxDate(a.date).getTime()
-      );
+      const merged = [...toArchive, ...existingFiltered].sort(compareTxNewestFirst);
       saveLocalArchivedStatements(merged);
       return merged;
     });
@@ -1755,7 +1844,7 @@ const lastSubmitRef = useRef<{
    createdAt: new Date()
  };
 
- const updatedTxs = [newTx, ...transactions];
+ const updatedTxs = [newTx, ...transactions].sort(compareTxNewestFirst);
  
  let found = false;
  let updatedCustomers = customers.map(c => {
@@ -1792,13 +1881,30 @@ const lastSubmitRef = useRef<{
  saveLocalTransactions(updatedTxs);
  saveLocalCustomers(updatedCustomers);
 
+ // Keep per-customer local cache synchronized immediately for instant re-opens & QuickEntry cycle math
+ try {
+   const cacheKey = `easy_due_txs_${userId}_${customerId}`;
+   const rawCached = localStorage.getItem(cacheKey);
+   if (rawCached || customerId === activeCustomerId) {
+     const existingCached: Transaction[] = rawCached
+       ? JSON.parse(rawCached).map((t: any) => ({
+           ...t,
+           date: parseTxDate(t.date),
+           createdAt: parseTxDate(t.createdAt || t.date),
+         }))
+       : [];
+     const nextCached = [newTx, ...existingCached.filter(t => t.id !== newTx.id)].sort(compareTxNewestFirst);
+     localStorage.setItem(cacheKey, JSON.stringify(nextCached));
+   }
+ } catch {}
+
  if (customerId === activeCustomerId) {
-   setAllCustomerTxs(prev => [newTx, ...prev.filter(t => t.id !== newTx.id)]);
+   setAllCustomerTxs(prev => [newTx, ...prev.filter(t => t.id !== newTx.id)].sort(compareTxNewestFirst));
    setActiveCustomerTxCount(prev => prev + 1);
  }
 
  if (selectedDailyDate && parseTxDate(date).toDateString() === selectedDailyDate.toDateString()) {
-   setArchiveTransactions(prev => [newTx, ...prev.filter(t => t.id !== newTx.id)]);
+   setArchiveTransactions(prev => [newTx, ...prev.filter(t => t.id !== newTx.id)].sort(compareTxNewestFirst));
  }
 
  adjustLocalMonthlySummaries(null, newTx);
@@ -3405,6 +3511,9 @@ const lastSubmitRef = useRef<{
         localStorage.setItem('search_bangla_in_english', String(backupData.preferences.searchBanglaInEnglish));
         window.dispatchEvent(new CustomEvent('phonetic-search-toggle', { detail: { enabled: Boolean(backupData.preferences.searchBanglaInEnglish) } }));
       }
+      if (backupData.tagConfig) {
+        await saveTagConfig(sanitizeTagConfig(backupData.tagConfig));
+      }
     } catch (e) {
       // ignore
     }
@@ -3899,6 +4008,7 @@ const lastSubmitRef = useRef<{
         type: t.type,
         amount: t.amount,
         description: t.description,
+        ...(t.tag ? { tag: t.tag } : {}),
         date: t.date instanceof Date ? t.date.toISOString() : (t.date?.toDate ? t.date.toDate().toISOString() : t.date),
         createdAt: t.createdAt instanceof Date ? t.createdAt.toISOString() : (t.createdAt?.toDate ? t.createdAt.toDate().toISOString() : t.createdAt),
         ...(t.isEdited ? { isEdited: true } : {}),
@@ -3954,7 +4064,8 @@ const lastSubmitRef = useRef<{
             return false;
           }
         })()
-      }
+      },
+      tagConfig
     };
   };
 
@@ -4006,6 +4117,8 @@ const lastSubmitRef = useRef<{
     archivedStatements,
     updateStatementAutoMerge,
     archiveCustomerExcessStatements,
-    exportArchivedStatements
+    exportArchivedStatements,
+    tagConfig,
+    saveTagConfig
   };
 }

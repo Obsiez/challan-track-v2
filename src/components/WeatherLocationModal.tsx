@@ -5,7 +5,6 @@ import {
   Search,
   MapPin,
   Navigation,
-  Loader2,
   Sun,
   Moon,
   CloudSun,
@@ -20,6 +19,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import ModalPortal, { useModalScrollLock } from './ModalPortal';
+import LoadingSpinner from './LoadingSpinner';
 import { Language, formatNumber } from '../lib/translations';
 import { triggerHaptic } from '../lib/haptics';
 import {
@@ -264,7 +264,7 @@ export default function WeatherLocationModal({
                     <div className="flex items-center gap-3.5 min-w-0">
                       <div className="w-12 h-12 rounded-2xl bg-[var(--accent-color)]/12 text-[var(--accent-color)] flex items-center justify-center shrink-0">
                         {isLoadingWeather && !weather ? (
-                          <Loader2 className="w-5 h-5 animate-spin stroke-[1.5]" />
+                          <LoadingSpinner size="md" />
                         ) : (
                           <WeatherGlyph
                             kind={weatherMeta?.icon || 'partly-cloudy'}
@@ -298,10 +298,10 @@ export default function WeatherLocationModal({
                         onSelectLocation(currentLocation, true);
                       }}
                       disabled={isLoadingWeather}
-                      className="w-9 h-9 rounded-full bg-white/60 dark:bg-white/[0.06] hover:bg-white dark:hover:bg-white/[0.12] border border-slate-900/[0.08] dark:border-white/[0.08] text-slate-700 dark:text-slate-200 flex items-center justify-center transition-colors cursor-pointer shrink-0 disabled:opacity-50"
+                      className="w-9 h-9 rounded-full bg-white/60 dark:bg-white/[0.06] hover:bg-white dark:hover:bg-white/[0.12] border border-slate-900/[0.08] dark:border-white/[0.08] text-slate-700 dark:text-slate-200 flex items-center justify-center transition-colors cursor-pointer shrink-0 disabled:opacity-75"
                       title={lang === 'bn' ? 'রিফ্রেশ করুন' : 'Refresh'}
                     >
-                      <RefreshCw className={`w-4 h-4 stroke-[1.5] ${isLoadingWeather ? 'animate-spin' : ''}`} />
+                      <RefreshCw className={`w-4 h-4 stroke-[1.5] ${isLoadingWeather ? 'animate-spin text-[var(--accent-color)]' : ''}`} />
                     </button>
                   </div>
 
@@ -333,7 +333,7 @@ export default function WeatherLocationModal({
                   className="w-full py-3 px-4 rounded-2xl bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-semibold text-sm flex items-center justify-center gap-2.5 transition-all cursor-pointer touch-press disabled:opacity-60"
                 >
                   {isLocating ? (
-                    <Loader2 className="w-4 h-4 animate-spin stroke-[1.75]" />
+                    <LoadingSpinner size="sm" />
                   ) : (
                     <Navigation className="w-4 h-4 stroke-[1.75]" />
                   )}
@@ -364,7 +364,7 @@ export default function WeatherLocationModal({
                       className="w-full pl-10 pr-9 py-2.5 bg-white/55 dark:bg-white/[0.05] border border-slate-900/[0.08] dark:border-white/[0.1] rounded-xl text-sm text-slate-950 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-900/40 dark:focus:border-white/40 outline-none transition-colors"
                     />
                     {isSearching && (
-                      <Loader2 className="w-4 h-4 animate-spin text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+                      <LoadingSpinner size="sm" className="text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
                     )}
                   </div>
 

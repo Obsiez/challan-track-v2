@@ -356,12 +356,14 @@ export const translations = {
  }
 };
 
+const EN_IN_NUMBER_FORMATTER = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 0 });
+const BENGALI_DIGITS = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'] as const;
+
 // Converters for Bengali numerals if language is Bangla
 export function formatNumber(val: number, lang: Language): string {
- const formattedEn = val.toLocaleString('en-IN', { minimumFractionDigits: 0 });
+ const formattedEn = EN_IN_NUMBER_FORMATTER.format(val);
  if (lang === 'bn') {
- const bengaliDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
- return formattedEn.replace(/[0-9]/g, (digit) => bengaliDigits[parseInt(digit, 10)]);
+   return formattedEn.replace(/[0-9]/g, (digit) => BENGALI_DIGITS[digit.charCodeAt(0) - 48]);
  }
  return formattedEn;
 }

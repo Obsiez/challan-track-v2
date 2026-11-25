@@ -19,12 +19,10 @@ import {
   loadSavedWeatherLocation,
   saveWeatherLocation
 } from '../lib/weather';
-import {
-  StaggerReveal,
-  SpotlightCard,
-  ScrollParallaxStage,
-  CircularGauge
-} from './MotionPrimitives';
+import { SpotlightCard, StaggerReveal, ScrollParallaxStage, CircularGauge, areTransitionsDisabled } from './MotionPrimitives';
+
+const DASH_TIME_FORMATTER_EN = new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit' });
+const DASH_TIME_FORMATTER_BN = new Intl.DateTimeFormat('bn-BD', { hour: '2-digit', minute: '2-digit' });
 
 const parseFirestoreDate = (dateVal: any): Date => {
   if (!dateVal) return new Date();
@@ -140,6 +138,26 @@ const Dashboard = React.memo(function Dashboard({
   const [weather, setWeather] = useState<WeatherData | null>(() => loadCachedWeather(loadSavedWeatherLocation()));
   const [isLoadingWeather, setIsLoadingWeather] = useState(false);
   const [isWeatherModalOpen, setIsWeatherModalOpen] = useState(false);
+  const [deferredAnalyticsReady, setDeferredAnalyticsReady] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return window.innerWidth >= 768 || areTransitionsDisabled();
+  });
+
+  useEffect(() => {
+    if (deferredAnalyticsReady) return;
+    let timerId: number | null = null;
+    const rafId = window.requestAnimationFrame(() => {
+      timerId = window.setTimeout(() => {
+        React.startTransition(() => {
+          setDeferredAnalyticsReady(true);
+        });
+      }, 280);
+    });
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      if (timerId !== null) window.clearTimeout(timerId);
+    };
+  }, [deferredAnalyticsReady]);
 
   const loadWeatherFor = useCallback((loc: WeatherLocation, forceRefresh = false) => {
     setWeatherLocation(loc);
@@ -152,6 +170,7 @@ const Dashboard = React.memo(function Dashboard({
         return;
       }
     }
+    const startedAt = Date.now();
     setIsLoadingWeather(true);
     fetchCurrentWeather(loc, { forceRefresh })
       .then((data) => {
@@ -161,6 +180,14 @@ const Dashboard = React.memo(function Dashboard({
         // Keep last known weather on offline/transient failure
       })
       .finally(() => {
+        if (forceRefresh) {
+          const elapsed = Date.now() - startedAt;
+          const remaining = Math.max(0, 620 - elapsed);
+          if (remaining > 0) {
+            window.setTimeout(() => setIsLoadingWeather(false), remaining);
+            return;
+          }
+        }
         setIsLoadingWeather(false);
       });
   }, []);
@@ -232,11 +259,6 @@ const Dashboard = React.memo(function Dashboard({
     ready: false,
   });
 
-  const isDesktop = useMemo(() => {
-    if (typeof window === 'undefined') return false;
-    return window.matchMedia('(min-width: 768px)').matches;
-  }, []);
-
   const stats = useMemo(() => {
     const totalOutstanding = customers.reduce((sum, c) => sum + (c.outstandingDue > 0 ? c.outstandingDue : 0), 0);
     const activeDebtorsCount = customers.filter(c => c.outstandingDue > 0).length;
@@ -246,10 +268,11 @@ const Dashboard = React.memo(function Dashboard({
 
     const midnight = new Date();
     midnight.setHours(0, 0, 0, 0);
+    const todayDateStr = midnight.toDateString();
 
     const todayTxs = transactions.filter(tx => {
       const txDate = parseFirestoreDate(tx.date);
-      return txDate.toDateString() === new Date().toDateString() || txDate >= midnight;
+      return txDate.toDateString() === todayDateStr || txDate >= midnight;
     });
 
     const duesToday = todayTxs
@@ -788,7 +811,7 @@ const Dashboard = React.memo(function Dashboard({
           3. PRIORITY DEBTORS HORIZONTAL RIBBON (Cardless Section, No Box Wrapper)
           ========================================================================= */}
       {stats.topDebtors.length > 0 && (
-        <section className="space-y-3">
+        <section className="space-y-3 [content-visibility:auto] [contain-intrinsic-size:auto_220px]">
           <span className={`text-slate-600 dark:text-slate-300 block ${subheaderTracking}`}>
             {lang === 'bn' ? 'শীর্ষ বকেয়া অ্যাকাউন্ট' : 'Priority Receivables'}
           </span>
@@ -839,7 +862,7 @@ const Dashboard = React.memo(function Dashboard({
       {/* =========================================================================
           4. TODAY'S QUICK BOOK JOURNAL (Floating Filter Bar + Hairline Feed)
           ========================================================================= */}
-      <section className="space-y-3.5">
+      <section className="space-y-3.5 [content-visibility:auto] [contain-intrinsic-size:auto_420px]">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-baseline gap-2.5">
             <h2 className="text-lg sm:text-xl font-display font-extrabold text-slate-950 dark:text-white tracking-tight">
@@ -997,10 +1020,7 @@ const Dashboard = React.memo(function Dashboard({
                           </span>
                         )}
                         <span>
-                          {new Date(parseFirestoreDate(tx.date)).toLocaleTimeString(lang === 'bn' ? 'bn-BD' : 'en-US', {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
+                          {(lang === 'bn' ? DASH_TIME_FORMATTER_BN : DASH_TIME_FORMATTER_EN).format(parseFirestoreDate(tx.date))}
                         </span>
                       </div>
                     </div>
@@ -1027,25 +1047,31 @@ const Dashboard = React.memo(function Dashboard({
       {/* =========================================================================
           5. INTEGRATED MONTHLY ANALYTICS & INSIGHTS
           ========================================================================= */}
-      <div className="pt-2">
-        <AnalyticsManager
-          customers={customers}
-          monthlySummaries={monthlySummaries}
-          lang={lang}
-          animateOnDesktop={isDesktop || true}
-          onSelectCustomer={onSelectCustomer}
-        />
-      </div>
+      {deferredAnalyticsReady ? (
+        <div className="pt-2 [content-visibility:auto] [contain-intrinsic-size:auto_760px]">
+          <AnalyticsManager
+            customers={customers}
+            monthlySummaries={monthlySummaries}
+            lang={lang}
+            animateOnDesktop={true}
+            onSelectCustomer={onSelectCustomer}
+          />
+        </div>
+      ) : (
+        <div aria-hidden="true" className="pt-2 min-h-[680px]" />
+      )}
       {/* Weather & Location Selector Popup */}
-      <WeatherLocationModal
-        isOpen={isWeatherModalOpen}
-        onClose={() => setIsWeatherModalOpen(false)}
-        weather={weather}
-        currentLocation={weatherLocation}
-        isLoadingWeather={isLoadingWeather}
-        onSelectLocation={loadWeatherFor}
-        lang={lang}
-      />
+      {isWeatherModalOpen && (
+        <WeatherLocationModal
+          isOpen={isWeatherModalOpen}
+          onClose={() => setIsWeatherModalOpen(false)}
+          weather={weather}
+          currentLocation={weatherLocation}
+          isLoadingWeather={isLoadingWeather}
+          onSelectLocation={loadWeatherFor}
+          lang={lang}
+        />
+      )}
     </div>
   );
 });

@@ -29,6 +29,7 @@ import ContactNumberPickerModal from './ContactNumberPickerModal';
 import { cleanBangladeshiPhone } from '../lib/phoneUtils';
 import { StaggerReveal, SpotlightCard, ScrollParallaxStage, ClientCardStage } from './MotionPrimitives';
 import ModalPortal, { useModalScrollLock } from './ModalPortal';
+import LoadingSpinner from './LoadingSpinner';
 import { TagIcon, TagPickerBar, getTagDefaultDescription, getTagMeta, EXPENSE_TAGS, PAYMENT_TAGS, useHorizontalDragWheelScroll } from '../lib/tagSystem';
 
 const WhatsAppIcon = () => (
@@ -690,6 +691,7 @@ const CustomerManager = React.memo(function CustomerManager({
  const [actionTag, setActionTag] = useState<string | null>(null);
  const [ledgerTagFilter, setLedgerTagFilter] = useState<string | null>(null);
  const [actionTargetCycle, setActionTargetCycle] = useState<'unbilled' | 'billed'>('unbilled');
+ const [paymentQuickFillIntent, setPaymentQuickFillIntent] = useState<'billed' | 'total' | null>(null);
  const [txSubmitting, setTxSubmitting] = useState(false);
 
  // Credit Card Billing Cycle View Tab ('unbilled' = This Month, 'billed' = Last Month)
@@ -1476,21 +1478,34 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     const lastCutoffMs = lastStatementDate.getTime();
     const prevCutoffMs = prevStatementDate.getTime();
 
-    const unbilledTxs: Transaction[] = [];
-    const billedTxs: Transaction[] = [];
+    const unbilledWithMeta: Array<{ tx: Transaction; txMs: number; createdMs: number; idx: number }> = [];
+    const billedWithMeta: Array<{ tx: Transaction; txMs: number; createdMs: number; idx: number }> = [];
     const lastCycleOnlyTxs: Transaction[] = [];
 
-    selectedCustomerAllTransactions.forEach((tx) => {
+    selectedCustomerAllTransactions.forEach((tx, idx) => {
       const txMs = parseFirestoreDate(tx.date).getTime();
+      const createdMs = parseFirestoreDate(tx.createdAt || tx.date).getTime();
       if (txMs >= lastCutoffMs) {
-        unbilledTxs.push(tx);
+        unbilledWithMeta.push({ tx, txMs, createdMs, idx });
       } else {
-        billedTxs.push(tx);
+        billedWithMeta.push({ tx, txMs, createdMs, idx });
         if (txMs >= prevCutoffMs) {
           lastCycleOnlyTxs.push(tx);
         }
       }
     });
+
+    const sortNewestEntries = (
+      a: { txMs: number; createdMs: number; idx: number },
+      b: { txMs: number; createdMs: number; idx: number }
+    ) => {
+      if (b.txMs !== a.txMs) return b.txMs - a.txMs;
+      if (b.createdMs !== a.createdMs) return b.createdMs - a.createdMs;
+      return a.idx - b.idx;
+    };
+
+    const unbilledTxs = unbilledWithMeta.sort(sortNewestEntries).map((item) => item.tx);
+    const billedTxs = billedWithMeta.sort(sortNewestEntries).map((item) => item.tx);
 
     const thisMonthSpend = unbilledTxs
       .filter((t) => t.type === 'due')
@@ -1593,11 +1608,12 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       ? activeCycleTransactions.filter(tx => tx.tag === ledgerTagFilter)
       : activeCycleTransactions;
 
-    const groups: Record<string, { dayMs: number; items: Array<{ tx: Transaction; txMs: number }> }> = {};
+    const groups: Record<string, { dayMs: number; items: Array<{ tx: Transaction; txMs: number; createdMs: number; idx: number }> }> = {};
     for (let i = 0; i < sourceTxs.length; i++) {
       const tx = sourceTxs[i];
       const d = parseFirestoreDate(tx.date);
       const txMs = d.getTime();
+      const createdMs = parseFirestoreDate(tx.createdAt || tx.date).getTime();
       const dayKey = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
       if (!groups[dayKey]) {
         groups[dayKey] = {
@@ -1605,7 +1621,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           items: [],
         };
       }
-      groups[dayKey].items.push({ tx, txMs });
+      groups[dayKey].items.push({ tx, txMs, createdMs, idx: i });
     }
 
     return Object.entries(groups)
@@ -1616,7 +1632,13 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
         tagKey: '',
         label: '',
         dateObj: new Date(group.dayMs),
-        items: group.items.sort((a, b) => b.txMs - a.txMs).map(item => item.tx),
+        items: group.items
+          .sort((a, b) => {
+            if (b.txMs !== a.txMs) return b.txMs - a.txMs;
+            if (b.createdMs !== a.createdMs) return b.createdMs - a.createdMs;
+            return a.idx - b.idx;
+          })
+          .map(item => item.tx),
       }));
   }, [activeCycleTransactions, ledgerTagFilter]);
 
@@ -1716,14 +1738,23 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       }
     }
 
-    // If adding a bill into Last Month's Billed cycle on a Credit Card ledger, timestamp it at the end of last month's cycle
+    // If adding a bill into Last Month's Billed cycle on a Credit Card ledger, timestamp it strictly newer than existing billed entries inside that closed cycle so it always lands on top
     let txDate = new Date();
     if (
       selectedCustomer?.accountType === 'credit_card' &&
+      openActionType === 'due' &&
       actionTargetCycle === 'billed' &&
       creditCardCycleData
     ) {
-      txDate = new Date(creditCardCycleData.lastStatementDate.getTime() - 12 * 60 * 60 * 1000);
+      const cutoffMs = creditCardCycleData.lastStatementDate.getTime();
+      let maxBilledMs = cutoffMs - 12 * 60 * 60 * 1000;
+      creditCardCycleData.billedTxs.forEach((bTx) => {
+        const bMs = parseFirestoreDate(bTx.date).getTime();
+        if (bMs < cutoffMs && bMs > maxBilledMs) {
+          maxBilledMs = bMs;
+        }
+      });
+      txDate = new Date(Math.min(cutoffMs - 1000, maxBilledMs + 1000));
     }
 
     const finalDesc = actionDesc.trim() || (actionTag ? getTagDefaultDescription(actionTag, lang) : '');
@@ -1733,6 +1764,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       setActionAmount('');
       setActionDesc('');
       setActionTag(null);
+      setPaymentQuickFillIntent(null);
       setActionTargetCycle('unbilled');
       setOpenActionType(null);
       setDuplicateTxWarning(null);
@@ -2018,10 +2050,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                   >
                     {isCreatingCustomer ? (
                       <span className="flex items-center gap-2">
-                        <svg className="animate-spin -ml-1 h-3.5 w-3.5 text-current" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
+                        <LoadingSpinner size="xs" />
                         {t.saving || (lang === 'bn' ? 'সংরক্ষণ হচ্ছে...' : 'Saving...')}
                       </span>
                     ) : (
@@ -2882,6 +2911,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
    setActionTargetCycle(cardCycleTab);
    setOpenActionType('due');
    setActionTag(null);
+   setPaymentQuickFillIntent(null);
  }}
  className={`py-4 px-3 rounded-[24px] flex flex-col items-center justify-center gap-2 cursor-pointer transition-all touch-press shadow-xs ${
  openActionType === 'due' 
@@ -2909,8 +2939,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
  <button
  onClick={() => {
+   setActionTargetCycle('unbilled');
    setOpenActionType('payment');
    setActionTag(null);
+   setPaymentQuickFillIntent(null);
  }}
  className={`py-4 px-3 rounded-[24px] flex flex-col items-center justify-center gap-2 cursor-pointer transition-all touch-press shadow-xs ${
  openActionType === 'payment' 
@@ -2967,8 +2999,8 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  </div>
 
  <form onSubmit={handleAddInlineTransaction} className="space-y-4">
- {/* Compact Inline Cycle Selector for Credit Card accounts */}
- {selectedCustomer.accountType === 'credit_card' && (
+ {/* Compact Inline Cycle Selector for Credit Card bill expenses */}
+ {selectedCustomer.accountType === 'credit_card' && openActionType === 'due' && (
    <div className="flex items-center justify-between gap-2 px-1 py-0.5">
      <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
        {lang === 'bn' ? 'কোন বিলিং সাইকেলে যুক্ত করবেন?' : 'Add bill to which statement cycle?'}
@@ -3010,6 +3042,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  placeholder="0"
  value={actionAmount}
  onChange={(e) => {
+ setPaymentQuickFillIntent(null);
  const val = e.target.value;
  const clean = val.replace(/[^0-9.]/g, '');
  const dots = clean.split('.');
@@ -3031,62 +3064,100 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 </p>
               )}
 
-              {openActionType === 'payment' && selectedCustomer && selectedCustomer.accountType === 'credit_card' && creditCardCycleData && creditCardCycleData.unpaidCarryOver > 0 && creditCardCycleData.unpaidCarryOver !== selectedCustomer.outstandingDue && (
-                <div 
-                  onClick={() => {
-                    triggerHaptic('single');
-                    const targetBilled = creditCardCycleData.unpaidCarryOver;
-                    const isChecked = actionAmount.replace(/,/g, '') === targetBilled.toString();
-                    if (!isChecked) {
-                      setActionAmount(formatIndianNumberString(targetBilled.toString()));
-                      if (!actionDesc.trim()) {
-                        setActionDesc(lang === 'bn' ? 'বিল্ড স্টেটমেন্ট পরিশোধ' : 'Billed Statement Payment');
+              {openActionType === 'payment' && selectedCustomer && selectedCustomer.accountType === 'credit_card' && creditCardCycleData && creditCardCycleData.unpaidCarryOver > 0 && (() => {
+                const cleanedAmt = actionAmount.replace(/,/g, '');
+                const targetBilled = creditCardCycleData.unpaidCarryOver;
+                const billedStr = targetBilled.toString();
+                const totalStr = selectedCustomer.outstandingDue.toString();
+                const isChecked =
+                  cleanedAmt === billedStr &&
+                  (billedStr !== totalStr || paymentQuickFillIntent === 'billed');
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic('single');
+                      if (!isChecked) {
+                        setPaymentQuickFillIntent('billed');
+                        setActionAmount(formatIndianNumberString(billedStr));
+                        if (!actionDesc.trim()) {
+                          setActionDesc(lang === 'bn' ? 'পূর্ববর্তী মাসের বিল পরিশোধ' : 'Billed Statement Payment');
+                        }
+                      } else {
+                        setPaymentQuickFillIntent(null);
+                        setActionAmount('');
                       }
-                    } else {
-                      setActionAmount('');
-                    }
-                  }}
-                  className="w-full flex items-center text-left gap-2.5 mt-2 p-3 bg-amber-500/10 hover:bg-amber-500/15 rounded-2xl border border-amber-500/25 cursor-pointer transition-colors select-none"
-                >
-                  <input
-                    type="checkbox"
-                    className="w-4 h-4 accent-amber-600 rounded cursor-pointer pointer-events-none"
-                    checked={actionAmount.replace(/,/g, '') === creditCardCycleData.unpaidCarryOver.toString()}
-                    readOnly
-                  />
-                  <span className="text-xs font-bold text-amber-800 dark:text-amber-200 select-none">
-                    {lang === 'bn' ? 'বিল্ড স্টেটমেন্ট পরিশোধ করুন' : 'Pay billed statement'} (৳{formatNumber(creditCardCycleData.unpaidCarryOver, lang)})
-                  </span>
-                </div>
-              )}
+                    }}
+                    className={`w-full flex items-center text-left gap-2.5 mt-2 p-3 rounded-2xl border cursor-pointer transition-colors select-none ${
+                      isChecked
+                        ? 'bg-amber-500/18 border-amber-500/50 dark:bg-amber-500/20 dark:border-amber-400/50'
+                        : 'bg-amber-500/[0.09] hover:bg-amber-500/[0.15] border-amber-500/30'
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                        isChecked
+                          ? 'bg-amber-500 border-amber-500 text-white'
+                          : 'border-amber-500/60 bg-white/70 dark:bg-white/[0.05]'
+                      }`}
+                    >
+                      {isChecked && <Check className="w-3 h-3 stroke-[2.5]" />}
+                    </span>
+                    <span className="text-xs font-bold text-amber-800 dark:text-amber-200 select-none">
+                      {lang === 'bn' ? 'পূর্ববর্তী মাসের বিল্ড বকেয়া পরিশোধ করুন' : "Pay billed (previous month's)"} (৳{formatNumber(targetBilled, lang)})
+                    </span>
+                  </button>
+                );
+              })()}
 
-              {openActionType === 'payment' && selectedCustomer && selectedCustomer.outstandingDue > 0 && (
-                <div 
-                  onClick={() => {
-                    triggerHaptic('single');
-                    const targetDue = selectedCustomer.outstandingDue;
-                    const isChecked = actionAmount.replace(/,/g, '') === targetDue.toString();
-                    if (!isChecked) {
-                      setActionAmount(formatIndianNumberString(targetDue.toString()));
-                    } else {
-                      setActionAmount('');
-                    }
-                  }}
-                  className="w-full flex items-center text-left gap-2.5 mt-2 p-3 surface-subcard hover:bg-slate-200/50 dark:hover:bg-white/[0.06] rounded-2xl border border-slate-200/70 dark:border-white/[0.08] cursor-pointer transition-colors select-none"
-                >
-                  <input
-                    type="checkbox"
-                    className="w-4 h-4 accent-emerald-600 rounded cursor-pointer pointer-events-none"
-                    checked={actionAmount.replace(/,/g, '') === selectedCustomer.outstandingDue.toString()}
-                    readOnly
-                  />
-                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 select-none">
-                    {selectedCustomer.accountType === 'credit_card'
-                      ? (lang === 'bn' ? 'মোট কার্ড ব্যালেন্স পরিশোধ করুন' : 'Pay total card balance')
-                      : (lang === 'bn' ? 'সম্পূর্ণ বকেয়া পরিশোধ করুন' : 'Settle complete due')} (৳{formatNumber(selectedCustomer.outstandingDue, lang)})
-                  </span>
-                </div>
-              )}
+              {openActionType === 'payment' && selectedCustomer && selectedCustomer.outstandingDue > 0 && (() => {
+                const cleanedAmt = actionAmount.replace(/,/g, '');
+                const targetDue = selectedCustomer.outstandingDue;
+                const totalStr = targetDue.toString();
+                const billedStr = creditCardCycleData ? creditCardCycleData.unpaidCarryOver.toString() : '';
+                const isChecked =
+                  cleanedAmt === totalStr &&
+                  (selectedCustomer.accountType !== 'credit_card' ||
+                    billedStr !== totalStr ||
+                    paymentQuickFillIntent !== 'billed');
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic('single');
+                      if (!isChecked) {
+                        setPaymentQuickFillIntent('total');
+                        setActionAmount(formatIndianNumberString(totalStr));
+                      } else {
+                        setPaymentQuickFillIntent(null);
+                        setActionAmount('');
+                      }
+                    }}
+                    className={`w-full flex items-center text-left gap-2.5 mt-2 p-3 rounded-2xl border cursor-pointer transition-colors select-none ${
+                      isChecked
+                        ? 'bg-emerald-500/14 border-emerald-500/45 dark:bg-emerald-500/18 dark:border-emerald-400/45'
+                        : 'surface-subcard hover:bg-slate-200/50 dark:hover:bg-white/[0.06] border-slate-200/70 dark:border-white/[0.08]'
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                        isChecked
+                          ? 'bg-emerald-600 border-emerald-600 text-white'
+                          : 'border-emerald-600/55 dark:border-emerald-400/55 bg-white/70 dark:bg-white/[0.05]'
+                      }`}
+                    >
+                      {isChecked && <Check className="w-3 h-3 stroke-[2.5]" />}
+                    </span>
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 select-none">
+                      {selectedCustomer.accountType === 'credit_card'
+                        ? (lang === 'bn' ? 'মোট কার্ড ব্যালেন্স পরিশোধ করুন' : 'Pay total card balance')
+                        : (lang === 'bn' ? 'সম্পূর্ণ বকেয়া পরিশোধ করুন' : 'Settle complete due')} (৳{formatNumber(targetDue, lang)})
+                    </span>
+                  </button>
+                );
+              })()}
 
  {/* Tap amount quick-add preset buttons */}
  <div className="flex flex-wrap gap-1.5 mt-2">
@@ -3095,6 +3166,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  key={preset}
  type="button"
  onClick={() => {
+ setPaymentQuickFillIntent(null);
  const cleaned = actionAmount.replace(/,/g, '');
  const currentVal = parseFloat(cleaned) || 0;
  const newVal = (currentVal + preset).toString();
@@ -3108,7 +3180,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  <button
  key="clear"
  type="button"
- onClick={() => setActionAmount('')}
+ onClick={() => {
+ setPaymentQuickFillIntent(null);
+ setActionAmount('');
+ }}
  className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 px-3 py-1 rounded-full text-xs font-bold transition-colors cursor-pointer touch-press"
  >
  {lang === 'bn' ? 'মুছে ফেলুন' : 'Clear'}
@@ -3148,6 +3223,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  onClick={() => {
    setOpenActionType(null);
    setActionTag(null);
+   setPaymentQuickFillIntent(null);
  }}
  className="px-5 py-2.5 text-xs bg-slate-100/90 hover:bg-slate-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-800 dark:text-slate-200 border border-slate-200/80 dark:border-white/[0.08] font-bold rounded-full cursor-pointer transition-colors touch-press"
  >
@@ -3164,10 +3240,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  >
  {txSubmitting ? (
  <span className="flex items-center gap-1.5">
- <svg className="animate-spin h-3.5 w-3.5 text-current" fill="none" viewBox="0 0 24 24">
- <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
- <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
- </svg>
+ <LoadingSpinner size="xs" />
  {t.saving || (lang === 'bn' ? 'সংরক্ষণ হচ্ছে...' : 'Saving...')}
  </span>
  ) : (
@@ -3511,7 +3584,6 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               const meta = getTagMeta(tagId);
               if (!meta) return null;
               const isSelected = ledgerTagFilter === tagId;
-              const IconComp = meta.icon;
               return (
                 <button
                   key={tagId}
@@ -3526,7 +3598,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                       : 'surface-subcard border text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
                   }`}
                 >
-                  <IconComp className="w-3.5 h-3.5 stroke-[1.5]" style={{ color: isSelected ? undefined : meta.color }} />
+                  <TagIcon tag={tagId} className="w-3.5 h-3.5 stroke-[1.5]" style={{ color: isSelected ? undefined : meta.color }} />
                   <span>{lang === 'bn' ? meta.bn : meta.en}</span>
                 </button>
               );

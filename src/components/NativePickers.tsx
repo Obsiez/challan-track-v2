@@ -1225,71 +1225,39 @@ export function NativeOptionPicker<T extends string | number>({
       </button>
 
       <ModalPortal lockScroll={false}>
-        <AnimatePresence>
-          {isOpen && (
-            <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-                className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 [backdrop-filter:blur(16px)] [-webkit-backdrop-filter:blur(16px)]"
-                onClick={() => setIsOpen(false)}
-              />
-              <motion.div
-                initial={{ opacity: 0, y: 32 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 24 }}
-                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                style={{ willChange: 'transform, opacity' }}
-                onClick={(e) => e.stopPropagation()}
-                className="glass-modal w-full sm:max-w-sm rounded-t-[2rem] sm:rounded-3xl border shadow-2xl overflow-hidden flex flex-col relative z-10 max-h-[82dvh]"
-              >
-                <div className="flex items-center justify-center pt-3 pb-1 sm:hidden w-full mx-auto">
-                  <div className="w-10 h-1 bg-slate-400/40 dark:bg-white/20 rounded-full mx-auto" />
-                </div>
+        {isOpen && (
+          <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+            <div
+              className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+              onClick={() => setIsOpen(false)}
+            />
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ contain: 'layout style' }}
+              className="animate-slide-up glass-modal w-full sm:max-w-sm rounded-t-[2rem] sm:rounded-3xl border shadow-2xl overflow-hidden flex flex-col relative z-10 max-h-[82dvh]"
+            >
+              <div className="flex items-center justify-center pt-3 pb-1 sm:hidden w-full mx-auto">
+                <div className="w-10 h-1 bg-slate-400/40 dark:bg-white/20 rounded-full mx-auto" />
+              </div>
 
-                <div className="px-5 pt-3 sm:pt-5 pb-3.5 border-b border-slate-900/[0.06] dark:border-white/[0.06] flex items-center justify-between gap-3 shrink-0">
-                  <h3 className="font-display text-base font-bold text-slate-950 dark:text-white truncate">
-                    {title}
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setIsOpen(false)}
-                    className="w-8 h-8 rounded-full bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-700 dark:text-white flex items-center justify-center cursor-pointer shrink-0"
-                  >
-                    <X className="w-4 h-4 stroke-[1.25]" />
-                  </button>
-                </div>
+              <div className="px-5 pt-3 sm:pt-5 pb-3.5 border-b border-slate-900/[0.06] dark:border-white/[0.06] flex items-center justify-between gap-3 shrink-0">
+                <h3 className="font-display text-base font-bold text-slate-950 dark:text-white truncate">
+                  {title}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setIsOpen(false)}
+                  className="w-8 h-8 rounded-full bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-700 dark:text-white flex items-center justify-center cursor-pointer shrink-0"
+                >
+                  <X className="w-4 h-4 stroke-[1.25]" />
+                </button>
+              </div>
 
-                <div className="flex-1 min-h-0 overflow-y-auto hide-scrollbar p-4 sm:p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-5">
-                  <div className={gridCls}>
-                    {options.map((opt) => {
-                      const isSelected = opt.value === value;
-                      if (gridColumns > 1) {
-                        return (
-                          <button
-                            key={String(opt.value)}
-                            type="button"
-                            disabled={opt.disabled}
-                            onClick={() => {
-                              if (opt.disabled) return;
-                              triggerHaptic('single');
-                              onChange(opt.value);
-                              setIsOpen(false);
-                            }}
-                            className={`py-2.5 px-2 rounded-2xl text-xs font-bold transition-colors duration-150 cursor-pointer touch-press flex items-center justify-center text-center ${
-                              opt.disabled
-                                ? 'opacity-40 cursor-not-allowed surface-subcard border'
-                                : isSelected
-                                ? 'bg-slate-950 text-white border-2 border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-sm'
-                                : 'surface-subcard border text-slate-900 dark:text-white hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.08]'
-                            }`}
-                          >
-                            <span className="truncate">{opt.compactLabel || opt.label}</span>
-                          </button>
-                        );
-                      }
+              <div className="flex-1 min-h-0 overflow-y-auto hide-scrollbar p-4 sm:p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-5">
+                <div className={gridCls}>
+                  {options.map((opt) => {
+                    const isSelected = opt.value === value;
+                    if (gridColumns > 1) {
                       return (
                         <button
                           key={String(opt.value)}
@@ -1301,32 +1269,54 @@ export function NativeOptionPicker<T extends string | number>({
                             onChange(opt.value);
                             setIsOpen(false);
                           }}
-                          className={`w-full p-3.5 rounded-2xl transition-colors duration-150 cursor-pointer flex items-center justify-between gap-3 text-left touch-press ${
+                          className={`py-2.5 px-2 rounded-2xl text-xs font-bold transition-transform duration-75 active:scale-95 cursor-pointer flex items-center justify-center text-center ${
                             opt.disabled
-                              ? 'opacity-45 cursor-not-allowed surface-subcard border'
+                              ? 'opacity-40 cursor-not-allowed bg-slate-900/[0.03] dark:bg-white/[0.04] border border-slate-900/[0.06] dark:border-white/[0.06]'
                               : isSelected
                               ? 'bg-slate-950 text-white border-2 border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-sm'
-                              : 'surface-subcard border text-slate-900 dark:text-white hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.08]'
+                              : 'bg-slate-900/[0.045] hover:bg-slate-900/[0.09] dark:bg-white/[0.055] dark:hover:bg-white/[0.11] border border-slate-900/[0.07] dark:border-white/[0.08] text-slate-900 dark:text-white'
                           }`}
                         >
-                          <div className="min-w-0 flex-1">
-                            <div className="text-xs font-bold truncate">{opt.label}</div>
-                            {opt.sublabel && (
-                              <div className={`text-[11px] mt-0.5 truncate ${isSelected ? 'text-white/75 dark:text-slate-600' : 'text-slate-500 dark:text-slate-400'}`}>
-                                {opt.sublabel}
-                              </div>
-                            )}
-                          </div>
-                          {isSelected && <Check className="w-4 h-4 stroke-[1.75] shrink-0" />}
+                          <span className="truncate">{opt.compactLabel || opt.label}</span>
                         </button>
                       );
-                    })}
-                  </div>
+                    }
+                    return (
+                      <button
+                        key={String(opt.value)}
+                        type="button"
+                        disabled={opt.disabled}
+                        onClick={() => {
+                          if (opt.disabled) return;
+                          triggerHaptic('single');
+                          onChange(opt.value);
+                          setIsOpen(false);
+                        }}
+                        className={`w-full p-3.5 rounded-2xl transition-transform duration-75 active:scale-[0.98] cursor-pointer flex items-center justify-between gap-3 text-left ${
+                          opt.disabled
+                            ? 'opacity-45 cursor-not-allowed bg-slate-900/[0.03] dark:bg-white/[0.04] border border-slate-900/[0.06] dark:border-white/[0.06]'
+                            : isSelected
+                            ? 'bg-slate-950 text-white border-2 border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-sm'
+                            : 'bg-slate-900/[0.045] hover:bg-slate-900/[0.09] dark:bg-white/[0.055] dark:hover:bg-white/[0.11] border border-slate-900/[0.07] dark:border-white/[0.08] text-slate-900 dark:text-white'
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-bold truncate">{opt.label}</div>
+                          {opt.sublabel && (
+                            <div className={`text-[11px] mt-0.5 truncate ${isSelected ? 'text-white/75 dark:text-slate-600' : 'text-slate-500 dark:text-slate-400'}`}>
+                              {opt.sublabel}
+                            </div>
+                          )}
+                        </div>
+                        {isSelected && <Check className="w-4 h-4 stroke-[1.75] shrink-0" />}
+                      </button>
+                    );
+                  })}
                 </div>
-              </motion.div>
+              </div>
             </div>
-          )}
-        </AnimatePresence>
+          </div>
+        )}
       </ModalPortal>
     </>
   );
@@ -1432,172 +1422,162 @@ export function NativeCustomerPicker({
       </button>
 
       <ModalPortal lockScroll={false}>
-        <AnimatePresence>
-          {isOpen && (
-            <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-                className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 [backdrop-filter:blur(16px)] [-webkit-backdrop-filter:blur(16px)]"
-                onClick={() => setIsOpen(false)}
-              />
-              <motion.div
-                initial={{ opacity: 0, y: 32 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 24 }}
-                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                style={{ willChange: 'transform, opacity' }}
-                onClick={(e) => e.stopPropagation()}
-                className="glass-modal w-full sm:max-w-md rounded-t-[2rem] sm:rounded-3xl border shadow-2xl overflow-hidden flex flex-col relative z-10 max-h-[85dvh]"
-              >
-                <div className="flex items-center justify-center pt-3 pb-1 sm:hidden shrink-0 w-full mx-auto">
-                  <div className="w-10 h-1 bg-slate-400/40 dark:bg-white/20 rounded-full mx-auto" />
-                </div>
+        {isOpen && (
+          <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+            <div
+              className="absolute inset-0 bg-slate-950/60 dark:bg-black/75 animate-backdrop-blur"
+              onClick={() => setIsOpen(false)}
+            />
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ contain: 'layout style' }}
+              className="animate-slide-up glass-modal w-full sm:max-w-md rounded-t-[2rem] sm:rounded-3xl border shadow-2xl overflow-hidden flex flex-col relative z-10 max-h-[85dvh]"
+            >
+              <div className="flex items-center justify-center pt-3 pb-1 sm:hidden shrink-0 w-full mx-auto">
+                <div className="w-10 h-1 bg-slate-400/40 dark:bg-white/20 rounded-full mx-auto" />
+              </div>
 
-                {/* Header */}
-                <div className="px-5 pt-3 sm:pt-5 pb-3.5 border-b border-slate-900/[0.06] dark:border-white/[0.06] flex items-center justify-between gap-3 shrink-0">
-                  <div>
-                    <span className={lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>
-                      {lang === 'bn' ? 'গ্রাহক তালিকা' : 'Customer Directory'}
-                    </span>
-                    <h3 className="font-display text-base font-bold text-slate-950 dark:text-white mt-0.5">
-                      {title || (lang === 'bn' ? 'গ্রাহক নির্বাচন করুন' : 'Select Customer')}
-                    </h3>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsOpen(false)}
-                    className="w-8 h-8 rounded-full bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-700 dark:text-white flex items-center justify-center cursor-pointer shrink-0"
-                  >
-                    <X className="w-4 h-4 stroke-[1.25]" />
-                  </button>
+              {/* Header */}
+              <div className="px-5 pt-3 sm:pt-5 pb-3.5 border-b border-slate-900/[0.06] dark:border-white/[0.06] flex items-center justify-between gap-3 shrink-0">
+                <div>
+                  <span className={lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400 block' : 'micro-mono-label font-semibold block'}>
+                    {lang === 'bn' ? 'গ্রাহক তালিকা' : 'Customer Directory'}
+                  </span>
+                  <h3 className="font-display text-base font-bold text-slate-950 dark:text-white mt-0.5">
+                    {title || (lang === 'bn' ? 'গ্রাহক নির্বাচন করুন' : 'Select Customer')}
+                  </h3>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setIsOpen(false)}
+                  className="w-8 h-8 rounded-full bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-700 dark:text-white flex items-center justify-center cursor-pointer shrink-0"
+                >
+                  <X className="w-4 h-4 stroke-[1.25]" />
+                </button>
+              </div>
 
-                {/* Search Field */}
-                <div className="px-4 sm:px-5 pt-3.5 pb-2 shrink-0">
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-slate-400 stroke-[1.25] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                      placeholder={lang === 'bn' ? 'নাম বা নম্বর দিয়ে খুঁজুন...' : 'Search by name or phone...'}
-                      className="w-full pl-10 pr-10 py-2.5 rounded-full border border-slate-900/[0.08] dark:border-white/[0.08] bg-slate-900/[0.03] dark:bg-white/[0.04] text-slate-950 dark:text-white text-xs font-semibold outline-none focus:border-slate-900/30 dark:focus:border-white/30"
-                    />
-                    {query && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          triggerHaptic('tick');
-                          setQuery('');
-                        }}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-950 dark:hover:text-white cursor-pointer"
-                      >
-                        <Delete className="w-3.5 h-3.5 stroke-[1.25]" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Customer List */}
-                <div className="flex-1 min-h-0 overflow-y-auto hide-scrollbar px-4 sm:px-5 pt-1 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-5 space-y-2">
-                  {allowNone && (
+              {/* Search Field */}
+              <div className="px-4 sm:px-5 pt-3.5 pb-2 shrink-0">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 stroke-[1.25] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={lang === 'bn' ? 'নাম বা নম্বর দিয়ে খুঁজুন...' : 'Search by name or phone...'}
+                    className="w-full pl-10 pr-10 py-2.5 rounded-full border border-slate-900/[0.08] dark:border-white/[0.08] bg-slate-900/[0.03] dark:bg-white/[0.04] text-slate-950 dark:text-white text-xs font-semibold outline-none focus:border-slate-900/30 dark:focus:border-white/30"
+                  />
+                  {query && (
                     <button
                       type="button"
                       onClick={() => {
-                        triggerHaptic('single');
-                        onChange('');
-                        setIsOpen(false);
+                        triggerHaptic('tick');
+                        setQuery('');
                       }}
-                      className={`w-full p-3.5 rounded-2xl transition-colors duration-150 cursor-pointer flex items-center justify-between gap-3 text-left touch-press ${
-                        value === ''
-                          ? 'bg-slate-950 text-white border-2 border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-sm'
-                          : 'surface-subcard border text-slate-900 dark:text-white hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.08]'
-                      }`}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-950 dark:hover:text-white cursor-pointer"
                     >
-                      <span className="text-xs font-bold truncate">
-                        {noneLabel || (lang === 'bn' ? 'কোনো গ্রাহক নয়' : 'None')}
-                      </span>
-                      {value === '' && <Check className="w-4 h-4 stroke-[1.75] shrink-0" />}
+                      <Delete className="w-3.5 h-3.5 stroke-[1.25]" />
                     </button>
                   )}
-
-                  {filteredCustomers.length === 0 ? (
-                    <div className="py-10 text-center text-xs text-slate-500 dark:text-slate-400">
-                      {lang === 'bn' ? 'কোনো গ্রাহক পাওয়া যায়নি' : 'No matching customers found'}
-                    </div>
-                  ) : (
-                    filteredCustomers.map((c) => {
-                      const isSelected = value === c.id;
-                      const isDisabled = Boolean(disabledCustomerIds?.has(c.id));
-                      const initial = c.name.trim().charAt(0).toUpperCase() || 'C';
-                      return (
-                        <button
-                          key={c.id}
-                          type="button"
-                          disabled={isDisabled}
-                          onClick={() => {
-                            if (isDisabled) return;
-                            triggerHaptic('single');
-                            onChange(c.id);
-                            setIsOpen(false);
-                          }}
-                          className={`w-full p-3.5 rounded-2xl transition-colors duration-150 flex items-center justify-between gap-3 text-left ${
-                            isDisabled
-                              ? 'opacity-45 cursor-not-allowed surface-subcard border'
-                              : isSelected
-                              ? 'bg-slate-950 text-white border-2 border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-sm cursor-pointer touch-press'
-                              : 'surface-subcard border text-slate-900 dark:text-white hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.08] cursor-pointer touch-press'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3 min-w-0 flex-1">
-                            <div className={`w-9 h-9 rounded-full flex items-center justify-center font-display font-bold text-xs shrink-0 ${
-                              isSelected
-                                ? 'bg-white text-slate-950 dark:bg-slate-950 dark:text-white'
-                                : 'bg-slate-900/[0.06] dark:bg-white/[0.08] text-slate-700 dark:text-slate-200'
-                            }`}>
-                              {c.accountType === 'credit_card' ? <CreditCard className="w-4 h-4 stroke-[1.25]" /> : initial}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="text-xs font-bold truncate flex items-center gap-1.5">
-                                <span className="truncate">{c.name}</span>
-                                {isDisabled && disabledBadgeText && (
-                                  <span className="text-[10px] font-semibold opacity-80 shrink-0">
-                                    · {disabledBadgeText}
-                                  </span>
-                                )}
-                              </div>
-                              <div className={`text-[11px] font-mono truncate mt-0.5 ${isSelected ? 'text-white/75 dark:text-slate-600' : 'text-slate-500 dark:text-slate-400'}`}>
-                                {c.phone ? cleanBangladeshiPhone(c.phone) : (lang === 'bn' ? 'নম্বর নেই' : 'No phone')}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span className={`font-mono text-xs font-bold tabular-nums ${
-                              isSelected
-                                ? 'text-white dark:text-slate-950'
-                                : (c.outstandingDue || 0) > 0
-                                ? 'text-ledger-red'
-                                : (c.outstandingDue || 0) < 0
-                                ? 'text-ledger-green'
-                                : 'text-slate-500 dark:text-slate-400'
-                            }`}>
-                              ৳{formatNumber(c.outstandingDue || 0, lang)}
-                            </span>
-                            {isSelected && <Check className="w-4 h-4 stroke-[1.75]" />}
-                          </div>
-                        </button>
-                      );
-                    })
-                  )}
                 </div>
-              </motion.div>
+              </div>
+
+              {/* Customer List */}
+              <div className="flex-1 min-h-0 overflow-y-auto hide-scrollbar px-4 sm:px-5 pt-1 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-5 space-y-2">
+                {allowNone && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic('single');
+                      onChange('');
+                      setIsOpen(false);
+                    }}
+                    className={`w-full p-3.5 rounded-2xl transition-transform duration-75 active:scale-[0.98] cursor-pointer flex items-center justify-between gap-3 text-left ${
+                      value === ''
+                        ? 'bg-slate-950 text-white border-2 border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-sm'
+                        : 'bg-slate-900/[0.045] hover:bg-slate-900/[0.09] dark:bg-white/[0.055] dark:hover:bg-white/[0.11] border border-slate-900/[0.07] dark:border-white/[0.08] text-slate-900 dark:text-white'
+                    }`}
+                  >
+                    <span className="text-xs font-bold truncate">
+                      {noneLabel || (lang === 'bn' ? 'কোনো গ্রাহক নয়' : 'None')}
+                    </span>
+                    {value === '' && <Check className="w-4 h-4 stroke-[1.75] shrink-0" />}
+                  </button>
+                )}
+
+                {filteredCustomers.length === 0 ? (
+                  <div className="py-10 text-center text-xs text-slate-500 dark:text-slate-400">
+                    {lang === 'bn' ? 'কোনো গ্রাহক পাওয়া যায়নি' : 'No matching customers found'}
+                  </div>
+                ) : (
+                  filteredCustomers.map((c) => {
+                    const isSelected = value === c.id;
+                    const isDisabled = Boolean(disabledCustomerIds?.has(c.id));
+                    const initial = c.name.trim().charAt(0).toUpperCase() || 'C';
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        disabled={isDisabled}
+                        onClick={() => {
+                          if (isDisabled) return;
+                          triggerHaptic('single');
+                          onChange(c.id);
+                          setIsOpen(false);
+                        }}
+                        className={`w-full p-3.5 rounded-2xl transition-transform duration-75 flex items-center justify-between gap-3 text-left ${
+                          isDisabled
+                            ? 'opacity-45 cursor-not-allowed bg-slate-900/[0.03] dark:bg-white/[0.04] border border-slate-900/[0.06] dark:border-white/[0.06]'
+                            : isSelected
+                            ? 'bg-slate-950 text-white border-2 border-slate-950 dark:bg-white dark:text-slate-950 dark:border-white shadow-sm cursor-pointer active:scale-[0.98]'
+                            : 'bg-slate-900/[0.045] hover:bg-slate-900/[0.09] dark:bg-white/[0.055] dark:hover:bg-white/[0.11] border border-slate-900/[0.07] dark:border-white/[0.08] text-slate-900 dark:text-white cursor-pointer active:scale-[0.98]'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <div className={`w-9 h-9 rounded-full flex items-center justify-center font-display font-bold text-xs shrink-0 ${
+                            isSelected
+                              ? 'bg-white text-slate-950 dark:bg-slate-950 dark:text-white'
+                              : 'bg-slate-900/[0.06] dark:bg-white/[0.08] text-slate-700 dark:text-slate-200'
+                          }`}>
+                            {c.accountType === 'credit_card' ? <CreditCard className="w-4 h-4 stroke-[1.25]" /> : initial}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs font-bold truncate flex items-center gap-1.5">
+                              <span className="truncate">{c.name}</span>
+                              {isDisabled && disabledBadgeText && (
+                                <span className="text-[10px] font-semibold opacity-80 shrink-0">
+                                  · {disabledBadgeText}
+                                </span>
+                              )}
+                            </div>
+                            <div className={`text-[11px] font-mono truncate mt-0.5 ${isSelected ? 'text-white/75 dark:text-slate-600' : 'text-slate-500 dark:text-slate-400'}`}>
+                              {c.phone ? cleanBangladeshiPhone(c.phone) : (lang === 'bn' ? 'নম্বর নেই' : 'No phone')}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`font-mono text-xs font-bold tabular-nums ${
+                            isSelected
+                              ? 'text-white dark:text-slate-950'
+                              : (c.outstandingDue || 0) > 0
+                              ? 'text-ledger-red'
+                              : (c.outstandingDue || 0) < 0
+                              ? 'text-ledger-green'
+                              : 'text-slate-500 dark:text-slate-400'
+                          }`}>
+                            ৳{formatNumber(c.outstandingDue || 0, lang)}
+                          </span>
+                          {isSelected && <Check className="w-4 h-4 stroke-[1.75]" />}
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
             </div>
-          )}
-        </AnimatePresence>
+          </div>
+        )}
       </ModalPortal>
     </>
   );

@@ -1,5 +1,5 @@
 {
-  "name": "Easy Due Tracker",
+  "name": "Challan Track Ledger",
   "description": "A minimalist, offline-ready due tracking ledger designed with very large buttons and highly clear text. Makes tracking and calculating customer dues simple and intuitive for parents and senior business owners. Syncs seamlessly across devices with robust backup support.",
   "requestFramePermissions": [
     "notifications"

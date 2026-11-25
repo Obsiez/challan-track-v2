@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Customer, Reminder, SavingGoal } from '../types';
 import {
   Bell, Calendar, User, Clock, AlertTriangle, Check,
@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { showNotification } from '../lib/notifications';
 import { StaggerReveal } from './MotionPrimitives';
 import ModalPortal from './ModalPortal';
+import LoadingSpinner from './LoadingSpinner';
 import {
   NativeDatePicker,
   NativeTimePicker,
@@ -75,6 +76,16 @@ export default function RemindersManager({
 
   // In-app test trigger alert state
   const [testAlertText, setTestAlertText] = useState<string | null>(null);
+
+  const emiDayOptions = useMemo(
+    () =>
+      Array.from({ length: 31 }, (_, i) => i + 1).map((day) => ({
+        value: day,
+        label: lang === 'bn' ? `প্রতি মাসের ${formatNumber(day, 'bn')} তারিখ` : `Every month on day ${day}`,
+        compactLabel: formatNumber(day, lang),
+      })),
+    [lang]
+  );
 
   const handleGoalSelect = (goalId: string) => {
     setSelectedGoalId(goalId);
@@ -528,11 +539,7 @@ export default function RemindersManager({
                       lang={lang}
                       title={lang === 'bn' ? 'মাসের তারিখ বেছে নিন' : 'Monthly Due Day'}
                       gridColumns={7}
-                      options={Array.from({ length: 31 }, (_, i) => i + 1).map(day => ({
-                        value: day,
-                        label: lang === 'bn' ? `প্রতি মাসের ${formatNumber(day, 'bn')} তারিখ` : `Every month on day ${day}`,
-                        compactLabel: formatNumber(day, lang)
-                      }))}
+                      options={emiDayOptions}
                       triggerClassName={`${glassInputCls} font-bold flex items-center justify-between gap-2 cursor-pointer text-left touch-press`}
                     />
                   </div>
@@ -597,8 +604,9 @@ export default function RemindersManager({
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="px-5 py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-full text-xs cursor-pointer touch-press transition-colors"
+                className="px-5 py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-full text-xs cursor-pointer touch-press transition-colors flex items-center justify-center gap-2 disabled:opacity-70"
               >
+                {isSubmitting && <LoadingSpinner size="xs" />}
                 {reminderCategory === 'emi'
                   ? (lang === 'bn' ? 'কিস্তি অ্যালার্ট চালু করুন' : 'Enable EMI Alert')
                   : t.scheduleNow

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Delete, Check, ChevronDown, ArrowRight, Calculator } from 'lucide-react';
 import { triggerHaptic } from '../lib/haptics';
 import { playKeypadClick } from '../lib/sounds';
@@ -850,16 +851,18 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
     };
   }, [closeKeypad, ensureInputVisibleOnce]);
 
-  // Close keypad or corner toggle if input is unmounted from DOM (e.g. modal closed)
+  // Close keypad or corner toggle if input is unmounted or disabled from DOM (e.g. modal closed / open-ended toggle)
   useEffect(() => {
     if (!activeInput && !desktopFocusedInput) return;
     const interval = setInterval(() => {
-      if (activeInput && !document.body.contains(activeInput)) {
+      if (activeInput && (!document.body.contains(activeInput) || activeInput.disabled || activeInput.readOnly)) {
         closeKeypad();
       }
       if (
         desktopFocusedInput &&
         (!document.body.contains(desktopFocusedInput) ||
+          desktopFocusedInput.disabled ||
+          desktopFocusedInput.readOnly ||
           (!activeInput && document.activeElement !== desktopFocusedInput))
       ) {
         desktopManualOpenRef.current = false;
@@ -910,7 +913,8 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
 
   // On Desktop ONLY: when keypad is enabled in settings and a numeric input is focused, show a small corner toggle button
   if (keypadEnabled && !activeInput && desktopFocusedInput && !isTouchMobileOrTablet()) {
-    return (
+    if (typeof document === 'undefined') return null;
+    return createPortal(
       <div
         data-keypad-toggle="true"
         onPointerDown={(e) => e.preventDefault()}
@@ -935,7 +939,8 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
           <Calculator className="w-4 h-4 stroke-[1.25]" style={{ color: 'var(--accent-color)' }} />
           <span>{lang === 'bn' ? 'কীপ্যাড' : 'Keypad'}</span>
         </button>
-      </div>
+      </div>,
+      document.body
     );
   }
 
@@ -1137,7 +1142,9 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
     closeKeypad();
   };
 
-  return (
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
     <div
       ref={keypadRef}
       data-keypad-root="true"
@@ -1343,6 +1350,8 @@ export default function CalculatorKeypad({ lang }: CalculatorKeypadProps) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
+

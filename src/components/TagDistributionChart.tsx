@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useRef, useLayoutEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Tag as DefaultTagIcon } from 'lucide-react';
+import { Tags as DefaultTagIcon } from 'lucide-react';
 import { Transaction } from '../types';
 import { Language, formatNumber } from '../lib/translations';
-import { getTagMeta, TagMeta } from '../lib/tagSystem';
+import { getTagMeta, TagMeta, useTagConfig } from '../lib/tagSystem';
 import { triggerHaptic } from '../lib/haptics';
-import { StaggerReveal, SpotlightCard } from './MotionPrimitives';
+import { StaggerReveal } from './MotionPrimitives';
 
 interface TagDistributionChartProps {
   transactions: Transaction[];
@@ -29,6 +29,7 @@ export const TagDistributionChart: React.FC<TagDistributionChartProps> = ({
   const [viewType, setViewType] = useState<'due' | 'payment'>('due');
   const [activeTagId, setActiveTagId] = useState<string | null>(null);
   const [hasSwitched, setHasSwitched] = useState(false);
+  const tagConfig = useTagConfig();
 
   const switchTrackRef = useRef<HTMLDivElement>(null);
   const [pillRect, setPillRect] = useState<{ x: number; w: number; ready: boolean }>({
@@ -83,7 +84,7 @@ export const TagDistributionChart: React.FC<TagDistributionChartProps> = ({
 
     const segList: TagSegment[] = Object.keys(amountMap)
       .map((tagId) => {
-        const meta = getTagMeta(tagId);
+        const meta = getTagMeta(tagId, viewType);
         const name = meta ? (lang === 'bn' ? meta.bn : meta.en) : (lang === 'bn' ? 'অন্যান্য' : 'Other');
         const color = meta ? meta.color : '#64748B';
         const amt = amountMap[tagId].amount;
@@ -103,7 +104,7 @@ export const TagDistributionChart: React.FC<TagDistributionChartProps> = ({
       .sort((a, b) => b.amount - a.amount);
 
     return { segments: segList, totalAmount: total, totalCount: count };
-  }, [transactions, viewType, lang]);
+  }, [transactions, viewType, lang, tagConfig]);
 
   const activeSegment = useMemo(() => {
     if (activeTagId) {
@@ -207,18 +208,10 @@ export const TagDistributionChart: React.FC<TagDistributionChartProps> = ({
         </div>
       </div>
 
-      {/* Unified Refractive Glass Stage */}
+      {/* Cardless Editorial Stage on Plain Canvas */}
       <StaggerReveal index={0} staggerMs={45}>
-        <SpotlightCard className="surface-glass rounded-[26px] p-5 sm:p-6 relative overflow-hidden">
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute -top-14 -right-14 w-40 h-40 rounded-full blur-3xl opacity-40 transition-colors duration-500"
-            style={{
-              backgroundColor: viewType === 'due' ? 'var(--ledger-red-bg)' : 'var(--ledger-green-bg)'
-            }}
-          />
-
-          <AnimatePresence mode="wait" initial={true}>
+        <div className="py-5 border-y border-slate-900/[0.08] dark:border-white/[0.08] relative">
+          <AnimatePresence mode="wait" initial={false}>
             {segments.length === 0 ? (
               <motion.div
                 key={`empty-${viewType}`}
@@ -411,10 +404,19 @@ export const TagDistributionChart: React.FC<TagDistributionChartProps> = ({
                               <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500 w-4 shrink-0 tabular-nums">
                                 {formatNumber(idx + 1, lang).padStart(2, lang === 'bn' ? '০' : '0')}
                               </span>
-                              <IconComp
-                                className="w-3.5 h-3.5 shrink-0 stroke-[1.5]"
-                                style={{ color: seg.color }}
-                              />
+                              {seg.meta?.logoDataUrl ? (
+                                <img
+                                  src={seg.meta.logoDataUrl}
+                                  alt={seg.name}
+                                  className="w-3.5 h-3.5 shrink-0 rounded-xs object-contain"
+                                  draggable={false}
+                                />
+                              ) : (
+                                <IconComp
+                                  className="w-3.5 h-3.5 shrink-0 stroke-[1.5]"
+                                  style={{ color: seg.color }}
+                                />
+                              )}
                               <span className="text-xs font-semibold text-slate-900 dark:text-white truncate">
                                 {seg.name}
                               </span>
@@ -449,7 +451,7 @@ export const TagDistributionChart: React.FC<TagDistributionChartProps> = ({
               </motion.div>
             )}
           </AnimatePresence>
-        </SpotlightCard>
+        </div>
       </StaggerReveal>
     </section>
   );

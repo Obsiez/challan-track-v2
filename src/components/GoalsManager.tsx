@@ -8,6 +8,7 @@ import { translations, Language, formatNumber, formatIndianNumberString } from '
 import { toast } from 'sonner';
 import { StaggerReveal, SpotlightCard, CircularGauge } from './MotionPrimitives';
 import ModalPortal, { useModalScrollLock } from './ModalPortal';
+import LoadingSpinner from './LoadingSpinner';
 import {
   NativeTimePicker,
   NativeOptionPicker,
@@ -133,6 +134,16 @@ export default function GoalsManager({
   const [emiDueDay, setEmiDueDay] = useState<number>(5);
   const [emiAlertTime, setEmiAlertTime] = useState<string>('09:00');
   const [isSavingEmiReminder, setIsSavingEmiReminder] = useState(false);
+
+  const emiDayOptions = React.useMemo(
+    () =>
+      Array.from({ length: 31 }, (_, i) => i + 1).map((day) => ({
+        value: day,
+        label: lang === 'bn' ? `প্রতি মাসের ${formatNumber(day, 'bn')} তারিখ` : `Day ${day} of every month`,
+        compactLabel: formatNumber(day, lang),
+      })),
+    [lang]
+  );
 
   // Goal Title Editing (Popup Modal)
   const [isEditingGoalTitle, setIsEditingGoalTitle] = useState(false);
@@ -1661,7 +1672,7 @@ export default function GoalsManager({
                 >
                   {isSubmitting ? (
                     <span className="flex items-center gap-2">
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <LoadingSpinner size="sm" />
                       {t.saving}
                     </span>
                   ) : (
@@ -2226,7 +2237,7 @@ export default function GoalsManager({
                       >
                         {isSubmitting ? (
                           <span className="flex items-center gap-2">
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            <LoadingSpinner size="sm" />
                             {t.saving}
                           </span>
                         ) : contributionActionType === 'withdrawal' ? (
@@ -2619,11 +2630,7 @@ export default function GoalsManager({
                   lang={lang}
                   title={lang === 'bn' ? 'প্রতি মাসের কিস্তির তারিখ' : 'Day of Month for EMI'}
                   gridColumns={7}
-                  options={Array.from({ length: 31 }, (_, i) => i + 1).map(day => ({
-                    value: day,
-                    label: lang === 'bn' ? `প্রতি মাসের ${formatNumber(day, 'bn')} তারিখ` : `Day ${day} of every month`,
-                    compactLabel: formatNumber(day, lang)
-                  }))}
+                  options={emiDayOptions}
                   triggerClassName={`${glassFieldCls} text-sm font-bold cursor-pointer flex items-center justify-between gap-2 text-left touch-press`}
                 />
               </div>
@@ -2659,9 +2666,13 @@ export default function GoalsManager({
                 type="button"
                 disabled={isSavingEmiReminder}
                 onClick={handleSaveEmiReminder}
-                className="w-full py-3 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-full text-xs cursor-pointer transition-colors flex items-center justify-center gap-2 touch-press"
+                className="w-full py-3 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold rounded-full text-xs cursor-pointer transition-colors flex items-center justify-center gap-2 touch-press disabled:opacity-70"
               >
-                <Bell className="w-4 h-4 stroke-[1.25]" />
+                {isSavingEmiReminder ? (
+                  <LoadingSpinner size="sm" />
+                ) : (
+                  <Bell className="w-4 h-4 stroke-[1.25]" />
+                )}
                 {reminders.some(r => r.goalId === emiReminderGoal.id && r.active)
                   ? (lang === 'bn' ? 'রিমাইন্ডার আপডেট করুন' : 'Update EMI Reminder')
                   : (lang === 'bn' ? 'কিস্তির অ্যালার্ট চালু করুন' : 'Enable EMI Reminder')}
@@ -2774,7 +2785,7 @@ export default function GoalsManager({
                 >
                   {isSavingEditContrib ? (
                     <span className="flex items-center gap-2">
-                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <LoadingSpinner size="xs" />
                       {t.saving}
                     </span>
                   ) : (
@@ -2839,7 +2850,7 @@ export default function GoalsManager({
               >
                 {isDeletingContrib ? (
                   <span className="flex items-center gap-2">
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <LoadingSpinner size="xs" />
                     {lang === 'bn' ? 'মুছে ফেলা হচ্ছে...' : 'Deleting...'}
                   </span>
                 ) : (
@@ -2930,7 +2941,7 @@ export default function GoalsManager({
                 >
                   {isSavingGoalTitle ? (
                     <span className="flex items-center gap-2">
-                      <div className="w-3.5 h-3.5 border-2 border-white dark:border-black border-t-transparent rounded-full animate-spin" />
+                      <LoadingSpinner size="xs" />
                       {t.saving}
                     </span>
                   ) : (

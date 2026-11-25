@@ -13,7 +13,8 @@ import {
   Plane,
   Users,
   PawPrint,
-  Tag,
+  CircleDotDashed,
+  Tags,
   Banknote,
   CreditCard,
   Smartphone,
@@ -26,7 +27,7 @@ import {
   LucideIcon
 } from 'lucide-react';
 import { Language } from './translations';
-import { Transaction } from '../types';
+import { Transaction, CustomTagDefinition, UserTagConfig } from '../types';
 
 export interface TagMeta {
   id: string;
@@ -36,48 +37,303 @@ export interface TagMeta {
   shortDescBn: string;
   icon: LucideIcon;
   color: string;
+  isCustom?: boolean;
+  logoDataUrl?: string | null;
+  imageOnly?: boolean;
+  enabled?: boolean;
+  type?: 'due' | 'payment';
 }
 
 export const EXPENSE_TAGS: TagMeta[] = [
-  { id: 'food', en: 'Food', bn: 'খাবার', shortDescEn: 'Food', shortDescBn: 'খাবার', icon: Utensils, color: '#F97316' },
-  { id: 'transport', en: 'Transport', bn: 'যাতায়াত', shortDescEn: 'Transport', shortDescBn: 'যাতায়াত', icon: Car, color: '#3B82F6' },
-  { id: 'housing', en: 'Housing', bn: 'বাসা-ভাড়া', shortDescEn: 'Housing', shortDescBn: 'বাসা-ভাড়া', icon: Home, color: '#8B5CF6' },
-  { id: 'health', en: 'Health', bn: 'চিকিৎসা', shortDescEn: 'Health', shortDescBn: 'চিকিৎসা', icon: HeartPulse, color: '#EF4444' },
-  { id: 'personal', en: 'Personal', bn: 'ব্যক্তিগত', shortDescEn: 'Personal', shortDescBn: 'ব্যক্তিগত', icon: User, color: '#EC4899' },
-  { id: 'shopping', en: 'Shopping', bn: 'কেনাকাটা', shortDescEn: 'Shopping', shortDescBn: 'কেনাকাটা', icon: ShoppingBag, color: '#06B6D4' },
-  { id: 'education', en: 'Education', bn: 'শিক্ষা', shortDescEn: 'Education', shortDescBn: 'শিক্ষা', icon: GraduationCap, color: '#10B981' },
-  { id: 'bills', en: 'Bills', bn: 'বিল', shortDescEn: 'Bills', shortDescBn: 'বিল', icon: Receipt, color: '#F59E0B' },
-  { id: 'finance', en: 'Finance', bn: 'ফাইন্যান্স', shortDescEn: 'Finance', shortDescBn: 'ফাইন্যান্স', icon: Landmark, color: '#6366F1' },
-  { id: 'gifts', en: 'Gifts', bn: 'উপহার', shortDescEn: 'Gift', shortDescBn: 'উপহার', icon: Gift, color: '#F43F5E' },
-  { id: 'travel', en: 'Travel', bn: 'ভ্রমণ', shortDescEn: 'Travel', shortDescBn: 'ভ্রমণ', icon: Plane, color: '#0EA5E9' },
-  { id: 'family', en: 'Family', bn: 'পরিবার', shortDescEn: 'Family', shortDescBn: 'পরিবার', icon: Users, color: '#14B8A6' },
-  { id: 'pets', en: 'Pets', bn: 'পোষা প্রাণী', shortDescEn: 'Pets', shortDescBn: 'পোষা প্রাণী', icon: PawPrint, color: '#D97706' },
-  { id: 'other', en: 'Other', bn: 'অন্যান্য', shortDescEn: 'Other', shortDescBn: 'অন্যান্য', icon: Tag, color: '#64748B' },
+  { id: 'food', en: 'Food', bn: 'খাবার', shortDescEn: 'Food', shortDescBn: 'খাবার', icon: Utensils, color: '#F97316', type: 'due' },
+  { id: 'transport', en: 'Transport', bn: 'যাতায়াত', shortDescEn: 'Transport', shortDescBn: 'যাতায়াত', icon: Car, color: '#3B82F6', type: 'due' },
+  { id: 'housing', en: 'Housing', bn: 'বাসা-ভাড়া', shortDescEn: 'Housing', shortDescBn: 'বাসা-ভাড়া', icon: Home, color: '#8B5CF6', type: 'due' },
+  { id: 'health', en: 'Health', bn: 'চিকিৎসা', shortDescEn: 'Health', shortDescBn: 'চিকিৎসা', icon: HeartPulse, color: '#EF4444', type: 'due' },
+  { id: 'personal', en: 'Personal', bn: 'ব্যক্তিগত', shortDescEn: 'Personal', shortDescBn: 'ব্যক্তিগত', icon: User, color: '#EC4899', type: 'due' },
+  { id: 'shopping', en: 'Shopping', bn: 'কেনাকাটা', shortDescEn: 'Shopping', shortDescBn: 'কেনাকাটা', icon: ShoppingBag, color: '#06B6D4', type: 'due' },
+  { id: 'education', en: 'Education', bn: 'শিক্ষা', shortDescEn: 'Education', shortDescBn: 'শিক্ষা', icon: GraduationCap, color: '#10B981', type: 'due' },
+  { id: 'bills', en: 'Bills', bn: 'বিল', shortDescEn: 'Bills', shortDescBn: 'বিল', icon: Receipt, color: '#F59E0B', type: 'due' },
+  { id: 'finance', en: 'Finance', bn: 'ফাইন্যান্স', shortDescEn: 'Finance', shortDescBn: 'ফাইন্যান্স', icon: Landmark, color: '#6366F1', type: 'due' },
+  { id: 'gifts', en: 'Gifts', bn: 'উপহার', shortDescEn: 'Gift', shortDescBn: 'উপহার', icon: Gift, color: '#F43F5E', type: 'due' },
+  { id: 'travel', en: 'Travel', bn: 'ভ্রমণ', shortDescEn: 'Travel', shortDescBn: 'ভ্রমণ', icon: Plane, color: '#0EA5E9', type: 'due' },
+  { id: 'family', en: 'Family', bn: 'পরিবার', shortDescEn: 'Family', shortDescBn: 'পরিবার', icon: Users, color: '#14B8A6', type: 'due' },
+  { id: 'pets', en: 'Pets', bn: 'পোষা প্রাণী', shortDescEn: 'Pets', shortDescBn: 'পোষা প্রাণী', icon: PawPrint, color: '#D97706', type: 'due' },
+  { id: 'other', en: 'Other', bn: 'অন্যান্য', shortDescEn: 'Other', shortDescBn: 'অন্যান্য', icon: Tags, color: '#64748B', type: 'due' },
 ];
 
 export const PAYMENT_TAGS: TagMeta[] = [
-  { id: 'cash', en: 'Cash', bn: 'নগদ', shortDescEn: 'Cash', shortDescBn: 'নগদ', icon: Banknote, color: '#10B981' },
-  { id: 'card', en: 'Card', bn: 'কার্ড', shortDescEn: 'Card', shortDescBn: 'কার্ড', icon: CreditCard, color: '#3B82F6' },
-  { id: 'mobile', en: 'Mobile', bn: 'মোবাইল', shortDescEn: 'Mobile', shortDescBn: 'মোবাইল', icon: Smartphone, color: '#EC4899' },
-  { id: 'bank', en: 'Bank', bn: 'ব্যাংক', shortDescEn: 'Bank', shortDescBn: 'ব্যাংক', icon: Building2, color: '#8B5CF6' },
-  { id: 'online', en: 'Online', bn: 'অনলাইন', shortDescEn: 'Online', shortDescBn: 'অনলাইন', icon: Globe, color: '#06B6D4' },
-  { id: 'other', en: 'Other', bn: 'অন্যান্য', shortDescEn: 'Other', shortDescBn: 'অন্যান্য', icon: Tag, color: '#64748B' },
+  { id: 'cash', en: 'Cash', bn: 'নগদ', shortDescEn: 'Cash', shortDescBn: 'নগদ', icon: Banknote, color: '#10B981', type: 'payment' },
+  { id: 'card', en: 'Card', bn: 'কার্ড', shortDescEn: 'Card', shortDescBn: 'কার্ড', icon: CreditCard, color: '#3B82F6', type: 'payment' },
+  { id: 'mobile', en: 'Mobile', bn: 'মোবাইল', shortDescEn: 'Mobile', shortDescBn: 'মোবাইল', icon: Smartphone, color: '#EC4899', type: 'payment' },
+  { id: 'bank', en: 'Bank', bn: 'ব্যাংক', shortDescEn: 'Bank', shortDescBn: 'ব্যাংক', icon: Building2, color: '#8B5CF6', type: 'payment' },
+  { id: 'online', en: 'Online', bn: 'অনলাইন', shortDescEn: 'Online', shortDescBn: 'অনলাইন', icon: Globe, color: '#06B6D4', type: 'payment' },
+  { id: 'other', en: 'Other', bn: 'অন্যান্য', shortDescEn: 'Other', shortDescBn: 'অন্যান্য', icon: Tags, color: '#64748B', type: 'payment' },
 ];
 
 export const ALL_TAGS: TagMeta[] = [...EXPENSE_TAGS, ...PAYMENT_TAGS.filter(p => !EXPENSE_TAGS.some(e => e.id === p.id))];
 
-const TAG_MAP: Record<string, TagMeta> = {};
-EXPENSE_TAGS.forEach(t => { TAG_MAP[t.id] = t; });
-PAYMENT_TAGS.forEach(t => { if (!TAG_MAP[t.id]) TAG_MAP[t.id] = t; });
+export const TAG_LIMITS = {
+  due: {
+    maxEnabled: 15,
+    maxTotal: 20,
+    defaultCount: EXPENSE_TAGS.length,
+  },
+  payment: {
+    maxEnabled: 10,
+    maxTotal: 15,
+    defaultCount: PAYMENT_TAGS.length,
+  },
+} as const;
 
-export function getTagMeta(tagId?: string | null): TagMeta | null {
-  if (!tagId) return null;
-  const normalized = tagId.toLowerCase().trim();
-  return TAG_MAP[normalized] || null;
+export const CUSTOM_TAG_COLORS = [
+  '#059669',
+  '#3B82F6',
+  '#F97316',
+  '#EC4899',
+  '#8B5CF6',
+  '#EF4444',
+  '#06B6D4',
+  '#F59E0B',
+  '#6366F1',
+  '#14B8A6',
+];
+
+export const DEFAULT_TAG_CONFIG: UserTagConfig = {
+  disabledDueTags: [],
+  disabledPaymentTags: [],
+  customTags: [],
+};
+
+const EXPENSE_DEFAULT_MAP: Record<string, TagMeta> = {};
+EXPENSE_TAGS.forEach(t => { EXPENSE_DEFAULT_MAP[t.id] = t; });
+
+const PAYMENT_DEFAULT_MAP: Record<string, TagMeta> = {};
+PAYMENT_TAGS.forEach(t => { PAYMENT_DEFAULT_MAP[t.id] = t; });
+
+const COMBINED_DEFAULT_MAP: Record<string, TagMeta> = {
+  ...EXPENSE_DEFAULT_MAP,
+  ...PAYMENT_DEFAULT_MAP,
+};
+
+let currentTagConfig: UserTagConfig = DEFAULT_TAG_CONFIG;
+let customDueMap: Record<string, TagMeta> = {};
+let customPaymentMap: Record<string, TagMeta> = {};
+
+function customDefToMeta(def: CustomTagDefinition): TagMeta {
+  return {
+    id: def.id,
+    en: def.name,
+    bn: def.name,
+    shortDescEn: def.name,
+    shortDescBn: def.name,
+    icon: CircleDotDashed,
+    color: def.color || '#059669',
+    isCustom: true,
+    logoDataUrl: def.logoDataUrl || null,
+    imageOnly: Boolean(def.imageOnly && def.logoDataUrl),
+    enabled: Boolean(def.enabled),
+    type: def.type,
+  };
 }
 
-export function getTagDefaultDescription(tagId: string, lang: Language): string {
-  const meta = getTagMeta(tagId);
+function isSafeLogoDataUrl(val: unknown): val is string {
+  if (typeof val !== 'string') return false;
+  if (val.length === 0 || val.length > 52000) return false;
+  return /^data:image\/(webp|png|jpeg|jpg);base64,[A-Za-z0-9+/=]+$/i.test(val);
+}
+
+export function sanitizeTagConfig(raw?: Partial<UserTagConfig> | null): UserTagConfig {
+  const rawDisabledDue = Array.isArray(raw?.disabledDueTags) ? raw!.disabledDueTags : [];
+  const rawDisabledPayment = Array.isArray(raw?.disabledPaymentTags) ? raw!.disabledPaymentTags : [];
+  const rawCustom = Array.isArray(raw?.customTags) ? raw!.customTags : [];
+
+  const disabledDueTags = Array.from(
+    new Set(
+      rawDisabledDue
+        .map((id) => String(id || '').toLowerCase().trim())
+        .filter((id) => Boolean(EXPENSE_DEFAULT_MAP[id]))
+    )
+  );
+
+  const disabledPaymentTags = Array.from(
+    new Set(
+      rawDisabledPayment
+        .map((id) => String(id || '').toLowerCase().trim())
+        .filter((id) => Boolean(PAYMENT_DEFAULT_MAP[id]))
+    )
+  );
+
+  const maxCustomDue = Math.max(0, TAG_LIMITS.due.maxTotal - TAG_LIMITS.due.defaultCount);
+  const maxCustomPayment = Math.max(0, TAG_LIMITS.payment.maxTotal - TAG_LIMITS.payment.defaultCount);
+
+  const seenIds = new Set<string>();
+  const dueCustoms: CustomTagDefinition[] = [];
+  const paymentCustoms: CustomTagDefinition[] = [];
+
+  for (const item of rawCustom) {
+    if (!item || typeof item !== 'object') continue;
+    const type: 'due' | 'payment' = item.type === 'payment' ? 'payment' : 'due';
+    const id = String(item.id || '').trim();
+    const name = String(item.name || '').trim().slice(0, 32);
+    if (!id || !name || seenIds.has(id.toLowerCase())) continue;
+    seenIds.add(id.toLowerCase());
+
+    const safeLogo = isSafeLogoDataUrl(item.logoDataUrl) ? item.logoDataUrl : null;
+    const color =
+      typeof item.color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(item.color.trim())
+        ? item.color.trim()
+        : '#059669';
+
+    const cleaned: CustomTagDefinition = {
+      id,
+      type,
+      name,
+      color,
+      logoDataUrl: safeLogo,
+      imageOnly: Boolean(item.imageOnly && safeLogo),
+      enabled: item.enabled !== false,
+      createdAt: item.createdAt || undefined,
+      updatedAt: item.updatedAt || undefined,
+    };
+
+    if (type === 'due' && dueCustoms.length < maxCustomDue) {
+      dueCustoms.push(cleaned);
+    } else if (type === 'payment' && paymentCustoms.length < maxCustomPayment) {
+      paymentCustoms.push(cleaned);
+    }
+  }
+
+  // Enforce enabled cap per category cleanly (disable overflow if corrupted/legacy payload exceeds cap)
+  const enforceEnabledCap = (
+    defaults: TagMeta[],
+    disabledIds: string[],
+    customs: CustomTagDefinition[],
+    maxEnabled: number
+  ) => {
+    const disabledSet = new Set(disabledIds);
+    const enabledDefaultCount = defaults.filter((d) => !disabledSet.has(d.id)).length;
+    let remainingSlots = Math.max(0, maxEnabled - enabledDefaultCount);
+    return customs.map((c) => {
+      if (!c.enabled) return c;
+      if (remainingSlots > 0) {
+        remainingSlots -= 1;
+        return c;
+      }
+      return { ...c, enabled: false };
+    });
+  };
+
+  const finalDueCustoms = enforceEnabledCap(
+    EXPENSE_TAGS,
+    disabledDueTags,
+    dueCustoms,
+    TAG_LIMITS.due.maxEnabled
+  );
+  const finalPaymentCustoms = enforceEnabledCap(
+    PAYMENT_TAGS,
+    disabledPaymentTags,
+    paymentCustoms,
+    TAG_LIMITS.payment.maxEnabled
+  );
+
+  return {
+    disabledDueTags,
+    disabledPaymentTags,
+    customTags: [...finalDueCustoms, ...finalPaymentCustoms],
+    updatedAt: typeof raw?.updatedAt === 'string' ? raw.updatedAt : undefined,
+  };
+}
+
+function rebuildCustomMaps(config: UserTagConfig) {
+  const nextDue: Record<string, TagMeta> = {};
+  const nextPay: Record<string, TagMeta> = {};
+  config.customTags.forEach((def) => {
+    const meta = customDefToMeta(def);
+    if (def.type === 'due') {
+      nextDue[def.id.toLowerCase()] = meta;
+    } else {
+      nextPay[def.id.toLowerCase()] = meta;
+    }
+  });
+  customDueMap = nextDue;
+  customPaymentMap = nextPay;
+}
+
+export function getUserTagConfig(): UserTagConfig {
+  return currentTagConfig;
+}
+
+export function setUserTagConfigState(nextConfig?: Partial<UserTagConfig> | null): UserTagConfig {
+  const sanitized = sanitizeTagConfig(nextConfig);
+  currentTagConfig = sanitized;
+  rebuildCustomMaps(sanitized);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('tag-config-changed', { detail: sanitized }));
+  }
+  return sanitized;
+}
+
+export function resetUserTagConfigState(): void {
+  currentTagConfig = DEFAULT_TAG_CONFIG;
+  customDueMap = {};
+  customPaymentMap = {};
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('tag-config-changed', { detail: DEFAULT_TAG_CONFIG }));
+  }
+}
+
+export function useTagConfig(): UserTagConfig {
+  const [config, setConfig] = React.useState<UserTagConfig>(() => getUserTagConfig());
+  React.useEffect(() => {
+    const sync = () => setConfig(getUserTagConfig());
+    sync();
+    window.addEventListener('tag-config-changed', sync);
+    return () => window.removeEventListener('tag-config-changed', sync);
+  }, []);
+  return config;
+}
+
+export function getTagCounts(config: UserTagConfig, type: 'due' | 'payment') {
+  const defaults = type === 'due' ? EXPENSE_TAGS : PAYMENT_TAGS;
+  const limits = TAG_LIMITS[type];
+  const disabledSet = new Set(
+    (type === 'due' ? config.disabledDueTags : config.disabledPaymentTags).map((id) => id.toLowerCase())
+  );
+  const customList = config.customTags.filter((c) => c.type === type);
+  const enabledDefaultCount = defaults.filter((d) => !disabledSet.has(d.id)).length;
+  const enabledCustomCount = customList.filter((c) => c.enabled).length;
+  return {
+    enabledDefaultCount,
+    enabledCustomCount,
+    enabledCount: enabledDefaultCount + enabledCustomCount,
+    totalCount: defaults.length + customList.length,
+    customCount: customList.length,
+    maxEnabled: limits.maxEnabled,
+    maxTotal: limits.maxTotal,
+  };
+}
+
+export function getTagMeta(tagId?: string | null, type?: 'due' | 'payment'): TagMeta | null {
+  if (!tagId) return null;
+  const normalized = tagId.toLowerCase().trim();
+  if (!normalized) return null;
+
+  if (type === 'due') {
+    return customDueMap[normalized] || EXPENSE_DEFAULT_MAP[normalized] || customPaymentMap[normalized] || PAYMENT_DEFAULT_MAP[normalized] || null;
+  }
+  if (type === 'payment') {
+    return customPaymentMap[normalized] || PAYMENT_DEFAULT_MAP[normalized] || customDueMap[normalized] || EXPENSE_DEFAULT_MAP[normalized] || null;
+  }
+  return (
+    customDueMap[normalized] ||
+    customPaymentMap[normalized] ||
+    COMBINED_DEFAULT_MAP[normalized] ||
+    null
+  );
+}
+
+export function getTagDefaultDescription(tagId: string, lang: Language, type?: 'due' | 'payment'): string {
+  const meta = getTagMeta(tagId, type);
   if (!meta) return '';
   return lang === 'bn' ? meta.shortDescBn : meta.shortDescEn;
 }
@@ -103,8 +359,21 @@ export function getTagUsageCounts(): Record<string, number> {
   }
 }
 
-export function getSortedTags(type: 'due' | 'payment', transactions: Transaction[] = []): TagMeta[] {
-  const baseList = type === 'due' ? [...EXPENSE_TAGS] : [...PAYMENT_TAGS];
+export function getSortedTags(
+  type: 'due' | 'payment',
+  transactions: Transaction[] = [],
+  config: UserTagConfig = currentTagConfig
+): TagMeta[] {
+  const defaults = type === 'due' ? EXPENSE_TAGS : PAYMENT_TAGS;
+  const disabledSet = new Set(
+    (type === 'due' ? config.disabledDueTags : config.disabledPaymentTags).map((id) => id.toLowerCase())
+  );
+  const enabledDefaults = defaults.filter((d) => !disabledSet.has(d.id));
+  const enabledCustoms = config.customTags
+    .filter((c) => c.type === type && c.enabled)
+    .map(customDefToMeta);
+
+  const activeList = [...enabledDefaults, ...enabledCustoms].slice(0, TAG_LIMITS[type].maxEnabled);
   const countMap: Record<string, number> = { ...getTagUsageCounts() };
 
   transactions.forEach((tx) => {
@@ -114,12 +383,233 @@ export function getSortedTags(type: 'due' | 'payment', transactions: Transaction
     }
   });
 
-  return baseList.sort((a, b) => {
-    const countA = countMap[a.id] || 0;
-    const countB = countMap[b.id] || 0;
+  return activeList.sort((a, b) => {
+    const countA = countMap[a.id.toLowerCase()] || 0;
+    const countB = countMap[b.id.toLowerCase()] || 0;
     if (countB !== countA) return countB - countA;
     return 0;
   });
+}
+
+export interface OptimizedTagLogoResult {
+  dataUrl: string;
+  width: number;
+  height: number;
+  byteSize: number;
+  dominantColor: string | null;
+}
+
+const MAX_RAW_TAG_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_TAG_DATAURL_CHARS = 38000; // ~28 KB base64 image payload per logo
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const clamp = (n: number) => Math.max(0, Math.min(255, Math.round(n)));
+  return (
+    '#' +
+    [clamp(r), clamp(g), clamp(b)]
+      .map((n) => n.toString(16).padStart(2, '0').toUpperCase())
+      .join('')
+  );
+}
+
+function extractDominantAccentColor(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number
+): string | null {
+  try {
+    const data = ctx.getImageData(0, 0, width, height).data;
+    const vibrantBuckets = new Map<number, { rSum: number; gSum: number; bSum: number; weight: number }>();
+    const fallbackBuckets = new Map<number, { rSum: number; gSum: number; bSum: number; weight: number }>();
+
+    for (let i = 0; i < data.length; i += 4) {
+      const a = data[i + 3];
+      if (a < 128) continue;
+
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const delta = max - min;
+      const lum = (max + min) / 510; // 0..1
+      const sat = delta === 0 ? 0 : delta / (255 - Math.abs(max + min - 255) || 1);
+
+      const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+      const alphaWeight = a / 255;
+
+      // Prefer vivid brand accents (avoid near-white backgrounds & near-black outlines)
+      if (sat >= 0.22 && lum >= 0.14 && lum <= 0.86) {
+        const w = alphaWeight * (0.4 + sat * 1.8);
+        const existing = vibrantBuckets.get(key);
+        if (existing) {
+          existing.rSum += r * w;
+          existing.gSum += g * w;
+          existing.bSum += b * w;
+          existing.weight += w;
+        } else {
+          vibrantBuckets.set(key, { rSum: r * w, gSum: g * w, bSum: b * w, weight: w });
+        }
+      } else if (!(r > 240 && g > 240 && b > 240)) {
+        const w = alphaWeight;
+        const existing = fallbackBuckets.get(key);
+        if (existing) {
+          existing.rSum += r * w;
+          existing.gSum += g * w;
+          existing.bSum += b * w;
+          existing.weight += w;
+        } else {
+          fallbackBuckets.set(key, { rSum: r * w, gSum: g * w, bSum: b * w, weight: w });
+        }
+      }
+    }
+
+    const pickTop = (buckets: Map<number, { rSum: number; gSum: number; bSum: number; weight: number }>) => {
+      let best: { rSum: number; gSum: number; bSum: number; weight: number } | null = null;
+      for (const bkt of buckets.values()) {
+        if (!best || bkt.weight > best.weight) best = bkt;
+      }
+      if (!best || best.weight <= 0) return null;
+      return rgbToHex(best.rSum / best.weight, best.gSum / best.weight, best.bSum / best.weight);
+    };
+
+    return pickTop(vibrantBuckets) || pickTop(fallbackBuckets);
+  } catch {
+    return null;
+  }
+}
+
+async function loadImageSourceFromFile(file: File): Promise<{
+  source: ImageBitmap | HTMLImageElement;
+  width: number;
+  height: number;
+  cleanup: () => void;
+}> {
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const bitmap = await createImageBitmap(file);
+      return {
+        source: bitmap,
+        width: bitmap.width,
+        height: bitmap.height,
+        cleanup: () => {
+          try { bitmap.close(); } catch {}
+        },
+      };
+    } catch {
+      // Fallback to HTMLImageElement below
+    }
+  }
+
+  return await new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      resolve({
+        source: img,
+        width: img.naturalWidth || img.width,
+        height: img.naturalHeight || img.height,
+        cleanup: () => URL.revokeObjectURL(url),
+      });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('INVALID_IMAGE'));
+    };
+    img.src = url;
+  });
+}
+
+export async function optimizeTagLogoImage(file: File): Promise<OptimizedTagLogoResult> {
+  if (!file || !file.type || !file.type.startsWith('image/')) {
+    throw new Error('UNSUPPORTED_TYPE');
+  }
+  if (file.size <= 0) {
+    throw new Error('INVALID_IMAGE');
+  }
+  if (file.size > MAX_RAW_TAG_IMAGE_BYTES) {
+    throw new Error('FILE_TOO_LARGE');
+  }
+
+  const loaded = await loadImageSourceFromFile(file);
+  const canvas = document.createElement('canvas');
+  try {
+    const srcW = Math.max(1, loaded.width);
+    const srcH = Math.max(1, loaded.height);
+    const colorState: { current: string | null; extracted: boolean } = {
+      current: null,
+      extracted: false,
+    };
+
+    const renderAtMaxEdge = (maxEdge: number, mime: string, quality?: number): { dataUrl: string; w: number; h: number } | null => {
+      const scale = Math.min(1, maxEdge / Math.max(srcW, srcH));
+      const targetW = Math.max(16, Math.round(srcW * scale));
+      const targetH = Math.max(16, Math.round(srcH * scale));
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext('2d', { alpha: true });
+      if (!ctx) return null;
+      ctx.clearRect(0, 0, targetW, targetH);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(loaded.source, 0, 0, targetW, targetH);
+      if (!colorState.extracted) {
+        colorState.extracted = true;
+        colorState.current = extractDominantAccentColor(ctx, targetW, targetH);
+      }
+      const dataUrl = quality !== undefined ? canvas.toDataURL(mime, quality) : canvas.toDataURL(mime);
+      if (!dataUrl || !dataUrl.startsWith(`data:${mime}`)) return null;
+      return { dataUrl, w: targetW, h: targetH };
+    };
+
+    const attempts: Array<{ maxEdge: number; mime: string; quality?: number }> = [
+      { maxEdge: 96, mime: 'image/webp', quality: 0.86 },
+      { maxEdge: 96, mime: 'image/webp', quality: 0.72 },
+      { maxEdge: 96, mime: 'image/webp', quality: 0.56 },
+      { maxEdge: 72, mime: 'image/webp', quality: 0.68 },
+      { maxEdge: 56, mime: 'image/webp', quality: 0.6 },
+      { maxEdge: 72, mime: 'image/png' },
+      { maxEdge: 48, mime: 'image/png' },
+    ];
+
+    let best: { dataUrl: string; w: number; h: number } | null = null;
+    for (const attempt of attempts) {
+      const res = renderAtMaxEdge(attempt.maxEdge, attempt.mime, attempt.quality);
+      if (!res) continue;
+      if (!best || res.dataUrl.length < best.dataUrl.length) {
+        best = res;
+      }
+      if (res.dataUrl.length <= MAX_TAG_DATAURL_CHARS) {
+        const base64Part = res.dataUrl.split(',')[1] || '';
+        const byteSize = Math.round((base64Part.length * 3) / 4);
+        return {
+          dataUrl: res.dataUrl,
+          width: res.w,
+          height: res.h,
+          byteSize,
+          dominantColor: colorState.current,
+        };
+      }
+    }
+
+    if (best && best.dataUrl.length <= 48000) {
+      const base64Part = best.dataUrl.split(',')[1] || '';
+      return {
+        dataUrl: best.dataUrl,
+        width: best.w,
+        height: best.h,
+        byteSize: Math.round((base64Part.length * 3) / 4),
+        dominantColor: colorState.current,
+      };
+    }
+
+    throw new Error('OUTPUT_TOO_LARGE');
+  } finally {
+    loaded.cleanup();
+    canvas.width = 0;
+    canvas.height = 0;
+  }
 }
 
 export interface TagIconProps {
@@ -133,10 +623,22 @@ export const TagIcon: React.FC<TagIconProps> = ({
   tag,
   type = 'due',
   className = 'w-4 h-4 stroke-[1.5]',
-  style
+  style,
 }) => {
-  const meta = getTagMeta(tag);
+  useTagConfig();
+  const meta = getTagMeta(tag, type);
   if (meta) {
+    if (meta.logoDataUrl) {
+      return (
+        <img
+          src={meta.logoDataUrl}
+          alt={meta.en}
+          className={`${className} object-contain rounded-sm`}
+          style={style}
+          draggable={false}
+        />
+      );
+    }
     const IconComponent = meta.icon;
     return <IconComponent className={className} style={style} />;
   }
@@ -327,11 +829,12 @@ export const TagPickerBar: React.FC<TagPickerBarProps> = ({
   className = ''
 }) => {
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const tagConfig = useTagConfig();
 
   // Strictly sort by most-used counts; never jump selected tag to front or shuffle mid-interaction
   const sortedTags = React.useMemo(
-    () => getSortedTags(type, transactions),
-    [type, transactions]
+    () => getSortedTags(type, transactions, tagConfig),
+    [type, transactions, tagConfig]
   );
 
   React.useEffect(() => {
@@ -345,7 +848,7 @@ export const TagPickerBar: React.FC<TagPickerBarProps> = ({
     sortedTags.length
   );
 
-  const activeMeta = selectedTag ? getTagMeta(selectedTag) : null;
+  const activeMeta = selectedTag ? getTagMeta(selectedTag, type) : null;
   const ActiveIcon = activeMeta?.icon;
 
   return (
@@ -354,10 +857,21 @@ export const TagPickerBar: React.FC<TagPickerBarProps> = ({
         <span className={lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400' : 'micro-mono-label font-semibold'}>
           {lang === 'bn' ? 'ট্যাগ নির্বাচন করুন' : 'Assign Tag'}
         </span>
-        {activeMeta && ActiveIcon && (
+        {activeMeta && (
           <span className="text-[11px] font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1">
-            <ActiveIcon className="w-3 h-3 stroke-[1.75]" style={{ color: activeMeta.color }} />
-            <span>{lang === 'bn' ? activeMeta.bn : activeMeta.en}</span>
+            {activeMeta.logoDataUrl ? (
+              <img
+                src={activeMeta.logoDataUrl}
+                alt={lang === 'bn' ? activeMeta.bn : activeMeta.en}
+                className={activeMeta.imageOnly ? 'h-4 w-auto max-w-[44px] object-contain rounded-xs' : 'w-3.5 h-3.5 object-contain rounded-xs'}
+                draggable={false}
+              />
+            ) : ActiveIcon ? (
+              <ActiveIcon className="w-3 h-3 stroke-[1.75]" style={{ color: activeMeta.color }} />
+            ) : null}
+            {!(activeMeta.imageOnly && activeMeta.logoDataUrl) && (
+              <span>{lang === 'bn' ? activeMeta.bn : activeMeta.en}</span>
+            )}
           </span>
         )}
       </div>
@@ -386,25 +900,45 @@ export const TagPickerBar: React.FC<TagPickerBarProps> = ({
           {sortedTags.map((tagItem) => {
             const isSelected = selectedTag === tagItem.id;
             const IconComp = tagItem.icon;
+            const tagName = lang === 'bn' ? tagItem.bn : tagItem.en;
+            const isImageOnly = Boolean(tagItem.imageOnly && tagItem.logoDataUrl);
+
             return (
               <button
                 key={tagItem.id}
                 type="button"
+                title={tagName}
+                aria-label={tagName}
                 onClick={() => {
                   if (!isSelected) recordTagUsage(tagItem.id);
                   onSelectTag(isSelected ? null : tagItem.id);
                 }}
-                className={`touch-press shrink-0 px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all duration-150 ${
+                className={`touch-press shrink-0 ${isImageOnly ? 'px-3 py-1.5' : 'px-3.5 py-1.5'} rounded-full text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-all duration-150 ${
                   isSelected
                     ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 shadow-xs ring-1 ring-slate-950 dark:ring-white font-bold'
                     : 'surface-subcard border text-slate-700 dark:text-slate-300 hover:bg-slate-900/[0.04] dark:hover:bg-white/[0.06]'
                 }`}
               >
-                <IconComp
-                  className="w-3.5 h-3.5 stroke-[1.5] shrink-0"
-                  style={{ color: isSelected ? undefined : tagItem.color }}
-                />
-                <span className="whitespace-nowrap">{lang === 'bn' ? tagItem.bn : tagItem.en}</span>
+                {tagItem.logoDataUrl ? (
+                  <img
+                    src={tagItem.logoDataUrl}
+                    alt={tagName}
+                    className={
+                      isImageOnly
+                        ? 'h-4 w-auto max-w-[52px] object-contain rounded-xs shrink-0'
+                        : 'w-4 h-4 object-contain rounded-xs shrink-0'
+                    }
+                    draggable={false}
+                  />
+                ) : (
+                  <IconComp
+                    className="w-3.5 h-3.5 stroke-[1.5] shrink-0"
+                    style={{ color: isSelected ? undefined : tagItem.color }}
+                  />
+                )}
+                {!isImageOnly && (
+                  <span className="whitespace-nowrap">{tagName}</span>
+                )}
               </button>
             );
           })}
@@ -425,3 +959,4 @@ export const TagPickerBar: React.FC<TagPickerBarProps> = ({
     </div>
   );
 };
+

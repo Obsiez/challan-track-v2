@@ -11,7 +11,10 @@ import { getPhoneticKey, matchesPhonetic, isPhoneticSearchEnabled } from '../lib
 import ContactNumberPickerModal from './ContactNumberPickerModal';
 import { cleanBangladeshiPhone } from '../lib/phoneUtils';
 import ModalPortal, { useModalScrollLock } from './ModalPortal';
+import LoadingSpinner from './LoadingSpinner';
 import { TagPickerBar, getTagDefaultDescription } from '../lib/tagSystem';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { db } from '../firebase';
 
 interface QuickEntryModalProps {
   isOpen: boolean;
@@ -99,6 +102,7 @@ function QuickEntryModalInner({
   const [amountInput, setAmountInput] = useState('');
   const [description, setDescription] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [paymentQuickFillIntent, setPaymentQuickFillIntent] = useState<'billed' | 'total' | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -250,24 +254,119 @@ function QuickEntryModalInner({
    [customers, selectedCustomerId]
  );
 
+ const [fetchedCardTxsMap, setFetchedCardTxsMap] = useState<Record<string, Transaction[]>>({});
+
+ React.useEffect(() => {
+   if (!selectedCustomerId || !currentCustomer || currentCustomer.accountType !== 'credit_card') return;
+   if (fetchedCardTxsMap[selectedCustomerId]) return;
+   const userId = currentCustomer.userId;
+   if (!userId || userId === 'local-guest-session') return;
+   if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+
+   let cancelled = false;
+   const txRef = collection(db, 'users', userId, 'transactions');
+   const q = query(txRef, where('customerId', '==', selectedCustomerId));
+   getDocs(q)
+     .then((snap) => {
+       if (cancelled) return;
+       const list: Transaction[] = [];
+       snap.forEach((docSnap) => {
+         const data = docSnap.data();
+         if ((data as any).isArchived) return;
+         list.push({
+           ...data,
+           id: docSnap.id,
+           date: data.date?.toDate ? data.date.toDate() : new Date(data.date),
+           createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt || data.date),
+         } as Transaction);
+       });
+       setFetchedCardTxsMap((prev) => ({ ...prev, [selectedCustomerId]: list }));
+       try {
+         localStorage.setItem(`easy_due_txs_${userId}_${selectedCustomerId}`, JSON.stringify(list));
+       } catch {}
+     })
+     .catch(() => {});
+
+   return () => {
+     cancelled = true;
+   };
+ }, [selectedCustomerId, currentCustomer, fetchedCardTxsMap]);
+
  const selectedCustomerTxs = useMemo(() => {
    if (!selectedCustomerId) return [];
-   const inMem = transactions.filter(t => t.customerId === selectedCustomerId);
-   if (inMem.length > 0 || typeof localStorage === 'undefined') return inMem;
+   const merged = new Map<string, Transaction>();
    try {
      const userId = currentCustomer?.userId;
-     if (!userId) return [];
-     const cached = localStorage.getItem(`easy_due_txs_${userId}_${selectedCustomerId}`);
-     if (cached) return JSON.parse(cached) as Transaction[];
-     const allStored = localStorage.getItem(`easy_due_transactions_${userId}`);
-     if (allStored) {
-       return (JSON.parse(allStored) as Transaction[]).filter((t) => t.customerId === selectedCustomerId);
+     if (userId && typeof localStorage !== 'undefined') {
+       const cached = localStorage.getItem(`easy_due_txs_${userId}_${selectedCustomerId}`);
+       if (cached) {
+         (JSON.parse(cached) as Transaction[]).forEach((t) => {
+           if (t?.id) merged.set(t.id, t);
+         });
+       } else {
+         const allStored = localStorage.getItem(`easy_due_transactions_${userId}`);
+         if (allStored) {
+           (JSON.parse(allStored) as Transaction[]).forEach((t) => {
+             if (t?.id && t.customerId === selectedCustomerId) merged.set(t.id, t);
+           });
+         }
+       }
      }
    } catch {}
-   return [];
- }, [selectedCustomerId, transactions, currentCustomer]);
+
+   const fetched = fetchedCardTxsMap[selectedCustomerId];
+   if (fetched) {
+     fetched.forEach((t) => {
+       if (t?.id) merged.set(t.id, t);
+     });
+   }
+
+   transactions.forEach((t) => {
+     if (t?.id && t.customerId === selectedCustomerId) merged.set(t.id, t);
+   });
+
+   return Array.from(merged.values());
+ }, [selectedCustomerId, transactions, currentCustomer, fetchedCardTxsMap]);
+
+ const creditCardBilledDue = useMemo(() => {
+   if (!currentCustomer || currentCustomer.accountType !== 'credit_card') return 0;
+   const billingDay = Math.min(31, Math.max(1, currentCustomer.billingDay || 15));
+   const getCycleBoundary = (year: number, monthIndex: number, day: number) => {
+     const firstOfTarget = new Date(year, monthIndex, 1, 0, 0, 0, 0);
+     const maxDays = new Date(firstOfTarget.getFullYear(), firstOfTarget.getMonth() + 1, 0).getDate();
+     return new Date(firstOfTarget.getFullYear(), firstOfTarget.getMonth(), Math.min(day, maxDays), 0, 0, 0, 0);
+   };
+   const now = new Date();
+   const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+   const thisMonthCutoff = getCycleBoundary(now.getFullYear(), now.getMonth(), billingDay);
+   const lastStatementDate =
+     todayMidnight.getTime() >= thisMonthCutoff.getTime()
+       ? thisMonthCutoff
+       : getCycleBoundary(now.getFullYear(), now.getMonth() - 1, billingDay);
+   const lastCutoffMs = lastStatementDate.getTime();
+   const parseDateMs = (d: any) => {
+     if (!d) return 0;
+     if (d instanceof Date) return d.getTime();
+     if (typeof d.toDate === 'function') return d.toDate().getTime();
+     if (typeof d.seconds === 'number') return d.seconds * 1000;
+     const parsed = new Date(d).getTime();
+     return isNaN(parsed) ? 0 : parsed;
+   };
+   let thisMonthSpend = 0;
+   let paymentsSinceCutoff = 0;
+   for (const tx of selectedCustomerTxs) {
+     if (parseDateMs(tx.date) >= lastCutoffMs) {
+       if (tx.type === 'due') thisMonthSpend += tx.amount;
+       else paymentsSinceCutoff += tx.amount;
+     }
+   }
+   const rawStatementAtCutoff = (currentCustomer.outstandingDue || 0) - thisMonthSpend + paymentsSinceCutoff;
+   const billedStatementAmount = Math.max(0, rawStatementAtCutoff);
+   return Math.max(0, billedStatementAmount - paymentsSinceCutoff);
+ }, [currentCustomer, selectedCustomerTxs]);
 
  const handleQuickAddAmount = (add: number) => {
+ setPaymentQuickFillIntent(null);
  const cleaned = amountInput.replace(/,/g, '');
  const current = parseFloat(cleaned) || 0;
  const newVal = (current + add).toString();
@@ -472,6 +571,7 @@ function QuickEntryModalInner({
                     triggerHaptic('single');
                     setType('due');
                     setSelectedTag(null);
+                    setPaymentQuickFillIntent(null);
                   }}
                   className={`py-3.5 px-3.5 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all cursor-pointer touch-press ${
                     type === 'due'
@@ -505,6 +605,7 @@ function QuickEntryModalInner({
                     triggerHaptic('single');
                     setType('payment');
                     setSelectedTag(null);
+                    setPaymentQuickFillIntent(null);
                   }}
                   className={`py-3.5 px-3.5 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all cursor-pointer touch-press ${
                     type === 'payment'
@@ -589,7 +690,10 @@ function QuickEntryModalInner({
                         <button
                           key={c.id}
                           type="button"
-                          onClick={() => setSelectedCustomerId(selectedCustomerId === c.id ? '' : c.id)}
+                          onClick={() => {
+                            setPaymentQuickFillIntent(null);
+                            setSelectedCustomerId(selectedCustomerId === c.id ? '' : c.id);
+                          }}
                           className={`p-3 text-left rounded-2xl transition-all text-xs truncate flex items-center justify-between cursor-pointer touch-press ${
                             selectedCustomerId === c.id
                               ? 'bg-slate-950 text-white border-2 border-slate-950 font-bold dark:bg-white dark:text-slate-950 dark:border-white shadow-sm'
@@ -786,6 +890,7 @@ function QuickEntryModalInner({
                   placeholder="0"
                   value={amountInput}
                   onChange={(e) => {
+                    setPaymentQuickFillIntent(null);
                     const val = e.target.value;
                     const clean = val.replace(/[^0-9.]/g, '');
                     const dots = clean.split('.');
@@ -807,34 +912,99 @@ function QuickEntryModalInner({
                 </p>
               )}
 
-              {type === 'payment' && currentCustomer && (currentCustomer as any).outstandingDue > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    triggerHaptic('single');
-                    const targetDue = (currentCustomer as any).outstandingDue;
-                    const isChecked = amountInput.replace(/,/g, '') === targetDue.toString();
-                    if (!isChecked) {
-                      setAmountInput(formatIndianNumberString(targetDue.toString()));
-                    } else {
-                      setAmountInput('');
-                    }
-                  }}
-                  className="w-full flex items-center text-left gap-2.5 mt-2 p-3 bg-slate-900/[0.03] dark:bg-white/[0.04] rounded-2xl border border-slate-900/[0.07] dark:border-white/[0.08] hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.07] cursor-pointer transition-colors select-none"
-                >
-                  <input
-                    type="checkbox"
-                    className="w-4 h-4 accent-emerald-600 rounded cursor-pointer pointer-events-none"
-                    checked={amountInput.replace(/,/g, '') === (currentCustomer as any).outstandingDue.toString()}
-                    readOnly
-                  />
-                  <span className="text-xs font-semibold text-slate-900 dark:text-white select-none">
-                    {(currentCustomer as any).accountType === 'credit_card'
-                      ? (lang === 'bn' ? 'সম্পূর্ণ কার্ড বিল পরিশোধ করুন' : 'Pay total card balance')
-                      : (lang === 'bn' ? 'সম্পূর্ণ বকেয়া পরিশোধ করুন' : 'Settle complete due')} (৳{formatNumber((currentCustomer as any).outstandingDue, lang)})
-                  </span>
-                </button>
-              )}
+              {type === 'payment' && currentCustomer && currentCustomer.accountType === 'credit_card' && creditCardBilledDue > 0 && (() => {
+                const cleanedAmt = amountInput.replace(/,/g, '');
+                const billedStr = creditCardBilledDue.toString();
+                const totalStr = (currentCustomer.outstandingDue || 0).toString();
+                const isChecked =
+                  cleanedAmt === billedStr &&
+                  (billedStr !== totalStr || paymentQuickFillIntent === 'billed');
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic('single');
+                      if (!isChecked) {
+                        setPaymentQuickFillIntent('billed');
+                        setAmountInput(formatIndianNumberString(billedStr));
+                        if (!description.trim()) {
+                          setDescription(lang === 'bn' ? 'পূর্ববর্তী মাসের বিল পরিশোধ' : 'Billed Statement Payment');
+                        }
+                      } else {
+                        setPaymentQuickFillIntent(null);
+                        setAmountInput('');
+                      }
+                    }}
+                    className={`w-full flex items-center text-left gap-2.5 mt-2 p-3 rounded-2xl border cursor-pointer transition-colors select-none ${
+                      isChecked
+                        ? 'bg-amber-500/18 border-amber-500/50 dark:bg-amber-500/20 dark:border-amber-400/50'
+                        : 'bg-amber-500/[0.09] hover:bg-amber-500/[0.15] border-amber-500/30'
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                        isChecked
+                          ? 'bg-amber-500 border-amber-500 text-white'
+                          : 'border-amber-500/60 bg-white/70 dark:bg-white/[0.05]'
+                      }`}
+                    >
+                      {isChecked && <Check className="w-3 h-3 stroke-[2.5]" />}
+                    </span>
+                    <span className="text-xs font-bold text-amber-800 dark:text-amber-200 select-none">
+                      {lang === 'bn' ? 'পূর্ববর্তী মাসের বিল্ড বকেয়া পরিশোধ করুন' : "Pay billed (previous month's)"} (৳{formatNumber(creditCardBilledDue, lang)})
+                    </span>
+                  </button>
+                );
+              })()}
+
+              {type === 'payment' && currentCustomer && (currentCustomer as any).outstandingDue > 0 && (() => {
+                const cleanedAmt = amountInput.replace(/,/g, '');
+                const targetDue = (currentCustomer as any).outstandingDue;
+                const totalStr = targetDue.toString();
+                const billedStr = creditCardBilledDue.toString();
+                const isChecked =
+                  cleanedAmt === totalStr &&
+                  (currentCustomer.accountType !== 'credit_card' ||
+                    billedStr !== totalStr ||
+                    paymentQuickFillIntent !== 'billed');
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic('single');
+                      if (!isChecked) {
+                        setPaymentQuickFillIntent('total');
+                        setAmountInput(formatIndianNumberString(totalStr));
+                      } else {
+                        setPaymentQuickFillIntent(null);
+                        setAmountInput('');
+                      }
+                    }}
+                    className={`w-full flex items-center text-left gap-2.5 mt-2 p-3 rounded-2xl border cursor-pointer transition-colors select-none ${
+                      isChecked
+                        ? 'bg-emerald-500/14 border-emerald-500/45 dark:bg-emerald-500/18 dark:border-emerald-400/45'
+                        : 'bg-slate-900/[0.03] dark:bg-white/[0.04] border-slate-900/[0.07] dark:border-white/[0.08] hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.07]'
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                        isChecked
+                          ? 'bg-emerald-600 border-emerald-600 text-white'
+                          : 'border-emerald-600/55 dark:border-emerald-400/55 bg-white/70 dark:bg-white/[0.05]'
+                      }`}
+                    >
+                      {isChecked && <Check className="w-3 h-3 stroke-[2.5]" />}
+                    </span>
+                    <span className="text-xs font-semibold text-slate-900 dark:text-white select-none">
+                      {(currentCustomer as any).accountType === 'credit_card'
+                        ? (lang === 'bn' ? 'সম্পূর্ণ কার্ড বিল পরিশোধ করুন' : 'Pay total card balance')
+                        : (lang === 'bn' ? 'সম্পূর্ণ বকেয়া পরিশোধ করুন' : 'Settle complete due')} (৳{formatNumber(targetDue, lang)})
+                    </span>
+                  </button>
+                );
+              })()}
 
               {/* Speedy Pill helpers */}
               <div className="flex flex-wrap gap-1.5 pt-1">
@@ -850,7 +1020,10 @@ function QuickEntryModalInner({
                 ))}
                 <button
                   type="button"
-                  onClick={() => setAmountInput('')}
+                  onClick={() => {
+                    setPaymentQuickFillIntent(null);
+                    setAmountInput('');
+                  }}
                   className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/15 text-rose-600 dark:text-rose-400 font-semibold rounded-full transition-colors text-xs cursor-pointer touch-press"
                 >
                   {lang === 'bn' ? 'মুছুন' : 'Clear'}
@@ -874,7 +1047,7 @@ function QuickEntryModalInner({
               </span>
               <input
                 type="text"
-                placeholder={selectedTag ? getTagDefaultDescription(selectedTag, lang) : t.notesPlaceholder}
+                placeholder={selectedTag ? getTagDefaultDescription(selectedTag, lang, type) : t.notesPlaceholder}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 onFocus={centerNativeInput}
@@ -905,7 +1078,7 @@ function QuickEntryModalInner({
             >
               {isSubmitting ? (
                 <span className="flex items-center gap-2">
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <LoadingSpinner size="sm" />
                   {typeof navigator !== 'undefined' && navigator.onLine ? t.saving : t.speedyNotice}
                 </span>
               ) : (

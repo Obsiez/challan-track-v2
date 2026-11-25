@@ -22,6 +22,7 @@ import AccentColorPickerModal from './components/AccentColorPickerModal';
 import BiometricLockScreen from './components/BiometricLockScreen';
 import CalculatorKeypad from './components/CalculatorKeypad';
 import ModalPortal from './components/ModalPortal';
+import LoadingSpinner from './components/LoadingSpinner';
 import { NativeDatePicker } from './components/NativePickers';
 import { isBiometricEnabled, setBiometricEnabledState, isBiometricSessionUnlocked, setBiometricSessionUnlocked } from './lib/biometrics';
 import { getSavedAccentColor, applyAccentColor, getSavedThemePalette, applyThemePalette } from './lib/accentTheme';
@@ -118,7 +119,7 @@ const MobileBottomDock = React.memo(({
   }));
 
   const [dragVisual, setDragVisual] = useState<{
-    pillX: number;
+    pillCenterX: number;
     hoveredTab: AppTab;
   } | null>(null);
 
@@ -165,7 +166,7 @@ const MobileBottomDock = React.memo(({
       setNavState((prev) =>
         prev.transitionMode === 'none' ? prev : { ...prev, transitionMode: 'none' }
       );
-    }, 155);
+    }, 480);
   }, []);
 
   useEffect(() => {
@@ -219,8 +220,6 @@ const MobileBottomDock = React.memo(({
   const showQuickEntryFab =
     activeTab === 'home' || (activeTab === 'customers' && !activeCid);
 
-  const fabDelay = '0ms';
-
   const activeNavIndex =
     activeTab === 'customers'
       ? 1
@@ -230,22 +229,39 @@ const MobileBottomDock = React.memo(({
       ? 3
       : 0;
 
-  // Exact pixel geometry during drag; percentage-locked when resting so resizing nav never desyncs pill width
-  const fullColWidth = Math.max(48, (dockWidth - 10) / 4);
-  const narrowColWidth = Math.max(36, (dockWidth - 76) / 4);
-  const activeColWidth = showQuickEntryFab ? narrowColWidth : fullColWidth;
-  const restingPillX = activeNavIndex * activeColWidth;
+  // Pixel geometry for dock pill transitions without distorting pill border-radius
+  const shrunkDockWidth = Math.max(194, dockWidth - 66);
+  const fullTrackWidth = Math.max(184, dockWidth - 10);
+  const shrunkTrackWidth = Math.max(184, shrunkDockWidth - 10);
+  const fullColWidth = fullTrackWidth / 4;
+  const shrunkColWidth = shrunkTrackWidth / 4;
+  const activeTrackWidth = showQuickEntryFab ? shrunkTrackWidth : fullTrackWidth;
+  const activeColWidth = showQuickEntryFab ? shrunkColWidth : fullColWidth;
+  const restingPillCenterX = (activeNavIndex + 0.5) * activeColWidth;
   const highlightedTab = dragVisual ? dragVisual.hoveredTab : activeTab;
+
+  // Choreography:
+  // - Expanding (hide-fab): + button drops & hides first (0..110ms), THEN navbar expands cleanly (125ms delay)
+  // - Shrinking (show-fab): navbar shrinks immediately without right-side overshoot, + button rises cleanly (90ms delay)
+  const isExpanding = navState.transitionMode === 'hide-fab';
+  const isShrinking = navState.transitionMode === 'show-fab';
+  const shouldAnimateMorph = !reducedMotion && (isExpanding || isShrinking);
+  const navDelayMs = isExpanding ? 125 : 0;
+  const navDurationMs = isExpanding ? 280 : 270;
+  const capsuleMorphEasing = 'cubic-bezier(0.22, 1, 0.36, 1)';
+  const indicatorMorphEasing = isExpanding
+    ? 'cubic-bezier(0.32, 1.36, 0.64, 1)'
+    : 'cubic-bezier(0.34, 1.36, 0.64, 1)';
 
   const getIndexFromClientX = (clientX: number) => {
     const track = trackRef.current;
-    if (!track) return { idx: activeNavIndex, pillX: restingPillX };
+    if (!track) return { idx: activeNavIndex, pillCenterX: restingPillCenterX, relX: restingPillCenterX };
     const rect = track.getBoundingClientRect();
-    const colW = rect.width / 4;
+    const colW = activeTrackWidth / 4;
     const relX = clientX - rect.left;
     const idx = Math.max(0, Math.min(3, Math.floor(relX / colW)));
-    const clampedPillX = Math.max(0, Math.min(rect.width - colW, relX - colW / 2));
-    return { idx, pillX: clampedPillX };
+    const clampedCenterX = Math.max(colW / 2, Math.min(activeTrackWidth - colW / 2, relX));
+    return { idx, pillCenterX: clampedCenterX, relX };
   };
 
   const clearGesture = () => {
@@ -258,7 +274,8 @@ const MobileBottomDock = React.memo(({
 
   const handleNavPointerDown = (e: React.PointerEvent<HTMLElement>) => {
     if (e.button !== 0 && e.pointerType === 'mouse') return;
-    const { idx } = getIndexFromClientX(e.clientX);
+    const { idx, relX } = getIndexFromClientX(e.clientX);
+    if (showQuickEntryFab && relX > shrunkTrackWidth + 5) return;
     const startTab = DOCK_TABS[idx];
 
     if (gestureRef.current?.holdTimer) {
@@ -267,7 +284,6 @@ const MobileBottomDock = React.memo(({
 
     const holdTimer = window.setTimeout(() => {
       if (gestureRef.current && !gestureRef.current.isSliding) {
-        // Press-and-hold without sliding does nothing
         gestureRef.current.holdExpired = true;
       }
     }, 420);
@@ -309,12 +325,12 @@ const MobileBottomDock = React.memo(({
       }
     }
 
-    const { idx, pillX } = getIndexFromClientX(e.clientX);
+    const { idx, pillCenterX } = getIndexFromClientX(e.clientX);
     if (idx !== g.hoveredIdx) {
       g.hoveredIdx = idx;
       triggerHaptic('single');
     }
-    setDragVisual({ pillX, hoveredTab: DOCK_TABS[idx] });
+    setDragVisual({ pillCenterX, hoveredTab: DOCK_TABS[idx] });
   };
 
   const handleNavPointerUp = (e: React.PointerEvent<HTMLElement>) => {
@@ -332,13 +348,11 @@ const MobileBottomDock = React.memo(({
     clearGesture();
 
     if (isSliding) {
-      // Switch mode ONLY when finger is lifted after sliding
       const targetTab = DOCK_TABS[idx];
       onNavigate(targetTab);
       return;
     }
 
-    // Non-slide action: only quick press switches; press-and-hold does nothing
     const dist = Math.hypot(e.clientX - startX, e.clientY - startY);
     const elapsed = performance.now() - startTime;
     if (!holdExpired && elapsed < 420 && dist <= 18) {
@@ -358,101 +372,147 @@ const MobileBottomDock = React.memo(({
   };
 
   const handleKeyboardClick = (e: React.MouseEvent<HTMLButtonElement>, targetTab: AppTab) => {
-    // Only handle keyboard activation (detail === 0); pointer interactions are handled via pointer events above
     if (e.detail === 0) {
       onNavigate(targetTab);
     }
   };
 
+  const pillCenterX = dragVisual ? dragVisual.pillCenterX : restingPillCenterX;
+  const pillTranslateX = pillCenterX - fullColWidth / 2;
+  const pillSideInset = Math.max(0, (fullColWidth - activeColWidth) / 2);
+  const pillRadius = Math.min(23, activeColWidth / 2);
+  const pillScale = dragVisual ? 1.015 : 1;
+
+  const pillTransition =
+    reducedMotion || dragVisual
+      ? 'none'
+      : shouldAnimateMorph
+      ? `transform ${navDurationMs}ms ${indicatorMorphEasing} ${navDelayMs}ms, clip-path ${navDurationMs}ms ${capsuleMorphEasing} ${navDelayMs}ms`
+      : 'transform 340ms cubic-bezier(0.34, 1.48, 0.64, 1)';
+
+  const tabButtonTransition = shouldAnimateMorph
+    ? `transform ${navDurationMs}ms ${capsuleMorphEasing} ${navDelayMs}ms`
+    : 'none';
+
+  const fabTransition = reducedMotion
+    ? 'none'
+    : showQuickEntryFab
+    ? 'transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1) 90ms, opacity 170ms ease-out 90ms'
+    : 'transform 140ms cubic-bezier(0.4, 0, 0.88, 0.55) 0ms, opacity 110ms ease-out 0ms';
+
   return (
     <div
       className="fixed bottom-4 inset-x-4 z-40 md:hidden flex justify-center pointer-events-none"
-      style={{ transform: 'translate3d(0, 0, 0)', isolation: 'isolate' }}
+      style={{ transform: 'translate3d(0, 0, 0)', isolation: 'isolate', contain: 'layout style' }}
     >
       <div ref={dockRef} className="relative w-full max-w-[420px] h-[56px] flex items-center">
+        {/* Glass Capsule Background (animates explicit width so semicircular pill ends never stretch horizontally) */}
+        <div
+          aria-hidden="true"
+          className="glass-chrome-bottom pointer-events-none absolute left-0 top-0 h-[56px] rounded-full will-change-[width]"
+          style={{
+            width: `${showQuickEntryFab ? shrunkDockWidth : dockWidth}px`,
+            transform: 'translate3d(0, 0, 0)',
+            backfaceVisibility: 'hidden',
+            WebkitBackfaceVisibility: 'hidden',
+            transition: shouldAnimateMorph
+              ? `width ${navDurationMs}ms ${capsuleMorphEasing} ${navDelayMs}ms`
+              : 'none',
+          }}
+        />
+
+        {/* Constant-size Interactive Overlay Track */}
         <nav
           onPointerDown={handleNavPointerDown}
           onPointerMove={handleNavPointerMove}
           onPointerUp={handleNavPointerUp}
           onPointerCancel={handleNavPointerCancel}
-          className="pointer-events-auto glass-chrome-bottom rounded-full h-[56px] p-[5px] flex items-center touch-none select-none"
-          style={{
-            width: showQuickEntryFab ? 'calc(100% - 66px)' : '100%',
-            transitionProperty: reducedMotion || navState.transitionMode === 'none' ? 'none' : 'width',
-            transitionDuration: reducedMotion || navState.transitionMode === 'none' ? '0ms' : '130ms',
-            transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
-          }}
+          className="relative z-10 w-full h-[56px] p-[5px] flex items-center touch-none select-none pointer-events-auto"
         >
-          <div ref={trackRef} className="relative grid grid-cols-4 w-full h-full">
-            {/* Borderless GPU Sliding Active Pill with Crisp, Snappy Ease */}
+          <div ref={trackRef} className="relative w-full h-full">
+            {/* Borderless GPU Sliding Active Pill (clip-path preserves exact circular ends at any width) */}
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute inset-y-0 left-0 z-0 will-change-transform bg-slate-950/[0.085] dark:bg-white/[0.14] rounded-full border-0"
+              className="pointer-events-none absolute inset-y-0 left-0 z-0 bg-slate-950/[0.085] dark:bg-white/[0.14] border-0"
               style={{
-                width: '25%',
-                transform: dragVisual
-                  ? `translate3d(${dragVisual.pillX}px, 0, 0)`
-                  : `translate3d(${activeNavIndex * 100}%, 0, 0)`,
-                transitionProperty: reducedMotion || dragVisual ? 'none' : 'transform',
-                transitionDuration: reducedMotion || dragVisual ? '0ms' : '135ms',
-                transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+                width: `${fullColWidth}px`,
+                transformOrigin: 'center center',
+                transform: `translate3d(${pillTranslateX.toFixed(2)}px, 0, 0) scale(${pillScale})`,
+                clipPath: `inset(0px ${pillSideInset.toFixed(2)}px 0px ${pillSideInset.toFixed(2)}px round ${pillRadius.toFixed(1)}px)`,
+                WebkitClipPath: `inset(0px ${pillSideInset.toFixed(2)}px 0px ${pillSideInset.toFixed(2)}px round ${pillRadius.toFixed(1)}px)`,
+                willChange: 'transform, clip-path',
+                backfaceVisibility: 'hidden',
+                WebkitBackfaceVisibility: 'hidden',
+                transition: pillTransition,
               }}
             />
 
-            <button
-              type="button"
-              onClick={(e) => handleKeyboardClick(e, 'home')}
-              className={`relative z-10 h-full min-w-0 flex flex-col items-center justify-center gap-0.5 rounded-full cursor-pointer transition-colors duration-150 ${
-                highlightedTab === 'home' || highlightedTab === 'daily_transactions'
-                  ? 'text-slate-950 dark:text-white font-bold'
-                  : 'text-slate-500 dark:text-slate-400 font-medium'
-              }`}
-            >
-              <House className="w-4.5 h-4.5 stroke-[1.25]" />
-              <span className="text-[10px] leading-tight">{labels.dashboard}</span>
-            </button>
+            {(() => {
+              const isHomeActive = highlightedTab === 'home' || highlightedTab === 'daily_transactions';
+              const isCustomersActive = highlightedTab === 'customers';
+              const isGoalsActive = highlightedTab === 'goals';
+              const isSettingsActive = highlightedTab === 'settings';
+              const iconSpringStyle = (isActive: boolean): React.CSSProperties => ({
+                transform: isActive
+                  ? 'translate3d(0, -1px, 0) scale(1.07)'
+                  : 'translate3d(0, 0, 0) scale(1)',
+                backfaceVisibility: 'hidden',
+                WebkitBackfaceVisibility: 'hidden',
+                transition: reducedMotion
+                  ? 'none'
+                  : 'transform 320ms cubic-bezier(0.34, 1.42, 0.64, 1)',
+              });
+              const labelSpringStyle = (isActive: boolean): React.CSSProperties => ({
+                transform: isActive ? 'translate3d(0, 0, 0) scale(1.01)' : 'translate3d(0, 0.5px, 0) scale(0.99)',
+                backfaceVisibility: 'hidden',
+                WebkitBackfaceVisibility: 'hidden',
+                transition: reducedMotion
+                  ? 'none'
+                  : 'transform 280ms cubic-bezier(0.34, 1.35, 0.64, 1)',
+              });
 
-            <button
-              type="button"
-              onClick={(e) => handleKeyboardClick(e, 'customers')}
-              className={`relative z-10 h-full min-w-0 flex flex-col items-center justify-center gap-0.5 rounded-full cursor-pointer transition-colors duration-150 ${
-                highlightedTab === 'customers'
-                  ? 'text-slate-950 dark:text-white font-bold'
-                  : 'text-slate-500 dark:text-slate-400 font-medium'
-              }`}
-              id="nav_customers_tab"
-            >
-              <Users className="w-4.5 h-4.5 stroke-[1.25]" />
-              <span className="text-[10px] leading-tight">{labels.clients}</span>
-            </button>
+              const tabItems: Array<{
+                id?: string;
+                tab: AppTab;
+                isActive: boolean;
+                label: string;
+                Icon: typeof House;
+              }> = [
+                { tab: 'home', isActive: isHomeActive, label: labels.dashboard, Icon: House },
+                { id: 'nav_customers_tab', tab: 'customers', isActive: isCustomersActive, label: labels.clients, Icon: Users },
+                { id: 'nav_goals_tab', tab: 'goals', isActive: isGoalsActive, label: labels.goals, Icon: Goal },
+                { id: 'nav_settings_tab', tab: 'settings', isActive: isSettingsActive, label: labels.settings, Icon: Settings },
+              ];
 
-            <button
-              type="button"
-              onClick={(e) => handleKeyboardClick(e, 'goals')}
-              className={`relative z-10 h-full min-w-0 flex flex-col items-center justify-center gap-0.5 rounded-full cursor-pointer transition-colors duration-150 ${
-                highlightedTab === 'goals'
-                  ? 'text-slate-950 dark:text-white font-bold'
-                  : 'text-slate-500 dark:text-slate-400 font-medium'
-              }`}
-              id="nav_goals_tab"
-            >
-              <Goal className="w-4.5 h-4.5 stroke-[1.25]" />
-              <span className="text-[10px] leading-tight">{labels.goals}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={(e) => handleKeyboardClick(e, 'settings')}
-              className={`relative z-10 h-full min-w-0 flex flex-col items-center justify-center gap-0.5 rounded-full cursor-pointer transition-colors duration-150 ${
-                highlightedTab === 'settings'
-                  ? 'text-slate-950 dark:text-white font-bold'
-                  : 'text-slate-500 dark:text-slate-400 font-medium'
-              }`}
-              id="nav_settings_tab"
-            >
-              <Settings className="w-4.5 h-4.5 stroke-[1.25]" />
-              <span className="text-[10px] leading-tight">{labels.settings}</span>
-            </button>
+              return tabItems.map(({ id, tab, isActive, label, Icon }, idx) => {
+                const tabTranslateX = (idx + 0.5) * activeColWidth - shrunkColWidth / 2;
+                return (
+                  <button
+                    key={tab}
+                    id={id}
+                    type="button"
+                    onClick={(e) => handleKeyboardClick(e, tab)}
+                    className={`absolute inset-y-0 left-0 z-10 rounded-full cursor-pointer transition-colors duration-150 will-change-transform ${
+                      isActive
+                        ? 'text-slate-950 dark:text-white font-bold'
+                        : 'text-slate-500 dark:text-slate-400 font-medium'
+                    }`}
+                    style={{
+                      width: `${shrunkColWidth}px`,
+                      transform: `translate3d(${tabTranslateX.toFixed(2)}px, 0, 0)`,
+                      backfaceVisibility: 'hidden',
+                      WebkitBackfaceVisibility: 'hidden',
+                      transition: tabButtonTransition,
+                    }}
+                  >
+                    <span className="w-full h-full flex flex-col items-center justify-center gap-0.5 transition-transform duration-150 active:scale-90">
+                      <Icon className="w-4.5 h-4.5 stroke-[1.35]" style={iconSpringStyle(isActive)} />
+                      <span className="text-[10px] leading-tight" style={labelSpringStyle(isActive)}>{label}</span>
+                    </span>
+                  </button>
+                );
+              });
+            })()}
           </div>
         </nav>
 
@@ -461,7 +521,7 @@ const MobileBottomDock = React.memo(({
           onClick={showQuickEntryFab ? onOpenQuickEntry : undefined}
           aria-hidden={!showQuickEntryFab}
           tabIndex={showQuickEntryFab ? 0 : -1}
-          className={`absolute right-0 bottom-0 z-20 touch-press touch-manipulation w-[56px] h-[56px] rounded-full text-white flex items-center justify-center shrink-0 will-change-transform ${
+          className={`absolute right-0 bottom-0 z-20 touch-manipulation w-[56px] h-[56px] rounded-full text-white shrink-0 ${
             showQuickEntryFab ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'
           }`}
           style={{
@@ -469,17 +529,19 @@ const MobileBottomDock = React.memo(({
             boxShadow: '0 18px 36px -8px var(--accent-glow), 0 6px 14px -4px rgba(15, 23, 42, 0.22), inset 0 1px 0 rgba(255,255,255,0.35)',
             transform: showQuickEntryFab
               ? 'translate3d(0, 0, 0) scale(1)'
-              : 'translate3d(4px, 6px, 0) scale(0.75)',
+              : 'translate3d(0, 76px, 0) scale(0.74)',
             opacity: showQuickEntryFab ? 1 : 0,
-            transitionProperty: reducedMotion ? 'none' : 'transform, opacity',
-            transitionDuration: reducedMotion ? '0ms' : '130ms',
-            transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
-            transitionDelay: fabDelay,
+            willChange: 'transform, opacity',
+            backfaceVisibility: 'hidden',
+            WebkitBackfaceVisibility: 'hidden',
+            transition: fabTransition,
           }}
           title={labels.recordEntry}
           id="fab_entry_btn"
         >
-          <Plus className="w-6 h-6 stroke-[1.5]" />
+          <span className="w-full h-full rounded-full flex items-center justify-center transition-transform duration-150 active:scale-90">
+            <Plus className="w-6 h-6 stroke-[1.5]" />
+          </span>
         </button>
       </div>
     </div>
@@ -501,6 +563,7 @@ function AppContent({ reducedMotion }: { reducedMotion: boolean }) {
   const [currentTab, setCurrentTab] = useState<AppTab>('home');
   const [selectedCustomerIdForDetail, setSelectedCustomerIdForDetail] = useState<string | null>(null);
   const navRafRef = React.useRef<number | null>(null);
+  const navTimerRef = React.useRef<number | null>(null);
   const [isQuickEntryOpen, setIsQuickEntryOpen] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -580,67 +643,41 @@ function AppContent({ reducedMotion }: { reducedMotion: boolean }) {
    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
  }, []);
 
-  const currentTabRef = React.useRef<AppTab>(currentTab);
-  const selectedCustomerIdRef = React.useRef<string | null>(selectedCustomerIdForDetail);
   const reducedMotionRef = React.useRef<boolean>(reducedMotion);
-  const navTimerRef = React.useRef<number | null>(null);
-  const pendingNavRef = React.useRef<{ tab: AppTab; customerId: string | null } | null>(null);
-  const lastNavIntentRef = React.useRef<{ tab: AppTab; customerId: string | null; time: number } | null>(null);
-  currentTabRef.current = currentTab;
-  selectedCustomerIdRef.current = selectedCustomerIdForDetail;
   reducedMotionRef.current = reducedMotion;
 
   useEffect(() => {
-    const onIntent = (e: Event) => {
-      const detail = (e as CustomEvent<{ tab: AppTab; customerId: string | null; fromPointerDown?: boolean }>).detail;
-      if (!detail) return;
-      const now = performance.now();
-      const prev = lastNavIntentRef.current;
-      if (
-        detail.fromPointerDown ||
-        !prev ||
-        prev.tab !== detail.tab ||
-        prev.customerId !== detail.customerId ||
-        now - prev.time > 500
-      ) {
-        lastNavIntentRef.current = {
-          tab: detail.tab,
-          customerId: detail.customerId,
-          time: now,
-        };
+    return () => {
+      if (navRafRef.current !== null) {
+        window.cancelAnimationFrame(navRafRef.current);
+      }
+      if (navTimerRef.current !== null) {
+        window.clearTimeout(navTimerRef.current);
       }
     };
-    window.addEventListener('challan-nav-intent', onIntent);
-    return () => window.removeEventListener('challan-nav-intent', onIntent);
   }, []);
 
   // History API / Breadcrumbs for Android Back Button support
   const navigateTo = useCallback((tab: AppTab, customerId: string | null = null, replace = false) => {
     triggerHaptic('single');
 
-    const prevTab = pendingNavRef.current?.tab ?? currentTabRef.current;
-    const prevCid = pendingNavRef.current ? pendingNavRef.current.customerId : selectedCustomerIdRef.current;
-    const wasShowingFab = prevTab === 'home' || (prevTab === 'customers' && !prevCid);
-    const willShowFab = tab === 'home' || (tab === 'customers' && !customerId);
     const isMobileDockVisible = typeof window !== 'undefined' && window.innerWidth < 768;
 
     window.dispatchEvent(
       new CustomEvent('challan-nav-intent', {
-        detail: { tab, customerId, fromPointerDown: false },
+        detail: { tab, customerId },
       })
     );
-    if (navRafRef.current) {
+    if (navRafRef.current !== null) {
       window.cancelAnimationFrame(navRafRef.current);
       navRafRef.current = null;
     }
     if (navTimerRef.current !== null) {
       window.clearTimeout(navTimerRef.current);
       navTimerRef.current = null;
-      pendingNavRef.current = null;
     }
 
     const commitTabChange = () => {
-      pendingNavRef.current = null;
       React.startTransition(() => {
         setCurrentTab(tab);
         setSelectedCustomerIdForDetail(customerId);
@@ -656,18 +693,18 @@ function AppContent({ reducedMotion }: { reducedMotion: boolean }) {
       } catch {}
     };
 
-    // Let the 130ms mobile dock morph finish uninterrupted before mounting heavy Dashboard/tab content
-    if (isMobileDockVisible && !reducedMotionRef.current && wasShowingFab !== willShowFab) {
-      pendingNavRef.current = { tab, customerId };
-      navTimerRef.current = window.setTimeout(() => {
-        navTimerRef.current = null;
-        commitTabChange();
-      }, 135);
+    // Paint frame 0 of the dock animation first, then immediately mount the next tab cleanly
+    if (isMobileDockVisible && !reducedMotionRef.current && !replace) {
+      navRafRef.current = window.requestAnimationFrame(() => {
+        navRafRef.current = null;
+        navTimerRef.current = window.setTimeout(() => {
+          navTimerRef.current = null;
+          commitTabChange();
+        }, 0);
+      });
       return;
     }
 
-    // Commit immediately when FAB visibility doesn't change or on desktop
-    pendingNavRef.current = null;
     commitTabChange();
   }, []);
 
@@ -924,7 +961,9 @@ function AppContent({ reducedMotion }: { reducedMotion: boolean }) {
     archivedStatements,
     updateStatementAutoMerge,
     archiveCustomerExcessStatements,
-    exportArchivedStatements
+    exportArchivedStatements,
+    tagConfig,
+    saveTagConfig
   } = useLedger(user?.uid, selectedDailyDate, selectedCustomerIdForDetail);
 
 // End-of-Day Cash Summary Notification
@@ -1248,43 +1287,37 @@ function AppContent({ reducedMotion }: { reducedMotion: boolean }) {
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err: any) {
-      console.error('Google Auth Failed: ', err);
       const errCode = err?.code || '';
-      const errMsg = err?.message || String(err);
 
-      // If user closed the popup window, do not trigger a disruptive error alert
-      if (errCode === 'auth/popup-closed-by-user') {
+      // If user closed or cancelled the popup window, do not trigger a disruptive error alert
+      if (errCode === 'auth/popup-closed-by-user' || errCode === 'auth/cancelled-popup-request') {
         setGoogleLoading(false);
         return;
       }
 
-      setAuthError(errMsg);
+      let userFriendlyMessage = lang === 'bn'
+        ? 'এই মুহূর্তে গুগল দিয়ে লগইন করা যাচ্ছে না। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন অথবা গেস্ট মোড ব্যবহার করুন।'
+        : 'Google sign-in is unavailable right now. Please try again later or continue as Guest.';
 
-      let userFriendlyMessage = lang === 'bn' 
-        ? 'গুগল লগইন করতে সমস্যা হয়েছে। অনুগ্রহ করে ইন্টারনেট সংযোগটি চেক করুন এবং আবার চেষ্টা করুন।' 
-        : 'Google sign-in could not connect. Please check your internet connection and try again.';
-
-      if (errCode === 'auth/operation-not-allowed') {
+      if (errCode === 'auth/popup-blocked') {
         userFriendlyMessage = lang === 'bn'
-          ? 'ফায়ারবেস কনসোলে গুগল লগইন সক্রিয় (Enable) করা নেই। অনুগ্রহ করে Firebase Console > Authentication > Sign-in method-এ গিয়ে Google সক্রিয় করুন।'
-          : 'Google Sign-In is not enabled yet in your Firebase Console. Please go to Firebase Console > Authentication > Sign-in method and enable Google.';
-      } else if (errCode === 'auth/unauthorized-domain') {
+          ? 'আপনার ব্রাউজার লগইন পপআপ উইন্ডোটি ব্লক করেছে। অনুগ্রহ করে এই সাইটের জন্য পপআপ অনুমতি দিয়ে আবার চেষ্টা করুন।'
+          : 'Your browser blocked the sign-in window. Please allow popups for this site and try again.';
+      } else if (errCode === 'auth/network-request-failed') {
         userFriendlyMessage = lang === 'bn'
-          ? `এই ডোমেনটি (${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}) ফায়ারবেসে অনুমোদিত নয়। অনুগ্রহ করে Firebase Console > Authentication > Settings > Authorized domains-এ এই ডোমেনটি যুক্ত করুন।`
-          : `This domain (${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}) is not authorized for OAuth in Firebase. Please add it to Firebase Console > Authentication > Settings > Authorized domains.`;
-      } else if (errCode === 'auth/popup-blocked') {
+          ? 'ইন্টারনেট সংযোগে সমস্যা হয়েছে। অনুগ্রহ করে আপনার সংযোগ যাচাই করে আবার চেষ্টা করুন।'
+          : 'Unable to connect right now. Please check your internet connection and try again.';
+      } else if (errCode === 'auth/too-many-requests') {
         userFriendlyMessage = lang === 'bn'
-          ? 'ব্রাউজার পপআপ উইন্ডোটি ব্লক করেছে। অনুগ্রহ করে এই সাইটের জন্য পপআপ অনুমতি দিন।'
-          : 'The sign-in popup was blocked by your browser. Please allow popups for this site and try again.';
-      } else if (errCode === 'auth/api-key-not-valid' || errMsg.includes('API key not valid')) {
-        userFriendlyMessage = lang === 'bn'
-          ? 'ফায়ারবেস এপিআই কী লোড হতে সমস্যা হয়েছে। অনুগ্রহ করে টার্মিনালে npm run dev কমান্ডটি রিস্টার্ট (Ctrl+C করে আবার চালু) করুন।'
-          : 'Firebase API key could not be verified. Please restart your Vite dev server (Ctrl+C and npm run dev) to load the new .env credentials.';
+          ? 'অনেকবার চেষ্টা করার কারণে সাময়িকভাবে লগইন স্থগিত আছে। কিছুক্ষণ পর আবার চেষ্টা করুন।'
+          : 'Too many sign-in attempts. Please wait a moment and try again.';
       }
 
+      setAuthError(userFriendlyMessage);
+
       triggerAlert(
-        lang === 'bn' ? 'লগইন ব্যর্থ' : 'Login Failed',
-        `${userFriendlyMessage}${errCode ? `\n[${errCode}]` : ''}`
+        lang === 'bn' ? 'লগইন সম্পন্ন হয়নি' : 'Sign-In Unavailable',
+        userFriendlyMessage
       );
     } finally {
       setGoogleLoading(false);
@@ -1529,7 +1562,7 @@ function AppContent({ reducedMotion }: { reducedMotion: boolean }) {
                   id="google_signin_btn"
                 >
                   {googleLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <LoadingSpinner size="sm" />
                   ) : (
                     <svg className="h-4 w-4 shrink-0 fill-current" viewBox="0 0 24 24">
                       <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -1551,24 +1584,9 @@ function AppContent({ reducedMotion }: { reducedMotion: boolean }) {
               </div>
 
               {authError && (
-                <div className="bg-[#FFF8E6] dark:bg-[#261E0A] border border-[#FFC043]/40 p-3.5 rounded-2xl text-xs text-[#7A4B00] dark:text-[#FFD479] font-medium space-y-2">
-                  <div className="flex items-center gap-1.5 font-bold">
-                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                    <span>{lang === 'bn' ? 'লগইন সাহায্য নির্দেশিকা' : 'Google Login Troubleshooting'}</span>
-                  </div>
-                  <p className="opacity-90">
-                    {lang === 'bn'
-                      ? 'গুগল সাইন-ইন সম্পন্ন করতে আপনার ফায়ারবেস প্রজেক্টের "Authorized Domains" তালিকায় এই ডোমেনটি যুক্ত করতে হবে:'
-                      : 'To complete Google Sign-In, you need to add this domain to your Firebase Authorized Domains list:'}
-                  </p>
-                  <div className="bg-white dark:bg-black p-2 rounded font-mono text-[11px] break-all select-all text-black dark:text-white border border-black/10 dark:border-white/15">
-                    {typeof window !== 'undefined' ? window.location.hostname : 'localhost'}
-                  </div>
-                  <p className="opacity-90 text-[11px]">
-                    {lang === 'bn'
-                      ? 'ধাপ: Firebase Console > Authentication > Settings > Authorized Domains-এ গিয়ে উপরের ডোমেনটি যুক্ত করুন। অথবা গেস্ট মোড চাপুন।'
-                      : 'Steps: Firebase Console > Authentication > Settings > Authorized Domains. Or use Guest Mode.'}
-                  </p>
+                <div className="bg-amber-500/10 dark:bg-amber-500/10 border border-amber-500/25 px-3.5 py-2.5 rounded-2xl text-xs text-amber-800 dark:text-amber-300 font-medium flex items-start gap-2">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span className="leading-relaxed">{authError}</span>
                 </div>
               )}
 
@@ -1722,7 +1740,7 @@ function AppContent({ reducedMotion }: { reducedMotion: boolean }) {
                   className="pointer-events-none absolute inset-x-0 top-0 h-10 bg-slate-950 dark:bg-white rounded-xl border-2 border-slate-950 dark:border-white shadow-xs z-0 will-change-transform"
                   style={{
                     transform: `translate3d(0, ${activeSidebarIndex * 46}px, 0)`,
-                    transition: 'transform 280ms cubic-bezier(0.22, 1, 0.36, 1)',
+                    transition: 'transform 340ms cubic-bezier(0.34, 1.38, 0.64, 1)',
                   }}
                 />
 
@@ -2072,6 +2090,8 @@ updateSettings={updateSettings}
           onLockBiometricSession={handleLockBiometricSession}
           showTagChart={showTagChart}
           onToggleTagChart={handleToggleTagChart}
+          tagConfig={tagConfig}
+          saveTagConfig={saveTagConfig}
         />
   )}
 
@@ -2238,7 +2258,7 @@ updateSettings={updateSettings}
     addTransaction={addTransaction}
     preselectedCustomerId={selectedCustomerIdForDetail || undefined}
     lang={lang}
-    transactions={customerTransactions}
+    transactions={allCustomerTransactions.length > 0 ? allCustomerTransactions : todayTransactions}
     onViewCustomer={navigateToCustomer}
     highlightedTxId={highlightedTxId}
     setHighlightedTxId={setHighlightedTxId}

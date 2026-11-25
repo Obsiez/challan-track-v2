@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Customer, UserSettings, ImportProgress, Transaction } from '../types';
+import { Customer, UserSettings, ImportProgress, Transaction, UserTagConfig } from '../types';
 import { 
-  Moon, Sun, Cloud, Download, Upload, LogOut, CheckCircle2, Languages, AlertTriangle, X, RotateCcw, Trash2, Contrast, Clock, RefreshCw, Palette, Check, Pipette, Fingerprint, Archive, Lock, FileSpreadsheet, Sliders, Minus, Plus, Keyboard, Vibrate, MoveHorizontal, Volume2, Search, SquarePen, Bell, Tag, Grid2X2, Gauge
+  Moon, Sun, Cloud, Download, Upload, LogOut, CheckCircle2, Languages, AlertTriangle, X, RotateCcw, Trash2, Contrast, Clock, RefreshCw, Palette, Check, Pipette, Fingerprint, Archive, Lock, FileSpreadsheet, Sliders, Minus, Plus, Keyboard, Vibrate, MoveHorizontal, Volume2, Search, SquarePen, Bell, CircleDotDashed, ChartPie, Grid2X2, Gauge, ChevronRight
 } from 'lucide-react';
 import { isPhoneticSearchEnabled, setPhoneticSearchEnabled } from '../lib/phonetics';
 import {
@@ -31,6 +31,8 @@ import { isCustomKeypadEnabled, setCustomKeypadEnabledState } from './Calculator
 import ScrollSafeSlider from './ScrollSafeSlider';
 import { SpotlightCard, CircularGauge, areTransitionsDisabled, setTransitionsDisabled } from './MotionPrimitives';
 import ModalPortal, { useModalScrollLock } from './ModalPortal';
+import ManageTagsModal from './ManageTagsModal';
+import { DEFAULT_TAG_CONFIG, TAG_LIMITS, getTagCounts, useTagConfig } from '../lib/tagSystem';
 
 interface SettingsManagerProps {
   theme: 'light' | 'dark';
@@ -66,6 +68,8 @@ interface SettingsManagerProps {
   onToggleDashboardReminders?: (val: boolean) => void;
   showTagChart?: boolean;
   onToggleTagChart?: (val: boolean) => void;
+  tagConfig?: UserTagConfig;
+  saveTagConfig?: (nextConfig: UserTagConfig) => Promise<void>;
 }
 
 const SettingsManager = React.memo(function SettingsManager({
@@ -100,12 +104,37 @@ const SettingsManager = React.memo(function SettingsManager({
   showDashboardReminders = true,
   onToggleDashboardReminders,
   showTagChart = true,
-  onToggleTagChart
+  onToggleTagChart,
+  tagConfig,
+  saveTagConfig
 }: SettingsManagerProps) {
   const resolvedUpdateAutoMerge = updateStatementAutoMerge || onUpdateStatementAutoMerge;
   const resolvedExportArchived = exportArchivedStatements || onExportArchivedStatements;
   const t = translations[lang];
+  const storeTagConfig = useTagConfig();
+  const effectiveTagConfig = tagConfig || storeTagConfig || DEFAULT_TAG_CONFIG;
+  const [showManageTagsModal, setShowManageTagsModal] = useState(false);
+  const [deferredReady, setDeferredReady] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return window.innerWidth >= 768 || areTransitionsDisabled();
+  });
   const [exporting, setExporting] = useState(false);
+
+  useEffect(() => {
+    if (deferredReady) return;
+    let timerId: number | null = null;
+    const rafId = window.requestAnimationFrame(() => {
+      timerId = window.setTimeout(() => {
+        React.startTransition(() => {
+          setDeferredReady(true);
+        });
+      }, 500);
+    });
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      if (timerId !== null) window.clearTimeout(timerId);
+    };
+  }, [deferredReady]);
   const [profileImgError, setProfileImgError] = useState(false);
   const resolvedPhotoURL =
     userPhotoURL ||
@@ -574,6 +603,7 @@ const SettingsManager = React.memo(function SettingsManager({
               <img
                 src={resolvedPhotoURL}
                 alt={effectiveDisplayName}
+                decoding="async"
                 referrerPolicy="no-referrer"
                 onError={() => setProfileImgError(true)}
                 className="w-14 h-14 sm:w-16 sm:h-16 rounded-full object-cover border border-slate-900/10 dark:border-white/15 shrink-0 shadow-xs"
@@ -997,6 +1027,8 @@ const SettingsManager = React.memo(function SettingsManager({
         </div>
       </div>
 
+      {deferredReady ? (
+        <div className="space-y-8 [content-visibility:auto] [contain-intrinsic-size:auto_1400px]">
       {/* SECTION 2: INTERACTION, KEYPAD & SECURITY */}
       <div className="space-y-2.5">
         <div className={sectionEyebrow}>
@@ -1042,7 +1074,7 @@ const SettingsManager = React.memo(function SettingsManager({
             <div className="flex items-center justify-between p-5 gap-4">
               <div>
                 <h2 className="font-display text-sm font-bold text-slate-950 dark:text-white flex items-center gap-2">
-                  <Tag className="w-4 h-4 stroke-[1.25]" />
+                  <ChartPie className="w-4 h-4 stroke-[1.25]" />
                   <span>{lang === 'bn' ? 'ড্যাশবোর্ডে ট্যাগ বিশ্লেষণ চার্ট' : 'Dashboard Tag Intelligence'}</span>
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -1070,6 +1102,38 @@ const SettingsManager = React.memo(function SettingsManager({
                 }`} />
               </button>
             </div>
+
+            {/* Manage Tags (Enable/Disable Defaults + Custom Tags & Image Logos) */}
+            {(() => {
+              const dueCounts = getTagCounts(effectiveTagConfig, 'due');
+              const payCounts = getTagCounts(effectiveTagConfig, 'payment');
+              return (
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic('single');
+                    setShowManageTagsModal(true);
+                  }}
+                  className="w-full flex items-center justify-between p-5 gap-4 text-left hover:bg-slate-900/[0.02] dark:hover:bg-white/[0.02] transition-colors cursor-pointer touch-press"
+                >
+                  <div className="min-w-0">
+                    <h2 className="font-display text-sm font-bold text-slate-950 dark:text-white flex items-center gap-2">
+                      <CircleDotDashed className="w-4 h-4 stroke-[1.25]" />
+                      <span>{lang === 'bn' ? 'ট্যাগ ব্যবস্থাপনা' : 'Manage Tags'}</span>
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      {lang === 'bn'
+                        ? `বকেয়া ${formatNumber(dueCounts.enabledCount, 'bn')}/${formatNumber(TAG_LIMITS.due.maxEnabled, 'bn')} ও আদায় ${formatNumber(payCounts.enabledCount, 'bn')}/${formatNumber(TAG_LIMITS.payment.maxEnabled, 'bn')}টি সক্রিয় — কাস্টম ট্যাগ ও লোগো যোগ করুন`
+                        : `${dueCounts.enabledCount}/${TAG_LIMITS.due.maxEnabled} due · ${payCounts.enabledCount}/${TAG_LIMITS.payment.maxEnabled} payment active — customize tags & logos`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 text-xs font-bold text-slate-600 dark:text-slate-300">
+                    <span>{lang === 'bn' ? 'সাজান' : 'Customize'}</span>
+                    <ChevronRight className="w-4 h-4 stroke-[1.5]" />
+                  </div>
+                </button>
+              );
+            })()}
             {/* Haptic Feedback */}
             <div className="p-5 space-y-3.5">
               <div className="flex items-center justify-between gap-4">
@@ -1803,6 +1867,10 @@ const SettingsManager = React.memo(function SettingsManager({
           </SpotlightCard>
         </div>
       </div>
+        </div>
+      ) : (
+        <div aria-hidden="true" className="min-h-[100dvh]" />
+      )}
 
       {/* Trash Action Confirmation Modal */}
       {confirmAction && (
@@ -2589,6 +2657,14 @@ const SettingsManager = React.memo(function SettingsManager({
           </div>
         </ModalPortal>
       )}
+
+      <ManageTagsModal
+        isOpen={showManageTagsModal}
+        onClose={() => setShowManageTagsModal(false)}
+        lang={lang}
+        tagConfig={effectiveTagConfig}
+        onSaveTagConfig={saveTagConfig || (async () => {})}
+      />
     </div>
   );
 });

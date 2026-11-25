@@ -82,6 +82,18 @@
         "updatedAt": { "type": "string", "format": "date-time", "description": "Last updated timestamp" }
       },
       "required": ["id", "userId", "title", "targetAmount", "savedAmount", "status", "createdAt", "updatedAt"]
+    },
+    "TagConfig": {
+      "title": "UserTagConfig",
+      "description": "Per-account tag customization including disabled default tags, custom tags, and compressed tag logos.",
+      "type": "object",
+      "properties": {
+        "disabledDueTags": { "type": "array", "description": "IDs of default Due tags hidden from picker" },
+        "disabledPaymentTags": { "type": "array", "description": "IDs of default Payment tags hidden from picker" },
+        "customTags": { "type": "array", "description": "User-defined custom Due and Payment tags with optional logos" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last modified timestamp" }
+      },
+      "required": ["disabledDueTags", "disabledPaymentTags", "customTags"]
     }
   },
   "firestore": {
@@ -104,6 +116,11 @@
     "/users/{userId}/goals/{goalId}": {
       "schema": "Goal",
       "description": "Savings goals, piggy banks, and EMI plans"
+    },
+    "/users/{userId}/tag_config/{configId}": {
+      "schema": "TagConfig",
+      "description": "Per-account custom tag configuration and logos"
     }
   }
 }
+

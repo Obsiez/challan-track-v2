@@ -120,3 +120,23 @@ export interface ImportProgress {
   message: string;
 }
 
+export interface CustomTagDefinition {
+  id: string;
+  type: 'due' | 'payment';
+  name: string;
+  color: string;
+  logoDataUrl?: string | null;
+  imageOnly?: boolean;
+  enabled: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UserTagConfig {
+  disabledDueTags: string[];
+  disabledPaymentTags: string[];
+  customTags: CustomTagDefinition[];
+  updatedAt?: string;
+}
+
+
