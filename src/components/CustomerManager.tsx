@@ -2489,7 +2489,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     </div>
   )}
 
- <div className="relative z-10 pt-1">
+ <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10 pt-1">
  {isEditingCustomer ? (
  <form
    onSubmit={async (e) => {
@@ -2524,34 +2524,11 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
        setIsSavingEdit(false);
      }
    }}
-   className="w-full space-y-4"
+   className="flex-1 space-y-3.5 max-w-md md:max-w-none"
  >
-   {/* Edit Header */}
-   <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-900/[0.06] dark:border-white/[0.07]">
-     <div>
-       <span className={lang === 'bn' ? 'text-[11px] text-slate-500 dark:text-slate-400 font-semibold block' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-semibold block'}>
-         {lang === 'bn' ? 'তথ্য সম্পাদনা' : 'Edit Profile'}
-       </span>
-       <h3 className="font-display text-lg font-bold text-slate-950 dark:text-white tracking-tight">
-         {selectedCustomer.name}
-       </h3>
-     </div>
-     <button
-       type="button"
-       disabled={isSavingEdit}
-       onClick={() => {
-         triggerHaptic('single');
-         setIsEditingCustomer(false);
-       }}
-       aria-label={lang === 'bn' ? 'সম্পাদনা বন্ধ করুন' : 'Close edit'}
-       className="w-8 h-8 rounded-full bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.06] dark:hover:bg-white/[0.12] border border-slate-900/[0.08] dark:border-white/[0.08] flex items-center justify-center text-slate-600 dark:text-slate-300 transition-colors cursor-pointer shrink-0"
-     >
-       <X className="w-4 h-4 stroke-[1.25]" />
-     </button>
-   </div>
-
-   {/* Desktop 2-Column Top Grid: Contact Portrait + Account Type */}
-   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+   {/* Desktop 2-Column Top Grid (Mobile stays exact single column) */}
+   <div className="space-y-3.5 md:space-y-0 md:grid md:grid-cols-2 md:gap-4 md:items-center">
+     {/* Apple-style Contact Photo Picker in Edit Mode */}
      <AppleContactPhotoPicker
        photoUrl={editPhotoUrl}
        displayName={editName || selectedCustomer.name}
@@ -2561,8 +2538,9 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
        onRemove={() => setEditPhotoUrl(null)}
      />
 
-     <div className="space-y-1.5">
-       <label className={`block text-[11px] font-bold text-slate-500 dark:text-slate-400 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>
+     {/* Account Type Selector in Edit Mode */}
+     <div>
+       <label className={`block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1.5 ${lang === 'bn' ? 'tracking-normal' : 'micro-mono-label'}`}>
          {lang === 'bn' ? 'হিসাবের ধরন' : 'Account Type'}
        </label>
        <div className="relative grid grid-cols-2 p-1 rounded-full bg-slate-900/[0.045] dark:bg-white/[0.05] border border-slate-900/[0.08] dark:border-white/[0.09]">
@@ -2579,14 +2557,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
              triggerHaptic('tick');
              setEditAccountType('standard');
            }}
-           className={`relative z-10 py-2.5 px-3 rounded-full text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors duration-150 ${
+           className={`relative z-10 py-2 px-3 rounded-full text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors duration-200 ${
              editAccountType === 'standard'
                ? 'text-white dark:text-slate-950'
                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
            }`}
          >
-           <Users className="w-3.5 h-3.5 shrink-0 stroke-[1.25]" />
-           <span className="truncate">{lang === 'bn' ? 'গ্রাহক খতিয়ান' : 'Customer Ledger'}</span>
+           <Users className="w-3.5 h-3.5 stroke-[1.25]" />
+           <span>{lang === 'bn' ? 'গ্রাহক খতিয়ান' : 'Customer Ledger'}</span>
          </button>
          <button
            type="button"
@@ -2594,23 +2572,23 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
              triggerHaptic('tick');
              setEditAccountType('credit_card');
            }}
-           className={`relative z-10 py-2.5 px-3 rounded-full text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors duration-150 ${
+           className={`relative z-10 py-2 px-3 rounded-full text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors duration-200 ${
              editAccountType === 'credit_card'
                ? 'text-white dark:text-slate-950'
                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
            }`}
          >
-           <CreditCard className="w-3.5 h-3.5 shrink-0 stroke-[1.25]" />
-           <span className="truncate">{lang === 'bn' ? 'ক্রেডিট কার্ড' : 'Credit Card'}</span>
+           <CreditCard className="w-3.5 h-3.5 stroke-[1.25]" />
+           <span>{lang === 'bn' ? 'ক্রেডিট কার্ড' : 'Credit Card'}</span>
          </button>
        </div>
      </div>
    </div>
 
-   {/* Desktop 2-Column Fields Grid: Name + Mobile Number */}
-   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-     <div className="space-y-1.5">
-       <label className={`block ${lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}`}>
+   {/* Desktop 2-Column Fields Grid (Mobile stays exact single column) */}
+   <div className="space-y-3.5 md:space-y-0 md:grid md:grid-cols-2 md:gap-4">
+     <div>
+       <label className={`block mb-1.5 overflow-hidden ${lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}`}>
          {editAccountType === 'credit_card' ? (lang === 'bn' ? 'কার্ড / হিসাবের নাম' : 'Card / Account Name') : (lang === 'bn' ? 'গ্রাহকের নাম' : 'Customer Name')}
        </label>
        <input
@@ -2623,8 +2601,8 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
        />
      </div>
 
-     <div className="space-y-1.5">
-       <label className={`block ${lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}`}>
+     <div>
+       <label className={`block mb-1.5 ${lang === 'bn' ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}`}>
          {lang === 'bn' ? 'মোবাইল নম্বর' : 'Mobile Number'}
        </label>
        <div className="flex gap-2">
@@ -2664,11 +2642,11 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                }
              }
            })}
-           className="px-3.5 bg-white/60 hover:bg-white/90 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-900 dark:text-white border border-slate-900/[0.08] dark:border-white/[0.08] rounded-2xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors shrink-0 font-semibold text-xs"
+           className="w-11 h-11 md:w-auto md:h-auto md:px-3.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25 rounded-2xl flex items-center justify-center md:gap-1.5 cursor-pointer transition-all shrink-0 touch-press"
            title={lang === 'bn' ? 'কন্টাক্ট নির্বাচন করুন' : 'Pick Contact'}
          >
-           <BookUser className="w-3.5 h-3.5 text-slate-700 dark:text-slate-300 stroke-[1.25]" />
-           <span className="hidden sm:inline">{lang === 'bn' ? 'কন্টাক্ট' : 'Contacts'}</span>
+           <BookUser className="w-5 h-5 md:w-4 md:h-4 text-emerald-600 dark:text-emerald-400 stroke-[1.25]" />
+           <span className="hidden md:inline text-xs font-bold">{lang === 'bn' ? 'কন্টাক্ট' : 'Contacts'}</span>
          </button>
        </div>
      </div>
@@ -2676,18 +2654,11 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
    {editAccountType === 'credit_card' && (
      <div className="p-3.5 rounded-2xl surface-subcard border border-slate-200/70 dark:border-white/[0.08]">
-       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-         <div>
-           <label className={`flex items-center gap-1.5 ${lang === 'bn' ? 'text-[11px] font-bold text-slate-600 dark:text-slate-300 tracking-normal' : 'micro-mono-label text-slate-600 dark:text-slate-300 font-bold'}`}>
-             <Calendar className="w-3.5 h-3.5 stroke-[1.25]" />
-             <span>{lang === 'bn' ? 'স্টেটমেন্ট বিলিং তারিখ (১-৩১)' : 'Statement Billing Day (1–31)'}</span>
-           </label>
-           <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-             {lang === 'bn'
-               ? 'মাসের কোন তারিখে কার্ডের বিল তৈরি হয় তা লিখুন (যেমন: ১৫)'
-               : 'Enter the day of the month your statement generates (1–31)'}
-           </p>
-         </div>
+       <div className="flex items-center justify-between gap-2">
+         <label className={`flex items-center gap-1.5 ${lang === 'bn' ? 'text-[11px] font-bold text-slate-600 dark:text-slate-300 tracking-normal' : 'micro-mono-label text-slate-600 dark:text-slate-300 font-bold'}`}>
+           <Calendar className="w-3.5 h-3.5 stroke-[1.25]" />
+           <span>{lang === 'bn' ? 'স্টেটমেন্ট বিলিং তারিখ (১-৩১)' : 'Statement Billing Day (1–31)'}</span>
+         </label>
          <input
            type="text"
            inputMode="numeric"
@@ -2702,7 +2673,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
              }
              setEditBillingDay(String(Math.min(31, Math.max(1, parseInt(clean, 10)))));
            }}
-           className="w-20 px-3 py-2 text-center border border-slate-200/80 dark:border-white/[0.1] rounded-full bg-white/80 dark:bg-white/[0.06] text-slate-950 dark:text-white font-mono font-bold text-sm focus:outline-none focus:border-slate-900 dark:focus:border-white placeholder:text-slate-400 placeholder:font-normal shrink-0"
+           className="w-20 px-2.5 py-1.5 text-center border border-slate-200/80 dark:border-white/[0.1] rounded-xl bg-white/80 dark:bg-white/[0.06] text-slate-950 dark:text-white font-mono font-black text-sm focus:outline-none focus:border-slate-900 dark:focus:border-white placeholder:text-slate-400 placeholder:font-normal"
          />
        </div>
      </div>
@@ -2711,8 +2682,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
    {editError && (
      <p className="text-xs font-bold text-rose-600 dark:text-rose-400">{editError}</p>
    )}
-
-   <div className="flex items-center justify-end gap-2.5 pt-2">
+   <div className="flex items-center gap-2 pt-1 md:justify-end">
+     <button
+       type="submit"
+       disabled={isSavingEdit}
+       className="px-5 py-2.5 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold text-xs rounded-full transition-colors cursor-pointer touch-press"
+     >
+       {isSavingEdit ? (lang === 'bn' ? 'সংরক্ষণ হচ্ছে...' : 'Saving...') : (lang === 'bn' ? 'সংরক্ষণ করুন' : 'Save')}
+     </button>
      <button
        type="button"
        disabled={isSavingEdit}
@@ -2720,21 +2697,14 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
          triggerHaptic('single');
          setIsEditingCustomer(false);
        }}
-       className="px-4 py-2 bg-slate-100/90 hover:bg-slate-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-800 dark:text-slate-200 font-bold text-xs rounded-full border border-slate-200/80 dark:border-white/[0.08] transition-colors cursor-pointer touch-press"
+       className="px-5 py-2.5 bg-slate-100/90 hover:bg-slate-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-800 dark:text-slate-200 font-bold text-xs rounded-full border border-slate-200/80 dark:border-white/[0.08] transition-colors cursor-pointer touch-press"
      >
        {lang === 'bn' ? 'বাতিল' : 'Cancel'}
-     </button>
-     <button
-       type="submit"
-       disabled={isSavingEdit}
-       className="px-5 py-2 bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 font-bold text-xs rounded-full transition-colors cursor-pointer touch-press disabled:opacity-70"
-     >
-       {isSavingEdit ? (lang === 'bn' ? 'সংরক্ষণ হচ্ছে...' : 'Saving...') : (lang === 'bn' ? 'সংরক্ষণ করুন' : 'Save')}
      </button>
    </div>
  </form>
  ) : (
- <div className="flex items-start gap-3.5 min-w-0 pr-28">
+ <div className="flex items-start gap-3.5 min-w-0">
  {selectedCustomer.photoUrl && !detailAvatarError ? (
    <div className="p-[2px] rounded-full contact-avatar-ring shrink-0 mt-0.5">
      <img
@@ -2763,16 +2733,16 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
        .toUpperCase() || 'C'}
    </div>
  )}
- <div className="min-w-0">
- <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-slate-950 dark:text-white truncate">{selectedCustomer.name}</h2>
+ <div className="min-w-0 flex-1">
+ <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-slate-950 dark:text-white truncate pr-28">{selectedCustomer.name}</h2>
  {selectedCustomer.phone ? (
- <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-2 font-mono">
+ <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-2 font-mono whitespace-nowrap">
  <Phone className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[1.5]" />
  <span>{cleanBangladeshiPhone(selectedCustomer.phone)}</span>
  <a 
  href={`tel:${cleanBangladeshiPhone(selectedCustomer.phone)}`}
  onClick={() => triggerHaptic('single')}
- className="ml-1.5 text-[11px] font-sans font-bold bg-slate-100/90 hover:bg-slate-200/80 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] px-3 py-0.5 rounded-full border border-slate-200/70 dark:border-white/[0.08] text-slate-700 dark:text-slate-200 inline-flex items-center cursor-pointer transition-colors touch-press"
+ className="ml-1.5 text-[11px] font-sans font-bold bg-slate-100/90 hover:bg-slate-200/80 dark:bg-white/[0.08] dark:hover:bg-white/[0.14] px-3 py-0.5 rounded-full border border-slate-200/70 dark:border-white/[0.08] text-slate-700 dark:text-slate-200 inline-flex items-center whitespace-nowrap shrink-0 cursor-pointer transition-colors touch-press"
  >
  {lang === 'bn' ? 'কল করুন' : 'Call Now'}
  </a>
