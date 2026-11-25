@@ -396,10 +396,10 @@ function renderSplashScreen(width, height) {
 }
 
 const targets = [
-  { file: 'icon-512.png', size: 512, mode: 'circle-transparent', medallionRadiusRatio: 0.478, iconScale: 0.45, iconOffsetY: 0.005 },
-  { file: 'icon-192.png', size: 192, mode: 'circle-transparent', medallionRadiusRatio: 0.478, iconScale: 0.45, iconOffsetY: 0.005 },
-  { file: 'icon-512-maskable.png', size: 512, mode: 'maskable-circle-on-bg', medallionRadiusRatio: 0.385, iconScale: 0.37, iconOffsetY: 0.004 },
-  { file: 'icon-192-maskable.png', size: 192, mode: 'maskable-circle-on-bg', medallionRadiusRatio: 0.385, iconScale: 0.37, iconOffsetY: 0.004 },
+  { file: 'icon-512.png', size: 512, mode: 'circle-transparent', medallionRadiusRatio: 0.49, iconScale: 0.45, iconOffsetY: 0.005 },
+  { file: 'icon-192.png', size: 192, mode: 'circle-transparent', medallionRadiusRatio: 0.49, iconScale: 0.45, iconOffsetY: 0.005 },
+  { file: 'icon-512-maskable.png', size: 512, mode: 'full-bleed-apple', medallionRadiusRatio: 0.5, iconScale: 0.38, iconOffsetY: 0.004 },
+  { file: 'icon-192-maskable.png', size: 192, mode: 'full-bleed-apple', medallionRadiusRatio: 0.5, iconScale: 0.38, iconOffsetY: 0.004 },
   { file: 'apple-touch-icon.png', size: 180, mode: 'full-bleed-apple', medallionRadiusRatio: 0.5, iconScale: 0.46, iconOffsetY: 0.005 },
 ];
 
