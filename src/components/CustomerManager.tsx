@@ -2846,71 +2846,74 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  {/* CURRENT BALANCE CARD + SUBTLE LEFT ELLIPSIS TOGGLE FOR TOTAL BILLED & TOTAL PAID */}
  <div className="pt-3 border-t border-slate-900/[0.06] dark:border-white/[0.06] space-y-3 relative z-10">
    {/* Neutral Total Outstanding Box */}
-   <div className="p-4 sm:p-5 rounded-2xl border border-slate-200/70 dark:border-white/[0.08] surface-subcard flex items-center justify-between gap-3">
-     {/* Subtle Circle-Ellipsis Button on the left */}
-     <button
-       type="button"
-       onClick={() => {
-         triggerHaptic('single');
-         setShowExtraBalanceCards(prev => !prev);
-       }}
-       className={`w-9 h-9 rounded-full transition-colors cursor-pointer shrink-0 flex items-center justify-center touch-press ${
-         showExtraBalanceCards
-           ? 'text-slate-950 dark:text-white bg-slate-200/80 dark:bg-white/[0.12]'
-           : 'text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-white/[0.08]'
-       }`}
-       title={showExtraBalanceCards ? (lang === 'bn' ? 'মোট বিবরণ লুকান' : 'Hide totals') : (lang === 'bn' ? 'মোট বকেয়া ও আদায় দেখুন' : 'Show Total Billed & Total Paid')}
-       aria-expanded={showExtraBalanceCards}
-       aria-label={showExtraBalanceCards ? (lang === 'bn' ? 'মোট বিবরণ লুকান' : 'Hide totals') : (lang === 'bn' ? 'মোট বকেয়া ও আদায় দেখুন' : 'Show Total Billed & Total Paid')}
-     >
-       <CircleEllipsis className="w-4.5 h-4.5 stroke-[1.25]" />
-     </button>
+   <div className="p-4 sm:p-5 rounded-2xl border border-slate-200/70 dark:border-white/[0.08] surface-subcard flex flex-col gap-1.5">
+     <div className="flex items-center justify-between gap-3">
+       {/* Subtle Circle-Ellipsis Button on the left */}
+       <button
+         type="button"
+         onClick={() => {
+           triggerHaptic('single');
+           setShowExtraBalanceCards(prev => !prev);
+         }}
+         className={`w-9 h-9 rounded-full transition-colors cursor-pointer shrink-0 flex items-center justify-center touch-press ${
+           showExtraBalanceCards
+             ? 'text-slate-950 dark:text-white bg-slate-200/80 dark:bg-white/[0.12]'
+             : 'text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-white/[0.08]'
+         }`}
+         title={showExtraBalanceCards ? (lang === 'bn' ? 'মোট বিবরণ লুকান' : 'Hide totals') : (lang === 'bn' ? 'মোট বকেয়া ও আদায় দেখুন' : 'Show Total Billed & Total Paid')}
+         aria-expanded={showExtraBalanceCards}
+         aria-label={showExtraBalanceCards ? (lang === 'bn' ? 'মোট বিবরণ লুকান' : 'Hide totals') : (lang === 'bn' ? 'মোট বকেয়া ও আদায় দেখুন' : 'Show Total Billed & Total Paid')}
+       >
+         <CircleEllipsis className="w-4.5 h-4.5 stroke-[1.25]" />
+       </button>
 
-     <div className="space-y-1.5 min-w-0 flex-1 text-right">
-       <span className={`block ${lang === 'bn' ? 'text-xs font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}`}>
-         {selectedCustomer.accountType === 'credit_card'
-           ? (lang === 'bn' ? 'মোট বকেয়া কার্ড ব্যালেন্স' : 'Total Outstanding Card Balance')
-           : lang === 'bn'
-             ? (selectedCustomer.outstandingDue > 0
-                 ? 'বর্তমান ব্যালেন্স (বকেয়া)'
-                 : selectedCustomer.outstandingDue < 0
-                 ? 'বর্তমান ব্যালেন্স (অগ্রিম)'
-                 : t.currentBalance)
-             : t.currentBalance}
-       </span>
-       <div className={`font-display text-3xl sm:text-4xl leading-none font-black tabular-nums tracking-tight ${
-         selectedCustomer.outstandingDue > 0
-           ? 'text-ledger-red'
-           : selectedCustomer.outstandingDue < 0
-           ? 'text-ledger-green'
-           : 'text-slate-500 dark:text-slate-400'
-       }`}>
-         {selectedCustomer.outstandingDue === 0
-           ? `৳ ${lang === 'bn' ? '০ (পরিশোধিত)' : '0 (Settled)'}`
-           : `${selectedCustomer.outstandingDue < 0 ? '-' : ''}৳ ${formatNumber(Math.abs(selectedCustomer.outstandingDue), lang)}`}
-       </div>
-       <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-         {selectedCustomer.accountType === 'credit_card' ? (
+       <div className="space-y-1.5 min-w-0 flex-1 text-right">
+         <span className={`block ${lang === 'bn' ? 'text-xs font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}`}>
+           {selectedCustomer.accountType === 'credit_card'
+             ? (lang === 'bn' ? 'মোট বকেয়া কার্ড ব্যালেন্স' : 'Total Outstanding Card Balance')
+             : lang === 'bn'
+               ? (selectedCustomer.outstandingDue > 0
+                   ? 'বর্তমান ব্যালেন্স (বকেয়া)'
+                   : selectedCustomer.outstandingDue < 0
+                   ? 'বর্তমান ব্যালেন্স (অগ্রিম)'
+                   : t.currentBalance)
+               : t.currentBalance}
+         </span>
+         <div className={`font-display text-3xl sm:text-4xl leading-none font-black tabular-nums tracking-tight ${
            selectedCustomer.outstandingDue > 0
-             ? (creditCardCycleData && creditCardCycleData.unpaidCarryOver > 0
-                 ? (lang === 'bn'
-                     ? `${creditCardCycleData.lastStatementDate.toLocaleDateString('bn-BD', { month: 'short', day: 'numeric' })}-এ বিল্ড হওয়া ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'bn')} অন্তর্ভুক্ত`
-                     : `Includes ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'en')} moved to Billed on ${creditCardCycleData.lastStatementDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`)
-                 : (lang === 'bn'
-                     ? `${creditCardCycleData ? creditCardCycleData.nextStatementDate.toLocaleDateString('bn-BD', { month: 'short', day: 'numeric' }) : ''}-এর আগের আনবিল্ড লেনদেন (বিলিং দিনে বিল্ড হবে)`
-                     : `Unbilled transactions before ${creditCardCycleData ? creditCardCycleData.nextStatementDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'billing date'} (bills on billing day)`))
+             ? 'text-ledger-red'
              : selectedCustomer.outstandingDue < 0
-             ? (lang === 'bn' ? 'কার্ডে অতিরিক্ত ক্রেডিট ব্যালেন্স আছে' : 'Extra credit balance on card')
-             : (lang === 'bn' ? 'সব কার্ড বিল পরিশোধিত' : 'All card bills settled')
-         ) : (
-           selectedCustomer.outstandingDue > 0 
-             ? t.customerOwes 
-             : selectedCustomer.outstandingDue < 0 
-             ? t.youOweCustomer 
-             : t.allClear
-         )}
-       </p>
+             ? 'text-ledger-green'
+             : 'text-slate-500 dark:text-slate-400'
+         }`}>
+           {selectedCustomer.outstandingDue === 0
+             ? `৳ ${lang === 'bn' ? '০ (পরিশোধিত)' : '0 (Settled)'}`
+             : `${selectedCustomer.outstandingDue < 0 ? '-' : ''}৳ ${formatNumber(Math.abs(selectedCustomer.outstandingDue), lang)}`}
+         </div>
+       </div>
      </div>
+
+     <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium leading-snug text-right whitespace-nowrap truncate">
+       {selectedCustomer.accountType === 'credit_card' ? (
+         selectedCustomer.outstandingDue > 0
+           ? (creditCardCycleData && creditCardCycleData.unpaidCarryOver > 0
+               ? (lang === 'bn'
+                   ? `${creditCardCycleData.lastStatementDate.toLocaleDateString('bn-BD', { month: 'short', day: 'numeric' })}-এ বিল্ড হওয়া ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'bn')} অন্তর্ভুক্ত`
+                   : `Includes ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'en')} moved to Billed on ${creditCardCycleData.lastStatementDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`)
+               : (lang === 'bn'
+                   ? `${creditCardCycleData ? creditCardCycleData.nextStatementDate.toLocaleDateString('bn-BD', { month: 'short', day: 'numeric' }) : ''}-এর আগে আনবিল্ড (বিলিং দিনে বিল্ড হবে)`
+                   : `Unbilled before ${creditCardCycleData ? creditCardCycleData.nextStatementDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'billing date'} (bills on billing day)`))
+           : selectedCustomer.outstandingDue < 0
+           ? (lang === 'bn' ? 'কার্ডে অতিরিক্ত ক্রেডিট ব্যালেন্স আছে' : 'Extra credit balance on card')
+           : (lang === 'bn' ? 'সব কার্ড বিল পরিশোধিত' : 'All card bills settled')
+       ) : (
+         selectedCustomer.outstandingDue > 0 
+           ? t.customerOwes 
+           : selectedCustomer.outstandingDue < 0 
+           ? t.youOweCustomer 
+           : t.allClear
+       )}
+     </p>
    </div>
 
    {/* Expanded Telemetry Panel: Lifetime Total Billed & Total Paid */}

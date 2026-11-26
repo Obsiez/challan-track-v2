@@ -85,7 +85,9 @@ const MobileBottomDock = React.memo(({
 }) => {
   const dockRef = React.useRef<HTMLDivElement>(null);
   const trackRef = React.useRef<HTMLDivElement>(null);
+  const pillRef = React.useRef<HTMLDivElement>(null);
   const trackLeftRef = React.useRef<number | null>(null);
+  const dragRafRef = React.useRef<number | null>(null);
   const [dockWidth, setDockWidth] = useState<number>(() => {
     if (typeof window === 'undefined') return 360;
     return Math.min(420, Math.max(260, window.innerWidth - 32));
@@ -95,7 +97,8 @@ const MobileBottomDock = React.memo(({
     const el = dockRef.current;
     if (!el) return;
     const measure = () => {
-      const w = el.clientWidth;
+      const viewportCap = typeof window !== 'undefined' ? Math.max(260, window.innerWidth - 32) : 420;
+      const w = Math.min(el.clientWidth || viewportCap, viewportCap, 420);
       if (w > 0) {
         setDockWidth((prev) => (Math.abs(prev - w) > 0.5 ? w : prev));
       }
@@ -107,7 +110,11 @@ const MobileBottomDock = React.memo(({
     if (typeof ResizeObserver !== 'undefined') {
       const ro = new ResizeObserver(measure);
       ro.observe(el);
-      return () => ro.disconnect();
+      window.addEventListener('resize', measure, { passive: true });
+      return () => {
+        ro.disconnect();
+        window.removeEventListener('resize', measure);
+      };
     }
     window.addEventListener('resize', measure, { passive: true });
     return () => window.removeEventListener('resize', measure);
@@ -123,10 +130,7 @@ const MobileBottomDock = React.memo(({
     transitionMode: 'none',
   }));
 
-  const [dragVisual, setDragVisual] = useState<{
-    pillCenterX: number;
-    hoveredTab: AppTab;
-  } | null>(null);
+  const [hoveredDragTab, setHoveredDragTab] = useState<AppTab | null>(null);
 
   const gestureRef = React.useRef<{
     pointerId: number;
@@ -158,22 +162,6 @@ const MobileBottomDock = React.memo(({
     []
   );
 
-  const transitionResetRef = React.useRef<number | null>(null);
-
-  const scheduleTransitionReset = useCallback((mode: 'none' | 'hide-fab' | 'show-fab') => {
-    if (transitionResetRef.current !== null) {
-      window.clearTimeout(transitionResetRef.current);
-      transitionResetRef.current = null;
-    }
-    if (mode === 'none') return;
-    transitionResetRef.current = window.setTimeout(() => {
-      transitionResetRef.current = null;
-      setNavState((prev) =>
-        prev.transitionMode === 'none' ? prev : { ...prev, transitionMode: 'none' }
-      );
-    }, 480);
-  }, []);
-
   useEffect(() => {
     const handleNavIntent = (e: Event) => {
       const detail = (e as CustomEvent<{ tab: AppTab; customerId: string | null }>).detail;
@@ -181,7 +169,6 @@ const MobileBottomDock = React.memo(({
       setNavState((prev) => {
         if (prev.tab === detail.tab && prev.customerId === detail.customerId) return prev;
         const mode = computeTransitionMode(prev.tab, prev.customerId, detail.tab, detail.customerId);
-        scheduleTransitionReset(mode);
         return {
           tab: detail.tab,
           customerId: detail.customerId,
@@ -193,29 +180,28 @@ const MobileBottomDock = React.memo(({
     window.addEventListener('challan-nav-intent', handleNavIntent);
     return () => {
       window.removeEventListener('challan-nav-intent', handleNavIntent);
-      if (transitionResetRef.current !== null) {
-        window.clearTimeout(transitionResetRef.current);
-      }
     };
-  }, [computeTransitionMode, scheduleTransitionReset]);
+  }, [computeTransitionMode]);
 
   useEffect(() => {
     setNavState((prev) => {
       if (prev.tab === syncedTab && prev.customerId === syncedCustomerId) return prev;
       const mode = computeTransitionMode(prev.tab, prev.customerId, syncedTab, syncedCustomerId);
-      scheduleTransitionReset(mode);
       return {
         tab: syncedTab,
         customerId: syncedCustomerId,
         transitionMode: mode,
       };
     });
-  }, [syncedTab, syncedCustomerId, computeTransitionMode, scheduleTransitionReset]);
+  }, [syncedTab, syncedCustomerId, computeTransitionMode]);
 
   useEffect(() => {
     return () => {
       if (gestureRef.current?.holdTimer) {
         window.clearTimeout(gestureRef.current.holdTimer);
+      }
+      if (dragRafRef.current !== null) {
+        window.cancelAnimationFrame(dragRafRef.current);
       }
     };
   }, []);
@@ -234,7 +220,7 @@ const MobileBottomDock = React.memo(({
       ? 3
       : 0;
 
-  // Pixel geometry for dock pill transitions without distorting pill border-radius
+  // Pixel geometry for dock pill transitions (pure compositor transform — zero CSS width/layout transitions)
   const shrunkDockWidth = Math.max(194, dockWidth - 66);
   const fullTrackWidth = Math.max(184, dockWidth - 10);
   const shrunkTrackWidth = Math.max(184, shrunkDockWidth - 10);
@@ -242,21 +228,21 @@ const MobileBottomDock = React.memo(({
   const shrunkColWidth = shrunkTrackWidth / 4;
   const activeTrackWidth = showQuickEntryFab ? shrunkTrackWidth : fullTrackWidth;
   const activeColWidth = showQuickEntryFab ? shrunkColWidth : fullColWidth;
+  const activeDockWidth = showQuickEntryFab ? shrunkDockWidth : dockWidth;
+  const capsuleShrinkOffset = Math.max(0, dockWidth - activeDockWidth);
   const restingPillCenterX = (activeNavIndex + 0.5) * activeColWidth;
-  const highlightedTab = dragVisual ? dragVisual.hoveredTab : activeTab;
+  const highlightedTab = hoveredDragTab ?? activeTab;
 
-  // Choreography:
+  // Choreography (pure transform + opacity only for locked 60fps mobile compositor):
   // - Expanding (hide-fab): + button drops & hides first (0..110ms), THEN navbar expands cleanly (125ms delay)
   // - Shrinking (show-fab): navbar shrinks immediately without right-side overshoot, + button rises cleanly (90ms delay)
   const isExpanding = navState.transitionMode === 'hide-fab';
   const isShrinking = navState.transitionMode === 'show-fab';
   const shouldAnimateMorph = !reducedMotion && (isExpanding || isShrinking);
   const navDelayMs = isExpanding ? 125 : 0;
-  const navDurationMs = isExpanding ? 280 : 270;
+  const navDurationMs = isExpanding ? 260 : 250;
   const capsuleMorphEasing = 'cubic-bezier(0.22, 1, 0.36, 1)';
-  const indicatorMorphEasing = isExpanding
-    ? 'cubic-bezier(0.32, 1.36, 0.64, 1)'
-    : 'cubic-bezier(0.34, 1.36, 0.64, 1)';
+  const indicatorMorphEasing = 'cubic-bezier(0.32, 1.32, 0.64, 1)';
 
   const getIndexFromClientX = (clientX: number) => {
     const track = trackRef.current;
@@ -277,12 +263,19 @@ const MobileBottomDock = React.memo(({
     if (gestureRef.current?.holdTimer) {
       window.clearTimeout(gestureRef.current.holdTimer);
     }
+    if (dragRafRef.current !== null) {
+      window.cancelAnimationFrame(dragRafRef.current);
+      dragRafRef.current = null;
+    }
     gestureRef.current = null;
-    setDragVisual(null);
+    setHoveredDragTab(null);
   };
 
   const handleNavPointerDown = (e: React.PointerEvent<HTMLElement>) => {
     if (e.button !== 0 && e.pointerType === 'mouse') return;
+    if (trackRef.current) {
+      trackLeftRef.current = trackRef.current.getBoundingClientRect().left;
+    }
     const { idx, relX } = getIndexFromClientX(e.clientX);
     if (showQuickEntryFab && relX > shrunkTrackWidth + 5) return;
     const startTab = DOCK_TABS[idx];
@@ -329,6 +322,7 @@ const MobileBottomDock = React.memo(({
           window.clearTimeout(g.holdTimer);
           g.holdTimer = null;
         }
+        setHoveredDragTab(DOCK_TABS[g.hoveredIdx]);
       } else {
         return;
       }
@@ -338,8 +332,22 @@ const MobileBottomDock = React.memo(({
     if (idx !== g.hoveredIdx) {
       g.hoveredIdx = idx;
       triggerHaptic('single');
+      setHoveredDragTab(DOCK_TABS[idx]);
     }
-    setDragVisual({ pillCenterX, hoveredTab: DOCK_TABS[idx] });
+
+    // Mutate pill transform directly on next rAF for zero-re-render 60/120fps finger scrub
+    const nextTranslateX = pillCenterX - fullColWidth / 2;
+    if (dragRafRef.current !== null) {
+      window.cancelAnimationFrame(dragRafRef.current);
+    }
+    dragRafRef.current = window.requestAnimationFrame(() => {
+      dragRafRef.current = null;
+      const pillEl = pillRef.current;
+      if (pillEl && gestureRef.current?.isSliding) {
+        pillEl.style.transition = 'none';
+        pillEl.style.transform = `translate3d(${nextTranslateX.toFixed(2)}px, 0, 0) scale(1.015)`;
+      }
+    });
   };
 
   const handleNavPointerUp = (e: React.PointerEvent<HTMLElement>) => {
@@ -386,28 +394,31 @@ const MobileBottomDock = React.memo(({
     }
   };
 
-  const pillCenterX = dragVisual ? dragVisual.pillCenterX : restingPillCenterX;
-  const pillTranslateX = pillCenterX - fullColWidth / 2;
+  const pillTranslateX = restingPillCenterX - fullColWidth / 2;
   const pillSideInset = Math.max(0, (fullColWidth - activeColWidth) / 2);
   const pillRadius = Math.min(23, activeColWidth / 2);
-  const pillScale = dragVisual ? 1.015 : 1;
+  const pillScale = hoveredDragTab ? 1.015 : 1;
 
   const pillTransition =
-    reducedMotion || dragVisual
+    reducedMotion || hoveredDragTab
       ? 'none'
       : shouldAnimateMorph
       ? `transform ${navDurationMs}ms ${indicatorMorphEasing} ${navDelayMs}ms, clip-path ${navDurationMs}ms ${capsuleMorphEasing} ${navDelayMs}ms`
-      : 'transform 340ms cubic-bezier(0.34, 1.48, 0.64, 1)';
+      : 'transform 300ms cubic-bezier(0.32, 1.32, 0.64, 1)';
 
-  const tabButtonTransition = shouldAnimateMorph
-    ? `transform ${navDurationMs}ms ${capsuleMorphEasing} ${navDelayMs}ms`
-    : 'none';
+  const capsuleTransformTransition = reducedMotion
+    ? 'none'
+    : `transform ${navDurationMs}ms ${capsuleMorphEasing} ${navDelayMs}ms`;
+
+  const tabButtonTransition = reducedMotion
+    ? 'none'
+    : `transform ${navDurationMs}ms ${capsuleMorphEasing} ${navDelayMs}ms`;
 
   const fabTransition = reducedMotion
     ? 'none'
     : showQuickEntryFab
-    ? 'transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1) 90ms, opacity 170ms ease-out 90ms'
-    : 'transform 140ms cubic-bezier(0.4, 0, 0.88, 0.55) 0ms, opacity 110ms ease-out 0ms';
+    ? 'transform 300ms cubic-bezier(0.34, 1.48, 0.64, 1) 80ms, opacity 160ms ease-out 80ms'
+    : 'transform 135ms cubic-bezier(0.4, 0, 0.88, 0.55) 0ms, opacity 105ms ease-out 0ms';
 
   return (
     <div
@@ -415,20 +426,55 @@ const MobileBottomDock = React.memo(({
       style={{ transform: 'translate3d(0, 0, 0)', isolation: 'isolate', contain: 'layout style' }}
     >
       <div ref={dockRef} className="relative w-full max-w-[420px] h-[56px] flex items-center">
-        {/* Glass Capsule Background (animates explicit width so semicircular pill ends never stretch horizontally) */}
+        {/* Composited Outer Elevation Shadow (pure scaleX GPU transform — zero backdrop re-allocation) */}
         <div
           aria-hidden="true"
-          className="glass-chrome-bottom pointer-events-none absolute left-0 top-0 h-[56px] rounded-full"
+          className="glass-chrome-bottom-shadow pointer-events-none absolute left-0 top-0 h-[56px] rounded-full"
           style={{
-            width: `${showQuickEntryFab ? shrunkDockWidth : dockWidth}px`,
-            transform: 'translate3d(0, 0, 0)',
+            width: `${dockWidth}px`,
+            transformOrigin: 'left center',
+            transform: `translate3d(0, 0, 0) scaleX(${(activeDockWidth / dockWidth).toFixed(4)})`,
+            willChange: 'transform',
             backfaceVisibility: 'hidden',
             WebkitBackfaceVisibility: 'hidden',
-            transition: shouldAnimateMorph
-              ? `width ${navDurationMs}ms ${capsuleMorphEasing} ${navDelayMs}ms`
-              : 'none',
+            transition: capsuleTransformTransition,
           }}
         />
+
+        {/* Pure Compositor Morphing Glass Capsule: Stationary Left Clipper + Inverse-Shifted Backdrop + Right Semicircle Clipper */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute left-0 top-0 h-[56px] rounded-full overflow-hidden"
+          style={{ width: `${dockWidth}px` }}
+        >
+          <div
+            className="w-full h-full rounded-full overflow-hidden relative"
+            style={{
+              transform: `translate3d(-${capsuleShrinkOffset.toFixed(2)}px, 0, 0)`,
+              willChange: 'transform',
+              backfaceVisibility: 'hidden',
+              WebkitBackfaceVisibility: 'hidden',
+              transition: capsuleTransformTransition,
+            }}
+          >
+            <div
+              className="glass-chrome-bottom w-full h-full rounded-full"
+              style={{
+                transform: `translate3d(${capsuleShrinkOffset.toFixed(2)}px, 0, 0)`,
+                willChange: 'transform',
+                backfaceVisibility: 'hidden',
+                WebkitBackfaceVisibility: 'hidden',
+                transition: capsuleTransformTransition,
+              }}
+            />
+            <div
+              className="pointer-events-none absolute right-0 top-0 bottom-0 w-[28px] overflow-hidden transition-opacity duration-150"
+              style={{ opacity: showQuickEntryFab ? 1 : 0 }}
+            >
+              <div className="absolute right-0 top-0 bottom-0 w-[56px] rounded-full border border-slate-950/[0.06] dark:border-white/[0.08]" />
+            </div>
+          </div>
+        </div>
 
         {/* Constant-size Interactive Overlay Track */}
         <nav
@@ -441,6 +487,7 @@ const MobileBottomDock = React.memo(({
           <div ref={trackRef} className="relative w-full h-full">
             {/* Borderless GPU Sliding Active Pill (clip-path preserves exact circular ends at any width) */}
             <div
+              ref={pillRef}
               aria-hidden="true"
               className="pointer-events-none absolute inset-y-0 left-0 z-0 bg-slate-950/[0.085] dark:bg-white/[0.14] border-0"
               style={{
@@ -449,7 +496,7 @@ const MobileBottomDock = React.memo(({
                 transform: `translate3d(${pillTranslateX.toFixed(2)}px, 0, 0) scale(${pillScale})`,
                 clipPath: `inset(0px ${pillSideInset.toFixed(2)}px 0px ${pillSideInset.toFixed(2)}px round ${pillRadius.toFixed(1)}px)`,
                 WebkitClipPath: `inset(0px ${pillSideInset.toFixed(2)}px 0px ${pillSideInset.toFixed(2)}px round ${pillRadius.toFixed(1)}px)`,
-                willChange: 'transform, clip-path',
+                willChange: 'transform',
                 backfaceVisibility: 'hidden',
                 WebkitBackfaceVisibility: 'hidden',
                 transition: pillTransition,
@@ -470,7 +517,7 @@ const MobileBottomDock = React.memo(({
                 WebkitBackfaceVisibility: 'hidden',
                 transition: reducedMotion
                   ? 'none'
-                  : 'transform 320ms cubic-bezier(0.34, 1.42, 0.64, 1)',
+                  : 'transform 280ms cubic-bezier(0.32, 1.36, 0.64, 1)',
               });
               const labelSpringStyle = (isActive: boolean): React.CSSProperties => ({
                 transform: isActive ? 'translate3d(0, 0, 0) scale(1.01)' : 'translate3d(0, 0.5px, 0) scale(0.99)',
@@ -479,7 +526,7 @@ const MobileBottomDock = React.memo(({
                 WebkitBackfaceVisibility: 'hidden',
                 transition: reducedMotion
                   ? 'none'
-                  : 'transform 280ms cubic-bezier(0.34, 1.35, 0.64, 1)',
+                  : 'transform 260ms cubic-bezier(0.32, 1.32, 0.64, 1)',
               });
 
               const tabItems: Array<{
