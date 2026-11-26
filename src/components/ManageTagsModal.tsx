@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  CircleDotDashed,
+  GraphStar,
   Plus,
   X,
   Check,
@@ -13,6 +13,7 @@ import {
   Pipette,
   ArrowLeft,
   Search,
+  Link,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import ModalPortal from './ModalPortal';
@@ -47,6 +48,7 @@ interface CustomTagDraft {
   iconName: string | null;
   logoDataUrl: string | null;
   imageOnly: boolean;
+  shared: boolean;
   enabled: boolean;
 }
 
@@ -279,6 +281,9 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
     )
   );
   const counts = getTagCounts(tagConfig, activeTab);
+  const sharedDefaultSet = new Set(
+    (tagConfig.sharedDefaultTags || []).map((id) => id.toLowerCase())
+  );
   const limits = TAG_LIMITS[activeTab];
   const slotFillPercent = Math.min(100, Math.round((counts.enabledCount / limits.maxEnabled) * 100));
 
@@ -289,6 +294,34 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleToggleDefaultTagShared = async (tagId: string) => {
+    const normalized = tagId.toLowerCase();
+    if (normalized === 'other') return;
+    triggerHaptic('single');
+    const nextShared = new Set((tagConfig.sharedDefaultTags || []).map((id) => id.toLowerCase()));
+    const willShare = !nextShared.has(normalized);
+    if (willShare) {
+      nextShared.add(normalized);
+    } else {
+      nextShared.delete(normalized);
+    }
+    await persistConfig({
+      ...tagConfig,
+      sharedDefaultTags: Array.from(nextShared),
+    });
+  };
+
+  const handleToggleCustomTagShared = async (tag: CustomTagDefinition) => {
+    triggerHaptic('single');
+    const nextCustomTags = tagConfig.customTags.map((c) =>
+      c.id === tag.id ? { ...c, shared: !c.shared, updatedAt: new Date().toISOString() } : c
+    );
+    await persistConfig({
+      ...tagConfig,
+      customTags: nextCustomTags,
+    });
   };
 
   const handleToggleDefaultTag = async (tagId: string) => {
@@ -383,6 +416,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
       iconName: CUSTOM_TAG_ICONS[customTagsForTab.length % CUSTOM_TAG_ICONS.length].id,
       logoDataUrl: null,
       imageOnly: false,
+      shared: false,
       enabled: counts.enabledCount < limits.maxEnabled,
     });
   };
@@ -400,6 +434,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
       iconName: tag.iconName || null,
       logoDataUrl: tag.logoDataUrl || null,
       imageOnly: Boolean(tag.imageOnly && tag.logoDataUrl),
+      shared: Boolean(tag.shared),
       enabled: tag.enabled,
     });
   };
@@ -477,6 +512,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
               iconName: draft.iconName,
               logoDataUrl: draft.logoDataUrl,
               imageOnly: Boolean(draft.imageOnly && draft.logoDataUrl),
+              shared: Boolean(draft.shared),
               enabled: draft.enabled,
               updatedAt: nowIso,
             }
@@ -508,6 +544,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
           iconName: draft.iconName,
           logoDataUrl: draft.logoDataUrl,
           imageOnly: Boolean(draft.imageOnly && draft.logoDataUrl),
+          shared: Boolean(draft.shared),
           enabled: shouldEnable,
           createdAt: nowIso,
           updatedAt: nowIso,
@@ -606,7 +643,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                   className="w-9 h-9 rounded-2xl surface-subcard border flex items-center justify-center shrink-0"
                   aria-hidden="true"
                 >
-                  <CircleDotDashed className="w-4.5 h-4.5 stroke-[1.6] text-slate-950 dark:text-white" />
+                  <GraphStar className="w-4.5 h-4.5 stroke-[1.6] text-slate-950 dark:text-white" />
                 </div>
               )}
 
@@ -960,6 +997,47 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                   </button>
                 )}
 
+                {/* Shared Tag Toggle (Available in Both Due & Payment) */}
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={draft.shared}
+                  onClick={() => {
+                    triggerHaptic('single');
+                    setDraft({ ...draft, shared: !draft.shared });
+                  }}
+                  className={`w-full p-3.5 rounded-2xl border flex items-center justify-between gap-3 text-left transition-colors cursor-pointer ${
+                    draft.shared
+                      ? 'bg-emerald-500/10 border-emerald-500/40'
+                      : 'surface-subcard hover:bg-slate-900/[0.04] dark:hover:bg-white/[0.06]'
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-950 dark:text-white flex items-center gap-1.5">
+                      <Link className="w-3.5 h-3.5 stroke-[1.5]" />
+                      <span>
+                        {isBn ? 'বাকি ও আদায় উভয় ক্ষেত্রে শেয়ার করুন' : 'Share in Both Due & Payment'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
+                      {isBn
+                        ? 'একবার তৈরি করেই বাকি এবং আদায় দুই তালিকায় ব্যবহার করুন'
+                        : 'Use this same tag in both Due and Payment pickers without creating it twice'}
+                    </p>
+                  </div>
+                  <div
+                    className={`w-11 h-6 shrink-0 flex items-center rounded-full p-0.5 transition-colors ${
+                      draft.shared ? 'bg-emerald-600' : 'bg-slate-900/15 dark:bg-white/15'
+                    }`}
+                  >
+                    <div
+                      className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform ${
+                        draft.shared ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </div>
+                </button>
+
                 {/* Accent Color Picker (Auto-picked from image, adjustable manually) */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2 px-0.5">
@@ -1087,7 +1165,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                   {customTagsForTab.length === 0 ? (
                     <div className="p-5 rounded-2xl surface-subcard border flex flex-col items-center text-center gap-2.5">
                       <div className="w-10 h-10 rounded-2xl bg-slate-900/[0.04] dark:bg-white/[0.06] border border-slate-900/[0.06] dark:border-white/[0.08] flex items-center justify-center text-slate-950 dark:text-white">
-                        <CircleDotDashed className="w-4.5 h-4.5 stroke-[1.5]" />
+                        <GraphStar className="w-4.5 h-4.5 stroke-[1.5]" />
                       </div>
                       <div className="space-y-0.5 max-w-xs">
                         <p className="text-xs font-bold text-slate-900 dark:text-white">
@@ -1129,14 +1207,6 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                             : isBn
                             ? 'কাস্টম'
                             : 'Custom';
-                        const statusLabel = tag.enabled
-                          ? isBn
-                            ? 'সক্রিয়'
-                            : 'Active'
-                          : isBn
-                          ? 'নিষ্ক্রিয়'
-                          : 'Hidden';
-
                         return (
                           <div
                             key={tag.id}
@@ -1165,12 +1235,35 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                                   {tag.name}
                                 </div>
                                 <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                                  {modeLabel} · {statusLabel}
+                                  <span>{modeLabel}</span>
+                                  {tag.shared && (
+                                    <>
+                                      {' · '}
+                                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                                        {isBn ? 'শেয়ার্ড' : 'Shared'}
+                                      </span>
+                                    </>
+                                  )}
                                 </div>
                               </div>
                             </div>
 
                             <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                disabled={saving}
+                                onClick={() => handleToggleCustomTagShared(tag)}
+                                className={`w-7 h-7 flex items-center justify-center cursor-pointer transition-colors bg-transparent ${
+                                  tag.shared
+                                    ? 'text-emerald-600 dark:text-emerald-400'
+                                    : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'
+                                }`}
+                                title={isBn ? 'বাকি ও আদায় উভয়ে শেয়ার করুন' : 'Share in both Due & Payment'}
+                                aria-label={`Share ${tag.name} in both Due and Payment`}
+                                aria-pressed={Boolean(tag.shared)}
+                              >
+                                <Link className="w-3.5 h-3.5 stroke-[1.75]" />
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => openEditForm(tag)}
@@ -1249,16 +1342,24 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {filteredDefaultTags.map((item) => {
                         const isEnabled = !disabledIds.has(item.id.toLowerCase());
+                        const isShared = sharedDefaultSet.has(item.id.toLowerCase());
+                        const canShare = item.id !== 'other';
                         const IconComp = item.icon;
                         return (
-                          <button
+                          <div
                             key={item.id}
-                            type="button"
+                            onClick={() => !saving && handleToggleDefaultTag(item.id)}
                             role="switch"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if ((e.key === 'Enter' || e.key === ' ') && !saving) {
+                                e.preventDefault();
+                                handleToggleDefaultTag(item.id);
+                              }
+                            }}
                             aria-checked={isEnabled}
-                            disabled={saving}
-                            onClick={() => handleToggleDefaultTag(item.id)}
-                            className={`p-3 rounded-2xl border flex items-center justify-between gap-2.5 text-left transition-all cursor-pointer touch-press ${
+                            aria-disabled={saving}
+                            className={`p-3 rounded-2xl border flex items-center justify-between gap-2 text-left transition-colors cursor-pointer touch-press ${
                               isEnabled
                                 ? 'surface-subcard hover:bg-slate-900/[0.04] dark:hover:bg-white/[0.06]'
                                 : 'bg-slate-900/[0.015] dark:bg-white/[0.015] border-slate-900/[0.05] dark:border-white/[0.05] opacity-60'
@@ -1268,27 +1369,57 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                               <div className="w-8 h-8 rounded-xl bg-white/75 dark:bg-white/[0.06] border border-slate-900/[0.07] dark:border-white/[0.08] flex items-center justify-center shrink-0">
                                 <IconComp className="w-4 h-4 stroke-[1.6]" style={{ color: item.color }} />
                               </div>
-                              <span className="text-xs font-bold text-slate-950 dark:text-white truncate">
-                                {isBn ? item.bn : item.en}
-                              </span>
+                              <div className="min-w-0">
+                                <span className="text-xs font-bold text-slate-950 dark:text-white truncate block">
+                                  {isBn ? item.bn : item.en}
+                                </span>
+                                {canShare && isShared && (
+                                  <span className="text-[9.5px] font-bold text-emerald-600 dark:text-emerald-400 block leading-tight">
+                                    {isBn ? 'শেয়ার্ড' : 'Shared'}
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
-                            <div
-                              className={`w-10 h-6 shrink-0 flex items-center rounded-full p-0.5 transition-colors ${
-                                isEnabled
-                                  ? 'bg-slate-950 dark:bg-white'
-                                  : 'bg-slate-900/15 dark:bg-white/15'
-                              }`}
-                            >
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {canShare && (
+                                <button
+                                  type="button"
+                                  disabled={saving}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleDefaultTagShared(item.id);
+                                  }}
+                                  title={isBn ? 'বাকি ও আদায় উভয়ে শেয়ার করুন' : 'Share in both Due & Payment'}
+                                  aria-label={`Share ${item.en} in both Due and Payment`}
+                                  aria-pressed={isShared}
+                                  className={`w-7 h-7 flex items-center justify-center cursor-pointer transition-colors bg-transparent ${
+                                    isShared
+                                      ? 'text-emerald-600 dark:text-emerald-400'
+                                      : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'
+                                  }`}
+                                >
+                                  <Link className="w-3.5 h-3.5 stroke-[1.75]" />
+                                </button>
+                              )}
+
                               <div
-                                className={`w-5 h-5 rounded-full shadow-xs transition-transform ${
+                                className={`w-10 h-6 shrink-0 flex items-center rounded-full p-0.5 transition-colors ${
                                   isEnabled
-                                    ? 'translate-x-4 bg-white dark:bg-slate-950'
-                                    : 'translate-x-0 bg-white dark:bg-slate-200'
+                                    ? 'bg-slate-950 dark:bg-white'
+                                    : 'bg-slate-900/15 dark:bg-white/15'
                                 }`}
-                              />
+                              >
+                                <div
+                                  className={`w-5 h-5 rounded-full shadow-xs transition-transform ${
+                                    isEnabled
+                                      ? 'translate-x-4 bg-white dark:bg-slate-950'
+                                      : 'translate-x-0 bg-white dark:bg-slate-200'
+                                  }`}
+                                />
+                              </div>
                             </div>
-                          </button>
+                          </div>
                         );
                       })}
                     </div>

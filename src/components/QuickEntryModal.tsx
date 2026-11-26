@@ -373,6 +373,24 @@ function QuickEntryModalInner({
  setAmountInput(formatIndianNumberString(newVal));
  };
 
+  const creditCardCutoffMs = useMemo(() => {
+    if (!currentCustomer || currentCustomer.accountType !== 'credit_card') return null;
+    const billingDay = Math.min(31, Math.max(1, currentCustomer.billingDay || 15));
+    const getCycleBoundary = (year: number, monthIndex: number, day: number) => {
+      const firstOfTarget = new Date(year, monthIndex, 1, 0, 0, 0, 0);
+      const maxDays = new Date(firstOfTarget.getFullYear(), firstOfTarget.getMonth() + 1, 0).getDate();
+      return new Date(firstOfTarget.getFullYear(), firstOfTarget.getMonth(), Math.min(day, maxDays), 0, 0, 0, 0);
+    };
+    const now = new Date();
+    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const thisMonthCutoff = getCycleBoundary(now.getFullYear(), now.getMonth(), billingDay);
+    const lastStatementDate =
+      todayMidnight.getTime() >= thisMonthCutoff.getTime()
+        ? thisMonthCutoff
+        : getCycleBoundary(now.getFullYear(), now.getMonth() - 1, billingDay);
+    return lastStatementDate.getTime();
+  }, [currentCustomer]);
+
   const getDuplicate = React.useCallback(() => {
     if (!selectedCustomerId || !amountInput || selectedCustomerTxs.length === 0) return null;
     const cleaned = amountInput.replace(/,/g, '');
@@ -392,10 +410,14 @@ function QuickEntryModalInner({
     const twentyFourHoursMs = 24 * 60 * 60 * 1000;
     return selectedCustomerTxs.find(t => {
       if (t.type !== type || Math.abs(t.amount - amountVal) >= 0.01) return false;
+      // Quick Entry records into the active unbilled section; ignore entries residing in closed billed cycles
+      if (creditCardCutoffMs !== null && parseDate(t.date).getTime() < creditCardCutoffMs) {
+        return false;
+      }
       const tDate = parseDate(t.createdAt || t.date);
       return (now - tDate.getTime()) < twentyFourHoursMs;
     }) || null;
-  }, [selectedCustomerId, amountInput, selectedCustomerTxs, type]);
+  }, [selectedCustomerId, amountInput, selectedCustomerTxs, type, creditCardCutoffMs]);
 
   const activeRealtimeDuplicate = useMemo(() => {
     if (isSubmitting) return null;

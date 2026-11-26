@@ -129,6 +129,7 @@ export interface CustomTagDefinition {
   iconName?: string | null;
   logoDataUrl?: string | null;
   imageOnly?: boolean;
+  shared?: boolean;
   enabled: boolean;
   createdAt?: string;
   updatedAt?: string;
@@ -137,6 +138,7 @@ export interface CustomTagDefinition {
 export interface UserTagConfig {
   disabledDueTags: string[];
   disabledPaymentTags: string[];
+  sharedDefaultTags?: string[];
   customTags: CustomTagDefinition[];
   updatedAt?: string;
 }

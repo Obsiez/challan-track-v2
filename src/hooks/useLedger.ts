@@ -1285,6 +1285,7 @@ const lastSubmitRef = useRef<{
       await setDoc(tagCfgRef, {
         disabledDueTags: sanitized.disabledDueTags,
         disabledPaymentTags: sanitized.disabledPaymentTags,
+        sharedDefaultTags: sanitized.sharedDefaultTags || [],
         customTags: sanitized.customTags.map((c) => ({
           id: c.id,
           type: c.type,
@@ -1293,6 +1294,7 @@ const lastSubmitRef = useRef<{
           iconName: c.iconName || null,
           logoDataUrl: c.logoDataUrl || null,
           imageOnly: Boolean(c.imageOnly && c.logoDataUrl),
+          shared: Boolean(c.shared),
           enabled: Boolean(c.enabled),
           createdAt: c.createdAt || sanitized.updatedAt,
           updatedAt: c.updatedAt || sanitized.updatedAt,

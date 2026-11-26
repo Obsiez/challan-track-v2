@@ -228,6 +228,9 @@ export interface CreditCardStatementMeta {
   billedStatementAmount: number;
   paidTowardBilled: number;
   unpaidCarryOver: number;
+  netUnbilledThisMonth?: number;
+  thisMonthSpend?: number;
+  paymentsSinceCutoff?: number;
 }
 
 export interface CreditCardStatementPdfResult {
@@ -237,6 +240,7 @@ export interface CreditCardStatementPdfResult {
   previewPages: string[];
   plainTextSummary: string;
   billedCount: number;
+  statementType?: 'billed' | 'unbilled';
 }
 
 /**
@@ -749,18 +753,20 @@ export async function shareReceiptImage(blob: Blob, fileName: string, customerNa
 }
 
 /**
- * Generates a minimal, text-only bank-statement-style PDF containing ALL billed transactions
- * for a credit card account. Renders onto crisp A4 canvas pages (guaranteeing full Bengali &
- * Taka glyph fidelity) and wraps them into a multi-page A4 PDF via jsPDF.
+ * Generates a minimal, text-only bank-statement-style PDF containing either billed or unbilled
+ * transactions for a credit card account. Renders onto crisp A4 canvas pages (guaranteeing full
+ * Bengali & Taka glyph fidelity) and wraps them into a multi-page A4 PDF via jsPDF.
  */
 export async function generateCreditCardStatementPdf(
   customer: Customer,
-  billedTransactions: Transaction[] = [],
+  statementTransactions: Transaction[] = [],
   meta?: CreditCardStatementMeta | null,
-  lang: Language = 'en'
+  lang: Language = 'en',
+  statementType: 'billed' | 'unbilled' = 'billed'
 ): Promise<CreditCardStatementPdfResult> {
   await ensureReceiptFontsLoaded();
 
+  const isUnbilled = statementType === 'unbilled';
   const customerName = customer?.name?.trim() || (lang === 'bn' ? 'ক্রেডিট কার্ড হিসাব' : 'Credit Card Account');
   const customerPhone = customer?.phone?.trim() || (lang === 'bn' ? 'প্রযোজ্য নয়' : 'N/A');
   const outstandingDue = typeof customer?.outstandingDue === 'number' && !isNaN(customer.outstandingDue)
@@ -769,23 +775,26 @@ export async function generateCreditCardStatementPdf(
   const billingDay = meta?.billingDay || Math.min(31, Math.max(1, customer?.billingDay || 15));
 
   const cleanPrefix = customerName.replace(/[^\w\u0980-\u09FF]/g, '_').replace(/_+/g, '_').trim() || 'Card';
-  const fileName = `${cleanPrefix}_Billed_Statement.pdf`;
+  const fileName = `${cleanPrefix}_${isUnbilled ? 'Unbilled' : 'Billed'}_Statement.pdf`;
 
-  const sortedBilled = [...(Array.isArray(billedTransactions) ? billedTransactions : [])].sort(
+  const sortedEntries = [...(Array.isArray(statementTransactions) ? statementTransactions : [])].sort(
     (a, b) => parseTxDate(a.date).getTime() - parseTxDate(b.date).getTime()
   );
 
-  const totalBilledCharges = sortedBilled
+  const totalStatementCharges = sortedEntries
     .filter((tx) => tx && tx.type === 'due')
     .reduce((sum, tx) => sum + (Number(tx.amount) || 0), 0);
-  const totalBilledCredits = sortedBilled
+  const totalStatementCredits = sortedEntries
     .filter((tx) => tx && tx.type === 'payment')
     .reduce((sum, tx) => sum + (Number(tx.amount) || 0), 0);
 
-  const statementBalance = meta?.billedStatementAmount ?? Math.max(0, totalBilledCharges - totalBilledCredits);
-  const unpaidBilledDue = meta?.unpaidCarryOver ?? statementBalance;
-  const closedOnStr = meta?.lastStatementDate
-    ? meta.lastStatementDate.toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', {
+  const rawNet = Math.max(0, totalStatementCharges - totalStatementCredits);
+  const statementBalance = isUnbilled
+    ? (meta?.netUnbilledThisMonth ?? rawNet)
+    : (meta?.billedStatementAmount ?? rawNet);
+  const openingOrCarryDue = meta?.unpaidCarryOver ?? (isUnbilled ? 0 : statementBalance);
+  const closedOnStr = (isUnbilled ? meta?.nextStatementDate : meta?.lastStatementDate)
+    ? (isUnbilled ? meta!.nextStatementDate : meta!.lastStatementDate).toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', {
         day: '2-digit',
         month: 'short',
         year: 'numeric'
@@ -889,11 +898,17 @@ export async function generateCreditCardStatementPdf(
   const maskedAccNo = (customer?.id ? customer.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 9).toUpperCase() : '123567744').padEnd(9, '0');
 
   // Dates
-  const startDate = sortedBilled.length > 0 ? parseTxDate(sortedBilled[0].date) : (meta?.lastStatementDate || now);
-  const endDate = sortedBilled.length > 0 ? parseTxDate(sortedBilled[sortedBilled.length - 1].date) : now;
+  const startDate = sortedEntries.length > 0
+    ? parseTxDate(sortedEntries[0].date)
+    : (meta?.lastStatementDate || now);
+  const endDate = isUnbilled
+    ? now
+    : (sortedEntries.length > 0 ? parseTxDate(sortedEntries[sortedEntries.length - 1].date) : now);
   const startDateNumStr = `${startDate.getMonth() + 1}/${startDate.getDate()}/${startDate.getFullYear()}`;
   const endDateNumStr = `${endDate.getMonth() + 1}/${endDate.getDate()}/${endDate.getFullYear()}`;
-  const monthYearStr = endDate.toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { month: 'long', year: 'numeric' });
+  const monthYearStr = isUnbilled
+    ? (lang === 'bn' ? 'চলতি আনবিল্ড সাইকেল' : `Current Cycle (${endDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })})`)
+    : endDate.toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { month: 'long', year: 'numeric' });
 
   // Cleanly balanced columns for legible 10pt-10.5pt entries
   const colDateX = padX;
@@ -931,13 +946,19 @@ export async function generateCreditCardStatementPdf(
     // Architectural monochrome masthead hairline
     drawRule(ctx, 36, anchorRule, 1.4);
 
-    // 1. Top Left: "Account Statement" modern geometric display title
+    // 1. Top Left: "Billed Statement" / "Unbilled Statement" modern geometric display title
     ctx.save();
     setTracking(ctx, '-0.5px');
     ctx.fillStyle = inkPrimary;
     ctx.font = fontDisplay(22, 'bold');
     ctx.textAlign = 'left';
-    ctx.fillText(lang === 'bn' ? 'অ্যাকাউন্ট স্টেটমেন্ট' : 'Account Statement', padX, 68);
+    ctx.fillText(
+      isUnbilled
+        ? (lang === 'bn' ? 'আনবিল্ড স্টেটমেন্ট' : 'Unbilled Statement')
+        : (lang === 'bn' ? 'বিল্ড স্টেটমেন্ট' : 'Billed Statement'),
+      padX,
+      68
+    );
     ctx.restore();
 
     // ACCOUNT label & value
@@ -1012,8 +1033,20 @@ export async function generateCreditCardStatementPdf(
     ctx.fillText(lang === 'bn' ? 'সময়কাল' : 'PERIOD', padX, hdrY);
 
     ctx.textAlign = 'right';
-    ctx.fillText(lang === 'bn' ? 'প্রারম্ভিক স্থিতি' : 'OPENING BALANCE', padX + 340, hdrY);
-    ctx.fillText(lang === 'bn' ? 'সমাপনী স্থিতি' : 'CLOSING BALANCE', rightX, hdrY);
+    ctx.fillText(
+      isUnbilled
+        ? (lang === 'bn' ? 'পূর্বের বকেয়া বিল' : 'CARRY-OVER BILLED')
+        : (lang === 'bn' ? 'প্রারম্ভিক স্থিতি' : 'OPENING BALANCE'),
+      padX + 340,
+      hdrY
+    );
+    ctx.fillText(
+      isUnbilled
+        ? (lang === 'bn' ? 'বর্তমান আনবিল্ড' : 'NET UNBILLED')
+        : (lang === 'bn' ? 'সমাপনী স্থিতি' : 'CLOSING BALANCE'),
+      rightX,
+      hdrY
+    );
     ctx.restore();
 
     drawRule(ctx, hdrY + 7, hairline, 0.5);
@@ -1026,7 +1059,7 @@ export async function generateCreditCardStatementPdf(
 
     ctx.textAlign = 'right';
     ctx.font = fontMono(12, '600');
-    ctx.fillText(`৳${safeFormatNumber(unpaidBilledDue, lang)}`, padX + 340, rowY);
+    ctx.fillText(`৳${safeFormatNumber(openingOrCarryDue, lang)}`, padX + 340, rowY);
     ctx.font = fontMono(12, 'bold');
     ctx.fillText(`৳${safeFormatNumber(statementBalance, lang)}`, rightX, rowY);
 
@@ -1075,20 +1108,24 @@ export async function generateCreditCardStatementPdf(
   curY = drawSummarySection(ctx, curY);
   curY = drawTransactionsHeader(ctx, curY);
 
-  if (sortedBilled.length === 0) {
+  if (sortedEntries.length === 0) {
     ctx.textAlign = 'center';
     ctx.font = fontSans(10.5, '500');
     ctx.fillStyle = inkMuted;
     ctx.fillText(
-      lang === 'bn'
-        ? 'বিলিং দিনে স্থানান্তরিত কোনো বিল্ড লেনদেন পাওয়া যায়নি।'
-        : 'No billed transactions moved into statement yet.',
+      isUnbilled
+        ? (lang === 'bn'
+            ? 'বর্তমান সাইকেলে কোনো আনবিল্ড লেনদেন পাওয়া যায়নি।'
+            : 'No unbilled transactions in the current cycle yet.')
+        : (lang === 'bn'
+            ? 'বিলিং দিনে স্থানান্তরিত কোনো বিল্ড লেনদেন পাওয়া যায়নি।'
+            : 'No billed transactions moved into statement yet.'),
       pageW / 2,
       curY + 30
     );
     curY += 56;
   } else {
-    sortedBilled.forEach((tx, rowIdx) => {
+    sortedEntries.forEach((tx, rowIdx) => {
       const txDate = parseTxDate(tx.date);
       const dateStr = `${txDate.getMonth() + 1}/${txDate.getDate()}/${txDate.getFullYear()}`;
       const isDue = tx.type === 'due';
@@ -1160,7 +1197,7 @@ export async function generateCreditCardStatementPdf(
     ctx.fillText(lang === 'bn' ? 'মাসিক সর্বমোট' : 'MONTHLY TOTALS', padX, curY);
     ctx.restore();
 
-    const netAmount = totalBilledCharges - totalBilledCredits;
+    const netAmount = totalStatementCharges - totalStatementCredits;
     ctx.textAlign = 'right';
     ctx.font = fontMono(10.25, 'bold');
     ctx.fillStyle = inkPrimary;
@@ -1249,16 +1286,16 @@ export async function generateCreditCardStatementPdf(
 
   // Build plain-text statement summary for clipboard copy
   const textLines: string[] = [
-    `CHALLAN TRACK — CREDIT CARD BILLED STATEMENT`,
+    `CHALLAN TRACK — CREDIT CARD ${isUnbilled ? 'UNBILLED' : 'BILLED'} STATEMENT`,
     `Account: ${customerName}${customerPhone !== 'N/A' ? ` (${customerPhone})` : ''}`,
-    `Statement Date: ${generatedStr} | Closed On: ${closedOnStr} | Billing Day: ${billingDay}`,
-    `Billed Entries: ${sortedBilled.length}`,
-    `Total Billed Debits: ৳${safeFormatNumber(totalBilledCharges, lang)}`,
-    `Total Billed Credits: ৳${safeFormatNumber(totalBilledCredits, lang)}`,
-    `Unpaid Billed Due: ৳${safeFormatNumber(unpaidBilledDue, lang)}`,
+    `Statement Date: ${generatedStr} | ${isUnbilled ? 'Next Billing' : 'Closed On'}: ${closedOnStr} | Billing Day: ${billingDay}`,
+    `${isUnbilled ? 'Unbilled' : 'Billed'} Entries: ${sortedEntries.length}`,
+    `Total ${isUnbilled ? 'Unbilled' : 'Billed'} Debits: ৳${safeFormatNumber(totalStatementCharges, lang)}`,
+    `Total ${isUnbilled ? 'Unbilled' : 'Billed'} Credits: ৳${safeFormatNumber(totalStatementCredits, lang)}`,
+    `${isUnbilled ? 'Net Unbilled Due' : 'Unpaid Billed Due'}: ৳${safeFormatNumber(statementBalance, lang)}`,
     `Total Card Balance: ${outstandingDue < 0 ? '-' : ''}৳${safeFormatNumber(Math.abs(outstandingDue), lang)}`,
     `----------------------------------------`,
-    ...sortedBilled.map((tx) => {
+    ...sortedEntries.map((tx) => {
       const d = parseTxDate(tx.date).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
       const sign = tx.type === 'due' ? '+' : '-';
       const desc = tx.description?.trim() || (tx.type === 'due' ? 'Card Charge' : 'Card Payment');
@@ -1273,7 +1310,8 @@ export async function generateCreditCardStatementPdf(
     fileName,
     previewPages,
     plainTextSummary: textLines.join('\n'),
-    billedCount: sortedBilled.length
+    billedCount: sortedEntries.length,
+    statementType
   };
 }
 

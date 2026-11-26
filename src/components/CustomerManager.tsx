@@ -486,14 +486,14 @@ const CustomerCardGridItem = React.memo(({
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0 pr-2">
               {c.photoUrl && !imgError ? (
-                <div className="p-[1.5px] rounded-full contact-avatar-ring shrink-0">
+                <div className="w-10 h-10 p-[1.5px] rounded-full contact-avatar-ring shrink-0 box-border overflow-hidden">
                   <img
                     src={c.photoUrl}
                     alt={c.name}
                     loading="lazy"
                     decoding="async"
                     onError={() => setImgError(true)}
-                    className="w-10 h-10 rounded-full object-cover block"
+                    className="w-full h-full rounded-full object-cover block"
                     draggable={false}
                   />
                 </div>
@@ -750,6 +750,7 @@ const CustomerManager = React.memo(function CustomerManager({
    setShowExtraBalanceCards(false);
    setShowMonthlyCycle(false);
    setIsManageStatementsOpen(false);
+   setIsCcPdfChoiceOpen(false);
    setCardCycleTab('unbilled');
    setActionTargetCycle('unbilled');
    setLedgerTagFilter(null);
@@ -928,6 +929,7 @@ const CustomerManager = React.memo(function CustomerManager({
   const [pinActionCustomer, setPinActionCustomer] = useState<Customer | null>(null);
   const [receiptResult, setReceiptResult] = useState<ReceiptImageResult | CreditCardStatementPdfResult | null>(null);
   const [isGeneratingReceipt, setIsGeneratingReceipt] = useState(false);
+  const [isCcPdfChoiceOpen, setIsCcPdfChoiceOpen] = useState(false);
   const [isCopiedReceipt, setIsCopiedReceipt] = useState(false);
   const [sortBy, setSortBy] = useState<'recent' | 'high_balance' | 'low_balance' | 'custom'>('recent');
   const [customOrder, setCustomOrder] = useState<string[]>(() => {
@@ -1038,6 +1040,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       phoneWarningCustomer ||
       pinActionCustomer ||
       receiptResult ||
+      isCcPdfChoiceOpen ||
       isManageStatementsOpen ||
       pendingContactChoice
     )
@@ -1052,6 +1055,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       editingTx ||
       auditLogTx ||
       receiptResult ||
+      isCcPdfChoiceOpen ||
       pinActionCustomer ||
       phoneWarningCustomer ||
       deletingCustomer ||
@@ -1070,6 +1074,8 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
         closeAuditLogModal();
       } else if (receiptResult) {
         closeReceiptModal();
+      } else if (isCcPdfChoiceOpen) {
+        closeCcPdfChoiceModal();
       } else if (pinActionCustomer) {
         closePinActionModal();
       } else if (phoneWarningCustomer) {
@@ -1089,6 +1095,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     editingTx,
     auditLogTx,
     receiptResult,
+    isCcPdfChoiceOpen,
     pinActionCustomer,
     phoneWarningCustomer,
     deletingCustomer,
@@ -1114,6 +1121,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
             window.scrollTo({ top: savedScrollY, behavior: 'instant' });
           });
         });
+        return;
+      }
+      if (isCcPdfChoiceOpen && e.state?.modal !== 'ccPdfChoice') {
+        setIsCcPdfChoiceOpen(false);
         return;
       }
       if (isManageStatementsOpen && e.state?.modal !== 'manageStatements') {
@@ -1160,7 +1171,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [isEditingCustomer, isManageStatementsOpen, auditLogTx, editingTx, deletingTx, deletingCustomer, duplicateTxWarning, pinActionCustomer, phoneWarningCustomer, receiptResult]);
+  }, [isEditingCustomer, isCcPdfChoiceOpen, isManageStatementsOpen, auditLogTx, editingTx, deletingTx, deletingCustomer, duplicateTxWarning, pinActionCustomer, phoneWarningCustomer, receiptResult]);
 
   const [recentlyEditedTxId, setRecentlyEditedTxId] = useState<string | null>(null);
 
@@ -1210,6 +1221,25 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     return [];
   }, [selectedCustomerId, allTransactions, transactions, customers]);
 
+  const activeCustomerLastStatementCutoffMs = useMemo(() => {
+    const activeCust = selectedCustomerId ? customers.find(c => c.id === selectedCustomerId) : undefined;
+    if (!activeCust || activeCust.accountType !== 'credit_card') return null;
+    const billingDay = Math.min(31, Math.max(1, activeCust.billingDay || 15));
+    const getCycleBoundary = (year: number, monthIndex: number, day: number) => {
+      const firstOfTarget = new Date(year, monthIndex, 1, 0, 0, 0, 0);
+      const maxDays = new Date(firstOfTarget.getFullYear(), firstOfTarget.getMonth() + 1, 0).getDate();
+      return new Date(firstOfTarget.getFullYear(), firstOfTarget.getMonth(), Math.min(day, maxDays), 0, 0, 0, 0);
+    };
+    const now = new Date();
+    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const thisMonthCutoff = getCycleBoundary(now.getFullYear(), now.getMonth(), billingDay);
+    const lastStatementDate =
+      todayMidnight.getTime() >= thisMonthCutoff.getTime()
+        ? thisMonthCutoff
+        : getCycleBoundary(now.getFullYear(), now.getMonth() - 1, billingDay);
+    return lastStatementDate.getTime();
+  }, [customers, selectedCustomerId]);
+
   const getDuplicate = React.useCallback((actionType: 'due' | 'payment', amountStr: string) => {
     if (!selectedCustomerId || !amountStr || fallbackCustomerTxs.length === 0) return null;
     const cleaned = amountStr.replace(/,/g, '');
@@ -1220,10 +1250,15 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     const twentyFourHoursMs = 24 * 60 * 60 * 1000;
     return fallbackCustomerTxs.find(t => {
       if (t.type !== actionType || Math.abs(t.amount - amountVal) >= 0.01) return false;
+      if (activeCustomerLastStatementCutoffMs !== null) {
+        const txCycleMs = parseTxDate(t.date).getTime();
+        const candidateCycle = txCycleMs >= activeCustomerLastStatementCutoffMs ? 'unbilled' : 'billed';
+        if (candidateCycle !== actionTargetCycle) return false;
+      }
       const tDate = parseTxDate(t.createdAt || t.date);
       return (now - tDate.getTime()) < twentyFourHoursMs;
     }) || null;
-  }, [selectedCustomerId, fallbackCustomerTxs]);
+  }, [selectedCustomerId, fallbackCustomerTxs, activeCustomerLastStatementCutoffMs, actionTargetCycle]);
 
   const activeRealtimeDuplicate = useMemo(() => {
     if (!openActionType || txSubmitting || !actionAmount) return null;
@@ -1269,6 +1304,13 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const closePhoneWarningModal = () => {
     setPhoneWarningCustomer(null);
     if (window.history.state?.modal === 'phoneWarningCustomer') {
+      window.history.back();
+    }
+  };
+
+  const closeCcPdfChoiceModal = () => {
+    setIsCcPdfChoiceOpen(false);
+    if (window.history.state?.modal === 'ccPdfChoice') {
       window.history.back();
     }
   };
@@ -1560,18 +1602,23 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     }
   };
 
-  const handleGenerateReceiptImage = async () => {
+  const handleGenerateReceiptImage = async (statementType: 'billed' | 'unbilled' = 'billed') => {
     if (!selectedCustomer) return;
     setIsGeneratingReceipt(true);
     triggerHaptic('single');
 
     try {
       if (selectedCustomer.accountType === 'credit_card') {
+        const statementTxs =
+          statementType === 'unbilled'
+            ? creditCardCycleData?.unbilledTxs || []
+            : creditCardCycleData?.billedTxs || [];
         const result = await generateCreditCardStatementPdf(
           selectedCustomer,
-          creditCardCycleData?.billedTxs || [],
+          statementTxs,
           creditCardCycleData,
-          lang
+          lang,
+          statementType
         );
         setReceiptResult(result);
       } else {
@@ -1924,11 +1971,10 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       }
     }
 
-    // If adding a bill into Last Month's Billed cycle on a Credit Card ledger, timestamp it strictly newer than existing billed entries inside that closed cycle so it always lands on top
+    // If adding a bill or card payment into Last Month's Billed cycle on a Credit Card ledger, timestamp it strictly newer than existing billed entries inside that closed cycle so it always lands on top
     let txDate = new Date();
     if (
       selectedCustomer?.accountType === 'credit_card' &&
-      openActionType === 'due' &&
       actionTargetCycle === 'billed' &&
       creditCardCycleData
     ) {
@@ -2484,12 +2530,19 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
         type="button"
         onClick={() => {
           triggerHaptic('single');
-          handleGenerateReceiptImage();
+          if (selectedCustomer.accountType === 'credit_card') {
+            try {
+              window.history.pushState({ ...window.history.state, modal: 'ccPdfChoice' }, '');
+            } catch {}
+            setIsCcPdfChoiceOpen(true);
+          } else {
+            handleGenerateReceiptImage();
+          }
         }}
         disabled={isGeneratingReceipt}
         className="w-9 h-9 bg-slate-100/80 hover:bg-slate-200/80 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] text-slate-700 dark:text-slate-200 border border-slate-200/70 dark:border-white/[0.08] rounded-full transition-colors cursor-pointer flex items-center justify-center touch-press"
         title={selectedCustomer.accountType === 'credit_card'
-          ? (lang === 'bn' ? 'বিল্ড স্টেটমেন্ট PDF ডাউনলোড করুন' : 'Generate Billed Statement PDF')
+          ? (lang === 'bn' ? 'স্টেটমেন্ট PDF ডাউনলোড করুন' : 'Generate Statement PDF')
           : (lang === 'bn' ? 'রসিদ ইমেজ তৈরি ও ডাউনলোড করুন' : 'Generate & Download Receipt Image')}
       >
         {isGeneratingReceipt ? (
@@ -2846,74 +2899,71 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  {/* CURRENT BALANCE CARD + SUBTLE LEFT ELLIPSIS TOGGLE FOR TOTAL BILLED & TOTAL PAID */}
  <div className="pt-3 border-t border-slate-900/[0.06] dark:border-white/[0.06] space-y-3 relative z-10">
    {/* Neutral Total Outstanding Box */}
-   <div className="p-4 sm:p-5 rounded-2xl border border-slate-200/70 dark:border-white/[0.08] surface-subcard flex flex-col gap-1.5">
-     <div className="flex items-center justify-between gap-3">
-       {/* Subtle Circle-Ellipsis Button on the left */}
-       <button
-         type="button"
-         onClick={() => {
-           triggerHaptic('single');
-           setShowExtraBalanceCards(prev => !prev);
-         }}
-         className={`w-9 h-9 rounded-full transition-colors cursor-pointer shrink-0 flex items-center justify-center touch-press ${
-           showExtraBalanceCards
-             ? 'text-slate-950 dark:text-white bg-slate-200/80 dark:bg-white/[0.12]'
-             : 'text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-white/[0.08]'
-         }`}
-         title={showExtraBalanceCards ? (lang === 'bn' ? 'মোট বিবরণ লুকান' : 'Hide totals') : (lang === 'bn' ? 'মোট বকেয়া ও আদায় দেখুন' : 'Show Total Billed & Total Paid')}
-         aria-expanded={showExtraBalanceCards}
-         aria-label={showExtraBalanceCards ? (lang === 'bn' ? 'মোট বিবরণ লুকান' : 'Hide totals') : (lang === 'bn' ? 'মোট বকেয়া ও আদায় দেখুন' : 'Show Total Billed & Total Paid')}
-       >
-         <CircleEllipsis className="w-4.5 h-4.5 stroke-[1.25]" />
-       </button>
+   <div className="p-4 sm:p-5 rounded-2xl border border-slate-200/70 dark:border-white/[0.08] surface-subcard flex items-center justify-between gap-2 sm:gap-3">
+     {/* Subtle Circle-Ellipsis Button centered vertically on the left */}
+     <button
+       type="button"
+       onClick={() => {
+         triggerHaptic('single');
+         setShowExtraBalanceCards(prev => !prev);
+       }}
+       className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full transition-colors cursor-pointer shrink-0 flex items-center justify-center touch-press ${
+         showExtraBalanceCards
+           ? 'text-slate-950 dark:text-white bg-slate-200/80 dark:bg-white/[0.12]'
+           : 'text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-white/[0.08]'
+       }`}
+       title={showExtraBalanceCards ? (lang === 'bn' ? 'মোট বিবরণ লুকান' : 'Hide totals') : (lang === 'bn' ? 'মোট বকেয়া ও আদায় দেখুন' : 'Show Total Billed & Total Paid')}
+       aria-expanded={showExtraBalanceCards}
+       aria-label={showExtraBalanceCards ? (lang === 'bn' ? 'মোট বিবরণ লুকান' : 'Hide totals') : (lang === 'bn' ? 'মোট বকেয়া ও আদায় দেখুন' : 'Show Total Billed & Total Paid')}
+     >
+       <CircleEllipsis className="w-4.5 h-4.5 stroke-[1.25]" />
+     </button>
 
-       <div className="space-y-1.5 min-w-0 flex-1 text-right">
-         <span className={`block ${lang === 'bn' ? 'text-xs font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}`}>
-           {selectedCustomer.accountType === 'credit_card'
-             ? (lang === 'bn' ? 'মোট বকেয়া কার্ড ব্যালেন্স' : 'Total Outstanding Card Balance')
-             : lang === 'bn'
-               ? (selectedCustomer.outstandingDue > 0
-                   ? 'বর্তমান ব্যালেন্স (বকেয়া)'
-                   : selectedCustomer.outstandingDue < 0
-                   ? 'বর্তমান ব্যালেন্স (অগ্রিম)'
-                   : t.currentBalance)
-               : t.currentBalance}
-         </span>
-         <div className={`font-display text-3xl sm:text-4xl leading-none font-black tabular-nums tracking-tight ${
-           selectedCustomer.outstandingDue > 0
-             ? 'text-ledger-red'
-             : selectedCustomer.outstandingDue < 0
-             ? 'text-ledger-green'
-             : 'text-slate-500 dark:text-slate-400'
-         }`}>
-           {selectedCustomer.outstandingDue === 0
-             ? `৳ ${lang === 'bn' ? '০ (পরিশোধিত)' : '0 (Settled)'}`
-             : `${selectedCustomer.outstandingDue < 0 ? '-' : ''}৳ ${formatNumber(Math.abs(selectedCustomer.outstandingDue), lang)}`}
-         </div>
-       </div>
-     </div>
-
-     <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium leading-snug text-right whitespace-nowrap truncate">
-       {selectedCustomer.accountType === 'credit_card' ? (
+     <div className="space-y-1.5 min-w-0 flex-1 text-right">
+       <span className={`block ${lang === 'bn' ? 'text-xs font-bold text-slate-500 dark:text-slate-400 tracking-normal' : 'micro-mono-label text-slate-500 dark:text-slate-400 font-bold'}`}>
+         {selectedCustomer.accountType === 'credit_card'
+           ? (lang === 'bn' ? 'মোট বকেয়া কার্ড ব্যালেন্স' : 'Total Outstanding Card Balance')
+           : lang === 'bn'
+             ? (selectedCustomer.outstandingDue > 0
+                 ? 'বর্তমান ব্যালেন্স (বকেয়া)'
+                 : selectedCustomer.outstandingDue < 0
+                 ? 'বর্তমান ব্যালেন্স (অগ্রিম)'
+                 : t.currentBalance)
+             : t.currentBalance}
+       </span>
+       <div className={`font-display text-3xl sm:text-4xl leading-none font-black tabular-nums tracking-tight ${
          selectedCustomer.outstandingDue > 0
-           ? (creditCardCycleData && creditCardCycleData.unpaidCarryOver > 0
-               ? (lang === 'bn'
-                   ? `${creditCardCycleData.lastStatementDate.toLocaleDateString('bn-BD', { month: 'short', day: 'numeric' })}-এ বিল্ড হওয়া ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'bn')} অন্তর্ভুক্ত`
-                   : `Includes ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'en')} moved to Billed on ${creditCardCycleData.lastStatementDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`)
-               : (lang === 'bn'
-                   ? `${creditCardCycleData ? creditCardCycleData.nextStatementDate.toLocaleDateString('bn-BD', { month: 'short', day: 'numeric' }) : ''}-এর আগে আনবিল্ড (বিলিং দিনে বিল্ড হবে)`
-                   : `Unbilled before ${creditCardCycleData ? creditCardCycleData.nextStatementDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'billing date'} (bills on billing day)`))
+           ? 'text-ledger-red'
            : selectedCustomer.outstandingDue < 0
-           ? (lang === 'bn' ? 'কার্ডে অতিরিক্ত ক্রেডিট ব্যালেন্স আছে' : 'Extra credit balance on card')
-           : (lang === 'bn' ? 'সব কার্ড বিল পরিশোধিত' : 'All card bills settled')
-       ) : (
-         selectedCustomer.outstandingDue > 0 
-           ? t.customerOwes 
-           : selectedCustomer.outstandingDue < 0 
-           ? t.youOweCustomer 
-           : t.allClear
-       )}
-     </p>
+           ? 'text-ledger-green'
+           : 'text-slate-500 dark:text-slate-400'
+       }`}>
+         {selectedCustomer.outstandingDue === 0
+           ? `৳ ${lang === 'bn' ? '০ (পরিশোধিত)' : '0 (Settled)'}`
+           : `${selectedCustomer.outstandingDue < 0 ? '-' : ''}৳ ${formatNumber(Math.abs(selectedCustomer.outstandingDue), lang)}`}
+       </div>
+       <p className="text-[10.5px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium leading-snug tracking-[-0.01em] whitespace-nowrap truncate">
+         {selectedCustomer.accountType === 'credit_card' ? (
+           selectedCustomer.outstandingDue > 0
+             ? (creditCardCycleData && creditCardCycleData.unpaidCarryOver > 0
+                 ? (lang === 'bn'
+                     ? `${creditCardCycleData.lastStatementDate.toLocaleDateString('bn-BD', { month: 'short', day: 'numeric' })}-এ বিল্ড হওয়া ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'bn')} অন্তর্ভুক্ত`
+                     : `Includes ৳${formatNumber(creditCardCycleData.unpaidCarryOver, 'en')} moved to Billed on ${creditCardCycleData.lastStatementDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`)
+                 : (lang === 'bn'
+                     ? `${creditCardCycleData ? creditCardCycleData.nextStatementDate.toLocaleDateString('bn-BD', { month: 'short', day: 'numeric' }) : ''}-এর আগে আনবিল্ড (বিলিং দিনে বিল্ড হবে)`
+                     : `Unbilled before ${creditCardCycleData ? creditCardCycleData.nextStatementDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'billing date'} (bills on billing day)`))
+             : selectedCustomer.outstandingDue < 0
+             ? (lang === 'bn' ? 'কার্ডে অতিরিক্ত ক্রেডিট ব্যালেন্স আছে' : 'Extra credit balance on card')
+             : (lang === 'bn' ? 'সব কার্ড বিল পরিশোধিত' : 'All card bills settled')
+         ) : (
+           selectedCustomer.outstandingDue > 0 
+             ? t.customerOwes 
+             : selectedCustomer.outstandingDue < 0 
+             ? t.youOweCustomer 
+             : t.allClear
+         )}
+       </p>
+     </div>
    </div>
 
    {/* Expanded Telemetry Panel: Lifetime Total Billed & Total Paid */}
@@ -3242,11 +3292,13 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
  </div>
 
  <form onSubmit={handleAddInlineTransaction} className="space-y-4">
- {/* Compact Inline Cycle Selector for Credit Card bill expenses */}
- {selectedCustomer.accountType === 'credit_card' && openActionType === 'due' && (
+ {/* Compact Inline Cycle Selector for Credit Card expenses & payments */}
+ {selectedCustomer.accountType === 'credit_card' && (
    <div className="flex items-center justify-between gap-2 px-1 py-0.5">
      <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
-       {lang === 'bn' ? 'কোন বিলিং সাইকেলে যুক্ত করবেন?' : 'Add bill to which statement cycle?'}
+       {openActionType === 'payment'
+         ? (lang === 'bn' ? 'কোন বিলিং সাইকেলে পরিশোধ করবেন?' : 'Apply payment to which statement cycle?')
+         : (lang === 'bn' ? 'কোন বিলিং সাইকেলে যুক্ত করবেন?' : 'Add bill to which statement cycle?')}
      </span>
      <div className="flex items-center gap-1 p-0.5 rounded-full bg-slate-200/60 dark:bg-white/[0.06] shrink-0">
        <button
@@ -4703,7 +4755,9 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               <div className="min-w-0">
                 <h3 className="font-display font-bold text-sm text-slate-950 dark:text-white truncate">
                   {receiptResult.kind === 'pdf'
-                    ? (lang === 'bn' ? 'বিল্ড কার্ড স্টেটমেন্ট (PDF)' : 'Billed Card Statement (PDF)')
+                    ? receiptResult.statementType === 'unbilled'
+                      ? (lang === 'bn' ? 'আনবিল্ড কার্ড স্টেটমেন্ট (PDF)' : 'Unbilled Card Statement (PDF)')
+                      : (lang === 'bn' ? 'বিল্ড কার্ড স্টেটমেন্ট (PDF)' : 'Billed Card Statement (PDF)')
                     : (lang === 'bn' ? 'ডিজিটাল রসিদ স্লিপ' : 'Digital Receipt Slip')}
                 </h3>
                 <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400 truncate">
@@ -4834,6 +4888,103 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           </div>
         </div>
       </div>
+      </div>
+    </ModalPortal>
+  )}
+
+  {/* Credit Card PDF Statement Cycle Choice Modal */}
+  {isCcPdfChoiceOpen && selectedCustomer && selectedCustomer.accountType === 'credit_card' && (
+    <ModalPortal lockScroll={false}>
+      <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 no-select overflow-hidden">
+        <div
+          className="animate-backdrop-blur absolute inset-0 bg-slate-950/60 dark:bg-black/75"
+          onClick={closeCcPdfChoiceModal}
+        />
+        <div
+          onClick={(e) => e.stopPropagation()}
+          role="dialog"
+          aria-modal="true"
+          aria-label={lang === 'bn' ? 'কোন স্টেটমেন্ট PDF তৈরি করবেন?' : 'Choose Statement PDF'}
+          className="animate-slide-up relative z-10 glass-modal w-full sm:max-w-sm rounded-t-[2rem] sm:rounded-3xl shadow-2xl border overflow-hidden flex flex-col"
+        >
+          <div className="sm:hidden pt-3 flex justify-center shrink-0">
+            <div className="w-10 h-1 bg-slate-400/40 dark:bg-white/20 rounded-full mx-auto" />
+          </div>
+
+          <div className="p-4 sm:p-5 border-b border-slate-900/[0.06] dark:border-white/[0.06] flex items-center justify-between gap-3 shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-full surface-subcard border flex items-center justify-center shrink-0 text-slate-900 dark:text-white">
+                <FileText className="w-4 h-4 stroke-[1.5]" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="font-display text-base font-bold text-slate-950 dark:text-white truncate">
+                  {lang === 'bn' ? 'কোন স্টেটমেন্ট PDF চান?' : 'Which statement PDF?'}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                  {selectedCustomer.name}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={closeCcPdfChoiceModal}
+              aria-label="Close"
+              className="w-8 h-8 bg-slate-100/80 hover:bg-slate-200 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] border border-slate-200/70 dark:border-white/[0.08] rounded-full text-slate-600 dark:text-slate-300 cursor-pointer transition-colors flex items-center justify-center touch-press shrink-0"
+            >
+              <X className="w-4 h-4 stroke-[1.5]" />
+            </button>
+          </div>
+
+          <div className="p-4 sm:p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pb-5 space-y-2.5">
+            <button
+              type="button"
+              onClick={() => {
+                setIsCcPdfChoiceOpen(false);
+                if (window.history.state?.modal === 'ccPdfChoice') {
+                  window.history.back();
+                }
+                handleGenerateReceiptImage('billed');
+              }}
+              className="w-full p-4 rounded-2xl surface-subcard hover:bg-slate-900/[0.04] dark:hover:bg-white/[0.06] border border-slate-200/80 dark:border-white/[0.1] flex items-center justify-between gap-3 text-left transition-colors cursor-pointer touch-press"
+            >
+              <div className="min-w-0 space-y-0.5">
+                <div className="text-sm font-bold text-slate-950 dark:text-white">
+                  {lang === 'bn' ? 'বিল্ড স্টেটমেন্ট (Billed)' : 'Billed Statement'}
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {formatNumber(creditCardCycleData?.billedTxs.length || 0, lang)}{' '}
+                  {lang === 'bn' ? 'টি এন্ট্রি · পরিশোধযোগ্য' : 'entries · Unpaid'}{' '}
+                  ৳{formatNumber(creditCardCycleData?.unpaidCarryOver ?? 0, lang)}
+                </p>
+              </div>
+              <FileText className="w-4.5 h-4.5 text-slate-500 dark:text-slate-400 shrink-0 stroke-[1.5]" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setIsCcPdfChoiceOpen(false);
+                if (window.history.state?.modal === 'ccPdfChoice') {
+                  window.history.back();
+                }
+                handleGenerateReceiptImage('unbilled');
+              }}
+              className="w-full p-4 rounded-2xl surface-subcard hover:bg-slate-900/[0.04] dark:hover:bg-white/[0.06] border border-slate-200/80 dark:border-white/[0.1] flex items-center justify-between gap-3 text-left transition-colors cursor-pointer touch-press"
+            >
+              <div className="min-w-0 space-y-0.5">
+                <div className="text-sm font-bold text-slate-950 dark:text-white">
+                  {lang === 'bn' ? 'আনবিল্ড স্টেটমেন্ট (Unbilled)' : 'Unbilled Statement'}
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {formatNumber(creditCardCycleData?.unbilledTxs.length || 0, lang)}{' '}
+                  {lang === 'bn' ? 'টি এন্ট্রি · চলমান' : 'entries · Current'}{' '}
+                  ৳{formatNumber(creditCardCycleData?.netUnbilledThisMonth ?? 0, lang)}
+                </p>
+              </div>
+              <FileText className="w-4.5 h-4.5 text-emerald-600 dark:text-emerald-400 shrink-0 stroke-[1.5]" />
+            </button>
+          </div>
+        </div>
       </div>
     </ModalPortal>
   )}

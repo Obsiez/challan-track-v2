@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Customer, UserSettings, ImportProgress, Transaction, UserTagConfig } from '../types';
 import { 
-  Moon, Sun, Cloud, Download, Upload, LogOut, CheckCircle2, Languages, AlertTriangle, X, RotateCcw, Trash2, Contrast, Clock, RefreshCw, Palette, Check, Pipette, Fingerprint, Archive, Lock, FileSpreadsheet, Sliders, Minus, Plus, Keyboard, Vibrate, MoveHorizontal, Volume2, Search, SquarePen, Bell, CircleDotDashed, ChartPie, Grid2X2, Gauge, ChevronRight
+  Moon, Sun, Cloud, Download, Upload, LogOut, CheckCircle2, Languages, AlertTriangle, X, RotateCcw, Trash2, Contrast, Clock, RefreshCw, Palette, Check, Pipette, Fingerprint, Archive, Lock, FileSpreadsheet, Sliders, Minus, Plus, Keyboard, Vibrate, MoveHorizontal, Volume2, Search, SquarePen, Bell, GraphStar, ChartPie, Grid2X2, Gauge, ChevronRight
 } from 'lucide-react';
 import { isPhoneticSearchEnabled, setPhoneticSearchEnabled } from '../lib/phonetics';
 import {
@@ -1188,7 +1188,7 @@ const SettingsManager = React.memo(function SettingsManager({
                 >
                   <div className="min-w-0">
                     <h2 className="font-display text-sm font-bold text-slate-950 dark:text-white flex items-center gap-2">
-                      <CircleDotDashed className="w-4 h-4 stroke-[1.25]" />
+                      <GraphStar className="w-4 h-4 stroke-[1.25]" />
                       <span>{lang === 'bn' ? 'ট্যাগ ব্যবস্থাপনা' : 'Manage Tags'}</span>
                     </h2>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">

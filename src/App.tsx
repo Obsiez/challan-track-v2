@@ -441,14 +441,30 @@ const MobileBottomDock = React.memo(({
           }}
         />
 
-        {/* Pure Compositor Morphing Glass Capsule: Stationary Left Clipper + Inverse-Shifted Backdrop + Right Semicircle Clipper */}
+        {/* Pure Compositor Morphing Glass Capsule: Direct rounded clip-path on backdrop-filter eliminates Chromium square corner halo */}
+        <div
+          aria-hidden="true"
+          className="glass-chrome-bottom pointer-events-none absolute left-0 top-0 h-[56px] rounded-full"
+          style={{
+            width: `${dockWidth}px`,
+            clipPath: `inset(0px ${capsuleShrinkOffset.toFixed(2)}px 0px 0px round 28px)`,
+            WebkitClipPath: `inset(0px ${capsuleShrinkOffset.toFixed(2)}px 0px 0px round 28px)`,
+            transform: 'translate3d(0, 0, 0)',
+            willChange: 'clip-path, transform',
+            backfaceVisibility: 'hidden',
+            WebkitBackfaceVisibility: 'hidden',
+            transition: reducedMotion
+              ? 'none'
+              : `clip-path ${navDurationMs}ms ${capsuleMorphEasing} ${navDelayMs}ms`,
+          }}
+        />
         <div
           aria-hidden="true"
           className="pointer-events-none absolute left-0 top-0 h-[56px] rounded-full overflow-hidden"
           style={{ width: `${dockWidth}px` }}
         >
           <div
-            className="w-full h-full rounded-full overflow-hidden relative"
+            className="w-full h-full relative"
             style={{
               transform: `translate3d(-${capsuleShrinkOffset.toFixed(2)}px, 0, 0)`,
               willChange: 'transform',
@@ -457,16 +473,6 @@ const MobileBottomDock = React.memo(({
               transition: capsuleTransformTransition,
             }}
           >
-            <div
-              className="glass-chrome-bottom w-full h-full rounded-full"
-              style={{
-                transform: `translate3d(${capsuleShrinkOffset.toFixed(2)}px, 0, 0)`,
-                willChange: 'transform',
-                backfaceVisibility: 'hidden',
-                WebkitBackfaceVisibility: 'hidden',
-                transition: capsuleTransformTransition,
-              }}
-            />
             <div
               className="pointer-events-none absolute right-0 top-0 bottom-0 w-[28px] overflow-hidden transition-opacity duration-150"
               style={{ opacity: showQuickEntryFab ? 1 : 0 }}

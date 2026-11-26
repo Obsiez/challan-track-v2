@@ -90,6 +90,7 @@ export interface TagMeta {
   isCustom?: boolean;
   logoDataUrl?: string | null;
   imageOnly?: boolean;
+  shared?: boolean;
   enabled?: boolean;
   type?: 'due' | 'payment';
 }
@@ -217,6 +218,7 @@ export const CUSTOM_TAG_COLORS = [
 export const DEFAULT_TAG_CONFIG: UserTagConfig = {
   disabledDueTags: [],
   disabledPaymentTags: [],
+  sharedDefaultTags: [],
   customTags: [],
 };
 
@@ -247,6 +249,7 @@ function customDefToMeta(def: CustomTagDefinition): TagMeta {
     isCustom: true,
     logoDataUrl: def.logoDataUrl || null,
     imageOnly: Boolean(def.imageOnly && def.logoDataUrl),
+    shared: Boolean(def.shared),
     enabled: Boolean(def.enabled),
     type: def.type,
   };
@@ -261,6 +264,7 @@ function isSafeLogoDataUrl(val: unknown): val is string {
 export function sanitizeTagConfig(raw?: Partial<UserTagConfig> | null): UserTagConfig {
   const rawDisabledDue = Array.isArray(raw?.disabledDueTags) ? raw!.disabledDueTags : [];
   const rawDisabledPayment = Array.isArray(raw?.disabledPaymentTags) ? raw!.disabledPaymentTags : [];
+  const rawSharedDefaults = Array.isArray(raw?.sharedDefaultTags) ? raw!.sharedDefaultTags : [];
   const rawCustom = Array.isArray(raw?.customTags) ? raw!.customTags : [];
 
   const disabledDueTags = Array.from(
@@ -276,6 +280,14 @@ export function sanitizeTagConfig(raw?: Partial<UserTagConfig> | null): UserTagC
       rawDisabledPayment
         .map((id) => String(id || '').toLowerCase().trim())
         .filter((id) => Boolean(PAYMENT_DEFAULT_MAP[id]))
+    )
+  );
+
+  const sharedDefaultTags = Array.from(
+    new Set(
+      rawSharedDefaults
+        .map((id) => String(id || '').toLowerCase().trim())
+        .filter((id) => id !== 'other' && Boolean(COMBINED_DEFAULT_MAP[id]))
     )
   );
 
@@ -312,6 +324,7 @@ export function sanitizeTagConfig(raw?: Partial<UserTagConfig> | null): UserTagC
       iconName: safeIconName,
       logoDataUrl: safeLogo,
       imageOnly: Boolean(item.imageOnly && safeLogo),
+      shared: Boolean(item.shared),
       enabled: item.enabled !== false,
       createdAt: item.createdAt || undefined,
       updatedAt: item.updatedAt || undefined,
@@ -360,6 +373,7 @@ export function sanitizeTagConfig(raw?: Partial<UserTagConfig> | null): UserTagC
   return {
     disabledDueTags,
     disabledPaymentTags,
+    sharedDefaultTags,
     customTags: [...finalDueCustoms, ...finalPaymentCustoms],
     updatedAt: typeof raw?.updatedAt === 'string' ? raw.updatedAt : undefined,
   };
@@ -522,15 +536,39 @@ export function getSortedTags(
   config: UserTagConfig = currentTagConfig
 ): TagMeta[] {
   const defaults = type === 'due' ? EXPENSE_TAGS : PAYMENT_TAGS;
-  const disabledSet = new Set(
+  const oppositeDefaults = type === 'due' ? PAYMENT_TAGS : EXPENSE_TAGS;
+  const ownDisabledSet = new Set(
     (type === 'due' ? config.disabledDueTags : config.disabledPaymentTags).map((id) => id.toLowerCase())
   );
-  const enabledDefaults = defaults.filter((d) => !disabledSet.has(d.id));
+  const oppositeDisabledSet = new Set(
+    (type === 'due' ? config.disabledPaymentTags : config.disabledDueTags).map((id) => id.toLowerCase())
+  );
+  const sharedDefaultSet = new Set(
+    (config.sharedDefaultTags || []).map((id) => id.toLowerCase())
+  );
+
+  const enabledDefaults = defaults.filter((d) => !ownDisabledSet.has(d.id.toLowerCase()));
   const enabledCustoms = config.customTags
     .filter((c) => c.type === type && c.enabled)
     .map(customDefToMeta);
 
-  const activeList = [...enabledDefaults, ...enabledCustoms].slice(0, TAG_LIMITS[type].maxEnabled);
+  const ownPrimaryList = [...enabledDefaults, ...enabledCustoms].slice(0, TAG_LIMITS[type].maxEnabled);
+  const seenIds = new Set(ownPrimaryList.map((t) => t.id.toLowerCase()));
+
+  const sharedCustoms = config.customTags
+    .filter((c) => c.type !== type && c.shared && c.enabled && !seenIds.has(c.id.toLowerCase()))
+    .map(customDefToMeta);
+  sharedCustoms.forEach((t) => seenIds.add(t.id.toLowerCase()));
+
+  const sharedDefaults = oppositeDefaults.filter(
+    (d) =>
+      d.id !== 'other' &&
+      sharedDefaultSet.has(d.id.toLowerCase()) &&
+      !oppositeDisabledSet.has(d.id.toLowerCase()) &&
+      !seenIds.has(d.id.toLowerCase())
+  );
+
+  const activeList = [...ownPrimaryList, ...sharedCustoms, ...sharedDefaults];
   const countMap: Record<string, number> = { ...getTagUsageCounts() };
 
   transactions.forEach((tx) => {
