@@ -426,14 +426,15 @@ const MobileBottomDock = React.memo(({
       style={{ transform: 'translate3d(0, 0, 0)', isolation: 'isolate', contain: 'layout style' }}
     >
       <div ref={dockRef} className="relative w-full max-w-[420px] h-[56px] flex items-center">
-        {/* Composited Outer Elevation Shadow (pure scaleX GPU transform — zero backdrop re-allocation) */}
+        {/* Composited Outer Elevation Shadow (centered under capsule so circular ends never show stretched corner glow) */}
         <div
           aria-hidden="true"
-          className="glass-chrome-bottom-shadow pointer-events-none absolute left-0 top-0 h-[56px] rounded-full"
+          className="glass-chrome-bottom-shadow pointer-events-none absolute top-0 h-[56px] rounded-full"
           style={{
-            width: `${dockWidth}px`,
+            left: '12px',
+            width: `${Math.max(120, dockWidth - 24)}px`,
             transformOrigin: 'left center',
-            transform: `translate3d(0, 0, 0) scaleX(${(activeDockWidth / dockWidth).toFixed(4)})`,
+            transform: `translate3d(0, 0, 0) scaleX(${(Math.max(120, activeDockWidth - 24) / Math.max(120, dockWidth - 24)).toFixed(4)})`,
             willChange: 'transform',
             backfaceVisibility: 'hidden',
             WebkitBackfaceVisibility: 'hidden',
@@ -441,7 +442,7 @@ const MobileBottomDock = React.memo(({
           }}
         />
 
-        {/* Pure Compositor Morphing Glass Capsule: Direct rounded clip-path on backdrop-filter eliminates Chromium square corner halo */}
+        {/* Pure Compositor Morphing Glass Capsule Backdrop */}
         <div
           aria-hidden="true"
           className="glass-chrome-bottom pointer-events-none absolute left-0 top-0 h-[56px] rounded-full"
@@ -458,13 +459,36 @@ const MobileBottomDock = React.memo(({
               : `clip-path ${navDurationMs}ms ${capsuleMorphEasing} ${navDelayMs}ms`,
           }}
         />
+
+        {/* Zero-Stretch 3-Part Capsule Hairline Border (True 28px circular caps + straight scaleX horizontal edges) */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute left-0 top-0 h-[56px] rounded-full overflow-hidden"
+          className="pointer-events-none absolute left-0 top-0 h-[56px]"
           style={{ width: `${dockWidth}px` }}
         >
+          {/* Left True 28px Semicircle */}
+          <div className="absolute left-0 top-0 bottom-0 w-[28px] overflow-hidden">
+            <div className="w-[56px] h-[56px] rounded-full border border-slate-950/[0.06] dark:border-white/[0.09]" />
+          </div>
+
+          {/* Center Straight Top & Bottom Borders (scaling straight lines preserves exact 1px stroke weight) */}
           <div
-            className="w-full h-full relative"
+            className="absolute top-0 bottom-0 border-t border-b border-slate-950/[0.06] dark:border-white/[0.09]"
+            style={{
+              left: '28px',
+              width: `${Math.max(1, dockWidth - 56)}px`,
+              transformOrigin: 'left center',
+              transform: `translate3d(0, 0, 0) scaleX(${(Math.max(1, activeDockWidth - 56) / Math.max(1, dockWidth - 56)).toFixed(4)})`,
+              willChange: 'transform',
+              backfaceVisibility: 'hidden',
+              WebkitBackfaceVisibility: 'hidden',
+              transition: capsuleTransformTransition,
+            }}
+          />
+
+          {/* Right True 28px Semicircle (translates cleanly with zero scaling) */}
+          <div
+            className="absolute right-0 top-0 bottom-0 w-[28px] overflow-hidden"
             style={{
               transform: `translate3d(-${capsuleShrinkOffset.toFixed(2)}px, 0, 0)`,
               willChange: 'transform',
@@ -473,12 +497,7 @@ const MobileBottomDock = React.memo(({
               transition: capsuleTransformTransition,
             }}
           >
-            <div
-              className="pointer-events-none absolute right-0 top-0 bottom-0 w-[28px] overflow-hidden transition-opacity duration-150"
-              style={{ opacity: showQuickEntryFab ? 1 : 0 }}
-            >
-              <div className="absolute right-0 top-0 bottom-0 w-[56px] rounded-full border border-slate-950/[0.06] dark:border-white/[0.08]" />
-            </div>
+            <div className="absolute right-0 top-0 bottom-0 w-[56px] rounded-full border border-slate-950/[0.06] dark:border-white/[0.09]" />
           </div>
         </div>
 

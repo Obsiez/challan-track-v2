@@ -8,7 +8,8 @@ import {
   Trash2,
   Pencil,
   EyeOff,
-  RotateCcw,
+  Grid2x2,
+  Grid3x3,
   AlertTriangle,
   Pipette,
   ArrowLeft,
@@ -60,6 +61,13 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
   onSaveTagConfig,
 }) => {
   const [activeTab, setActiveTab] = useState<'due' | 'payment'>('due');
+  const [isSingleColDefaults, setIsSingleColDefaults] = useState<boolean>(() => {
+    try {
+      return typeof localStorage === 'undefined' || localStorage.getItem('challan_manage_tags_cols_v2') !== '2';
+    } catch {
+      return true;
+    }
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [draft, setDraft] = useState<CustomTagDraft | null>(null);
   const [isIconPickerOpen, setIsIconPickerOpen] = useState(false);
@@ -577,14 +585,15 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
     );
   };
 
-  const handleResetDefaults = async () => {
-    triggerHaptic('single');
-    if (activeTab === 'due') {
-      await persistConfig({ ...tagConfig, disabledDueTags: [] });
-    } else {
-      await persistConfig({ ...tagConfig, disabledPaymentTags: [] });
-    }
-    toast.success(isBn ? 'ডিফল্ট ট্যাগগুলো চালু করা হয়েছে' : 'Default tags re-enabled');
+  const toggleDefaultGridLayout = () => {
+    triggerHaptic('tick');
+    setIsSingleColDefaults((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('challan_manage_tags_cols_v2', next ? '1' : '2');
+      } catch {}
+      return next;
+    });
   };
 
   const isPresetMatched = draft
@@ -624,8 +633,8 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
           </div>
 
           {/* Header */}
-          <div className="px-5 py-3.5 sm:py-4 border-b border-slate-900/[0.06] dark:border-white/[0.06] flex items-center justify-between shrink-0 gap-3">
-            <div className="flex items-center gap-3 min-w-0">
+          <div className="px-5 py-3.5 border-b border-slate-900/[0.06] dark:border-white/[0.06] flex items-center justify-between shrink-0 gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
               {draft ? (
                 <button
                   type="button"
@@ -634,21 +643,21 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                     closeDraftToManageList();
                   }}
                   aria-label={isBn ? 'ফিরে যান' : 'Back to tags'}
-                  className="w-9 h-9 rounded-full surface-subcard border flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.1] transition-colors cursor-pointer shrink-0 touch-press"
+                  className="w-8 h-8 rounded-full surface-subcard border flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.1] transition-colors cursor-pointer shrink-0 touch-press"
                 >
                   <ArrowLeft className="w-4 h-4 stroke-[1.75]" />
                 </button>
               ) : (
                 <div
-                  className="w-9 h-9 rounded-2xl surface-subcard border flex items-center justify-center shrink-0"
+                  className="w-8 h-8 rounded-full surface-subcard border flex items-center justify-center shrink-0"
                   aria-hidden="true"
                 >
-                  <GraphStar className="w-4.5 h-4.5 stroke-[1.6] text-slate-950 dark:text-white" />
+                  <GraphStar className="w-4 h-4 stroke-[1.6] text-slate-950 dark:text-white" />
                 </div>
               )}
 
-              <div className="min-w-0">
-                <h3 className="font-display text-base sm:text-lg font-bold text-slate-950 dark:text-white tracking-tight truncate">
+              <div className="min-w-0 flex items-center gap-2.5">
+                <h3 className="font-display text-base sm:text-[17px] font-bold text-slate-950 dark:text-white tracking-tight truncate">
                   {draft
                     ? draft.id
                       ? isBn
@@ -661,15 +670,17 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                     ? 'ট্যাগ পরিচালনা'
                     : 'Manage Tags'}
                 </h3>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-                  {draft
-                    ? isBn
-                      ? 'নাম, ব্র্যান্ড লোগো ও রঙ নির্ধারণ করুন'
-                      : 'Set label, brand logo & chart accent color'
-                    : isBn
-                    ? 'ডিফল্ট ট্যাগ চালু/বন্ধ করুন ও কাস্টম লোগো সাজান'
-                    : 'Toggle defaults, create custom tags & upload logos'}
-                </p>
+                {!draft && (
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold tabular-nums shrink-0 ${
+                      counts.enabledCount >= limits.maxEnabled
+                        ? 'bg-amber-500/12 text-amber-700 dark:text-amber-300'
+                        : 'surface-subcard text-slate-600 dark:text-slate-300'
+                    }`}
+                  >
+                    {formatNumber(counts.enabledCount, lang)}/{formatNumber(limits.maxEnabled, lang)}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -679,20 +690,20 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                 triggerHaptic('medium');
                 closeModalCleanly();
               }}
-              className="w-9 h-9 rounded-full bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-600 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer shrink-0 touch-press"
+              className="w-8 h-8 rounded-full bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-600 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer shrink-0 touch-press"
               aria-label="Close"
             >
               <X className="w-4 h-4 stroke-[1.5]" />
             </button>
           </div>
 
-          {/* Segmented Switcher, Capacity Meter & Search Bar */}
+          {/* Clean Streamlined Switcher + Search/Action Row */}
           {!draft && (
-            <div className="px-5 pt-3.5 pb-3 border-b border-slate-900/[0.06] dark:border-white/[0.06] space-y-3 shrink-0">
-              <div className="relative grid grid-cols-2 p-1 rounded-full bg-slate-900/[0.05] dark:bg-white/[0.05] border border-slate-900/[0.08] dark:border-white/[0.09]">
+            <div className="px-5 py-3 border-b border-slate-900/[0.06] dark:border-white/[0.06] space-y-2.5 shrink-0">
+              <div className="relative grid grid-cols-2 p-0.5 rounded-full bg-slate-900/[0.05] dark:bg-white/[0.05] border border-slate-900/[0.07] dark:border-white/[0.08]">
                 <div
                   aria-hidden="true"
-                  className="pointer-events-none absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-slate-950 dark:bg-white shadow-sm will-change-transform transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+                  className="pointer-events-none absolute top-0.5 bottom-0.5 left-0.5 w-[calc(50%-2px)] rounded-full bg-slate-950 dark:bg-white shadow-xs will-change-transform transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
                   style={{
                     transform: `translate3d(${activeTab === 'payment' ? '100%' : '0%'}, 0, 0)`,
                   }}
@@ -703,7 +714,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                     triggerHaptic('tick');
                     setActiveTab('due');
                   }}
-                  className={`relative z-10 py-2 px-3 rounded-full text-xs font-bold cursor-pointer transition-colors ${
+                  className={`relative z-10 py-1.5 px-3 rounded-full text-xs font-bold cursor-pointer transition-colors ${
                     activeTab === 'due'
                       ? 'text-white dark:text-slate-950'
                       : 'text-slate-600 dark:text-slate-300'
@@ -717,7 +728,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                     triggerHaptic('tick');
                     setActiveTab('payment');
                   }}
-                  className={`relative z-10 py-2 px-3 rounded-full text-xs font-bold cursor-pointer transition-colors ${
+                  className={`relative z-10 py-1.5 px-3 rounded-full text-xs font-bold cursor-pointer transition-colors ${
                     activeTab === 'payment'
                       ? 'text-white dark:text-slate-950'
                       : 'text-slate-600 dark:text-slate-300'
@@ -727,72 +738,42 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                 </button>
               </div>
 
-              {/* Tabular-nums Capacity Readout + Hairline Bar */}
-              <div className="space-y-1.5 px-0.5">
-                <div className="flex items-center justify-between text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400">
-                  <span>
-                    {isBn ? 'সক্রিয়' : 'Enabled'}:{' '}
-                    <strong
-                      className={
-                        counts.enabledCount >= limits.maxEnabled
-                          ? 'text-amber-600 dark:text-amber-400'
-                          : 'text-slate-950 dark:text-white'
-                      }
-                    >
-                      {formatNumber(counts.enabledCount, lang)} / {formatNumber(limits.maxEnabled, lang)}
-                    </strong>
-                  </span>
-                  <span>
-                    {isBn ? 'মোট স্লট' : 'Total Slots'}:{' '}
-                    <strong
-                      className={
-                        counts.totalCount >= limits.maxTotal
-                          ? 'text-amber-600 dark:text-amber-400'
-                          : 'text-slate-950 dark:text-white'
-                      }
-                    >
-                      {formatNumber(counts.totalCount, lang)} / {formatNumber(limits.maxTotal, lang)}
-                    </strong>
-                  </span>
-                </div>
-                <div className="h-1.5 w-full rounded-full bg-slate-900/[0.06] dark:bg-white/[0.07] overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-300 ease-out"
-                    style={{
-                      width: `${slotFillPercent}%`,
-                      backgroundColor:
-                        counts.enabledCount >= limits.maxEnabled ? '#F59E0B' : 'var(--accent-color)',
-                    }}
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1 min-w-0">
+                  <Search className="w-3.5 h-3.5 stroke-[1.75] text-slate-400 dark:text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder={isBn ? 'ট্যাগ খুঁজুন...' : 'Search tags...'}
+                    className="w-full h-9 pl-8.5 pr-8 rounded-full border border-slate-900/[0.08] dark:border-white/[0.09] bg-slate-900/[0.03] dark:bg-white/[0.04] text-xs font-medium text-slate-950 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--accent-color)]/35 transition-shadow"
                   />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      aria-label={isBn ? 'খোঁজা মুছুন' : 'Clear search'}
+                      className="w-6 h-6 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-white absolute right-1.5 top-1/2 -translate-y-1/2 cursor-pointer"
+                    >
+                      <X className="w-3 h-3 stroke-[1.75]" />
+                    </button>
+                  )}
                 </div>
-              </div>
-
-              {/* Quick Filter Search */}
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 stroke-[1.75] text-slate-400 dark:text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={isBn ? 'ট্যাগের নাম দিয়ে খুঁজুন...' : 'Filter tags by name...'}
-                  className="w-full pl-9 pr-9 py-2 rounded-2xl border border-slate-900/[0.08] dark:border-white/[0.09] bg-slate-900/[0.03] dark:bg-white/[0.04] text-xs font-medium text-slate-950 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--accent-color)]/35 transition-shadow"
-                />
-                {searchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchQuery('')}
-                    aria-label={isBn ? 'খোঁজা মুছুন' : 'Clear search'}
-                    className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-white absolute right-1.5 top-1/2 -translate-y-1/2 cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5 stroke-[1.75]" />
-                  </button>
-                )}
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={openCreateForm}
+                  className="h-9 px-3.5 rounded-full bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors touch-press disabled:opacity-50 shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5 stroke-[2]" />
+                  <span>{isBn ? 'নতুন ট্যাগ' : 'Create Tag'}</span>
+                </button>
               </div>
             </div>
           )}
 
           {/* Scrollable Body */}
-          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain hide-scrollbar p-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] space-y-5">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain hide-scrollbar px-5 py-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] space-y-4">
             {draft ? (
               <form onSubmit={handleSaveDraft} className="space-y-4">
                 {/* Live Preview */}
@@ -933,7 +914,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
 
                       <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                         {logoInfo
-                          ? `${logoInfo.width}×${logoInfo.height}px · ${(logoInfo.byteSize / 1024).toFixed(1)} KB`
+                          ? `${logoInfo.width}×${logoInfo.height}px (${(logoInfo.byteSize / 1024).toFixed(1)} KB)`
                           : draft.logoDataUrl
                           ? isBn
                             ? 'কাস্টম লোগো যুক্ত আছে'
@@ -1046,7 +1027,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                     </span>
                     <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400 tabular-nums">
                       {autoPickedHex && autoPickedHex.toLowerCase() === draft.color.toLowerCase()
-                        ? `${isBn ? 'ছবি থেকে স্বয়ংক্রিয়' : 'Auto-picked'} · ${draft.color}`
+                        ? `${isBn ? 'ছবি থেকে স্বয়ংক্রিয়' : 'Auto-picked'} (${draft.color})`
                         : draft.color}
                     </span>
                   </div>
@@ -1135,92 +1116,59 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
             ) : (
               <>
                 {/* Custom Tags Section */}
-                <div className="space-y-2.5">
+                <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2 px-0.5">
                     <span className={isBn ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400' : 'micro-mono-label font-semibold'}>
                       {isBn ? 'কাস্টম ট্যাগ' : 'Custom Tags'} ({formatNumber(customTagsForTab.length, lang)})
                     </span>
-                    <button
-                      type="button"
-                      disabled={saving}
-                      onClick={openCreateForm}
-                      className="h-9 px-3.5 rounded-full bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors touch-press disabled:opacity-50"
-                    >
-                      <Plus className="w-3.5 h-3.5 stroke-[2]" />
-                      <span>{isBn ? 'নতুন ট্যাগ' : 'Create Tag'}</span>
-                    </button>
+                    <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500 tabular-nums">
+                      {formatNumber(counts.totalCount, lang)}/{formatNumber(limits.maxTotal, lang)} {isBn ? 'স্লট' : 'slots'}
+                    </span>
                   </div>
 
                   {counts.totalCount >= limits.maxTotal && (
-                    <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-800 dark:text-amber-200 flex items-center gap-2 font-medium">
+                    <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-800 dark:text-amber-200 flex items-center gap-2 font-medium">
                       <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                       <span>
                         {isBn
-                          ? `মোট ${formatNumber(limits.maxTotal, 'bn')}টি ট্যাগের সর্বোচ্চ সীমা পূর্ণ হয়েছে। নতুন যোগ করতে একটি কাস্টম ট্যাগ মুছুন।`
-                          : `Maximum ${limits.maxTotal} total tags reached for this type. Delete a custom tag to add another.`}
+                          ? `সর্বোচ্চ ${formatNumber(limits.maxTotal, 'bn')}টি ট্যাগের সীমা পূর্ণ।`
+                          : `Maximum ${limits.maxTotal} tags reached. Delete one to add another.`}
                       </span>
                     </div>
                   )}
 
                   {customTagsForTab.length === 0 ? (
-                    <div className="p-5 rounded-2xl surface-subcard border flex flex-col items-center text-center gap-2.5">
-                      <div className="w-10 h-10 rounded-2xl bg-slate-900/[0.04] dark:bg-white/[0.06] border border-slate-900/[0.06] dark:border-white/[0.08] flex items-center justify-center text-slate-950 dark:text-white">
-                        <GraphStar className="w-4.5 h-4.5 stroke-[1.5]" />
-                      </div>
-                      <div className="space-y-0.5 max-w-xs">
-                        <p className="text-xs font-bold text-slate-900 dark:text-white">
-                          {isBn ? 'কোনো কাস্টম ট্যাগ নেই' : 'No custom tags yet'}
-                        </p>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                          {isBn
-                            ? 'ব্র্যান্ড লোগো ও আলাদা রঙ দিয়ে আপনার নিজস্ব ট্যাগ তৈরি করুন।'
-                            : 'Create custom tags with brand logos and auto-matched accent colors.'}
-                        </p>
-                      </div>
-                      {counts.totalCount < limits.maxTotal && (
-                        <button
-                          type="button"
-                          onClick={openCreateForm}
-                          className="h-9 px-4 rounded-full surface-glass-interactive border text-xs font-bold text-slate-900 dark:text-white inline-flex items-center gap-1.5 cursor-pointer touch-press"
-                        >
-                          <Plus className="w-3.5 h-3.5 stroke-[2]" />
-                          <span>{isBn ? 'প্রথম ট্যাগ তৈরি করুন' : 'Create First Tag'}</span>
-                        </button>
-                      )}
-                    </div>
+                    <button
+                      type="button"
+                      onClick={counts.totalCount < limits.maxTotal ? openCreateForm : undefined}
+                      className="w-full px-3.5 py-3 rounded-2xl surface-subcard border-2 border-dashed !border-slate-900/35 dark:!border-white/35 flex items-center justify-between gap-3 text-left hover:bg-slate-900/[0.03] dark:hover:bg-white/[0.04] transition-colors cursor-pointer"
+                    >
+                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400 truncate">
+                        {isBn ? 'কোনো কাস্টম ট্যাগ নেই, নতুন যোগ করুন' : 'No custom tags yet — add with icon or logo'}
+                      </span>
+                      <Plus className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 shrink-0" />
+                    </button>
                   ) : filteredCustomTags.length === 0 ? (
-                    <div className="p-4 rounded-2xl surface-subcard border text-center text-xs text-slate-500 dark:text-slate-400">
+                    <div className="p-3 rounded-2xl surface-subcard border text-center text-xs text-slate-500 dark:text-slate-400">
                       {isBn ? 'খোঁজা অনুযায়ী কোনো কাস্টম ট্যাগ মেলেনি' : 'No matching custom tags'}
                     </div>
                   ) : (
                     <div className="divide-y divide-slate-900/[0.06] dark:divide-white/[0.06] surface-subcard border rounded-2xl overflow-hidden">
                       {filteredCustomTags.map((tag) => {
-                        const modeLabel =
-                          tag.imageOnly && tag.logoDataUrl
-                            ? isBn
-                              ? 'শুধু লোগো'
-                              : 'Image-only chip'
-                            : tag.logoDataUrl
-                            ? isBn
-                              ? 'লোগো + নাম'
-                              : 'Logo + Name'
-                            : isBn
-                            ? 'কাস্টম'
-                            : 'Custom';
                         return (
                           <div
                             key={tag.id}
-                            className={`px-3.5 py-3 flex items-center justify-between gap-3 transition-opacity ${
-                              tag.enabled ? 'opacity-100' : 'opacity-65'
+                            className={`px-3 py-2.5 flex items-center justify-between gap-2.5 transition-opacity ${
+                              tag.enabled ? 'opacity-100' : 'opacity-60'
                             }`}
                           >
-                            <div className="flex items-center gap-3 min-w-0">
-                              <div className="w-9 h-9 rounded-xl border border-slate-900/[0.08] dark:border-white/[0.1] bg-white/75 dark:bg-white/[0.05] flex items-center justify-center shrink-0 overflow-hidden p-0.5">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="w-8 h-8 rounded-xl border border-slate-900/[0.07] dark:border-white/[0.09] bg-white/75 dark:bg-white/[0.05] flex items-center justify-center shrink-0 overflow-hidden p-0.5">
                                 {tag.logoDataUrl ? (
                                   <img
                                     src={tag.logoDataUrl}
                                     alt={tag.name}
-                                    className="w-6 h-6 object-contain"
+                                    className="w-5.5 h-5.5 object-contain"
                                     draggable={false}
                                   />
                                 ) : (
@@ -1234,21 +1182,15 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                                 <div className="text-xs font-bold text-slate-950 dark:text-white truncate">
                                   {tag.name}
                                 </div>
-                                <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                                  <span>{modeLabel}</span>
-                                  {tag.shared && (
-                                    <>
-                                      {' · '}
-                                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                                        {isBn ? 'শেয়ার্ড' : 'Shared'}
-                                      </span>
-                                    </>
-                                  )}
-                                </div>
+                                {tag.shared && (
+                                  <div className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 leading-tight">
+                                    {isBn ? 'শেয়ার্ড' : 'Shared'}
+                                  </div>
+                                )}
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-1 shrink-0">
+                            <div className="flex items-center gap-0.5 shrink-0">
                               <button
                                 type="button"
                                 disabled={saving}
@@ -1267,7 +1209,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => openEditForm(tag)}
-                                className="w-9 h-9 rounded-full hover:bg-slate-900/[0.07] dark:hover:bg-white/[0.1] flex items-center justify-center text-slate-600 dark:text-slate-300 cursor-pointer transition-colors"
+                                className="w-8 h-8 rounded-full hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.08] flex items-center justify-center text-slate-500 dark:text-slate-300 cursor-pointer transition-colors"
                                 title={isBn ? 'সম্পাদনা' : 'Edit'}
                                 aria-label={`Edit ${tag.name}`}
                               >
@@ -1280,7 +1222,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                                   pushTagsHistory('delete');
                                   setDeleteConfirmTag(tag);
                                 }}
-                                className="w-9 h-9 rounded-full hover:bg-rose-500/12 flex items-center justify-center text-rose-600 dark:text-rose-400 cursor-pointer transition-colors"
+                                className="w-8 h-8 rounded-full hover:bg-rose-500/12 flex items-center justify-center text-rose-600 dark:text-rose-400 cursor-pointer transition-colors"
                                 title={isBn ? 'মুছুন' : 'Delete'}
                                 aria-label={`Delete ${tag.name}`}
                               >
@@ -1293,14 +1235,14 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                                 aria-label={tag.name}
                                 disabled={saving}
                                 onClick={() => handleToggleCustomTag(tag)}
-                                className={`w-10 h-6 shrink-0 flex items-center rounded-full p-0.5 cursor-pointer transition-colors ml-1 ${
+                                className={`w-9 h-5 shrink-0 flex items-center rounded-full p-0.5 cursor-pointer transition-colors ml-1 ${
                                   tag.enabled
                                     ? 'bg-slate-950 dark:bg-white'
                                     : 'bg-slate-900/15 dark:bg-white/15'
                                 }`}
                               >
                                 <div
-                                  className={`w-5 h-5 rounded-full shadow-xs transition-transform ${
+                                  className={`w-4 h-4 rounded-full shadow-xs transition-transform ${
                                     tag.enabled
                                       ? 'translate-x-4 bg-white dark:bg-slate-950'
                                       : 'translate-x-0 bg-white dark:bg-slate-200'
@@ -1315,31 +1257,49 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                   )}
                 </div>
 
-                {/* Default Tags Section */}
-                <div className="space-y-2.5">
+                {/* Default Tags Section (Clean 2-Column Adaptive Grid for Compact Visibility) */}
+                <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2 px-0.5">
                     <span className={isBn ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400' : 'micro-mono-label font-semibold'}>
-                      {isBn ? 'ডিফল্ট ট্যাগসমূহ' : 'Default Tags'} ({formatNumber(defaultTags.length, lang)})
+                      {isBn ? 'ডিফল্ট ট্যাগ' : 'Default Tags'} ({formatNumber(defaultTags.length, lang)})
                     </span>
-                    {disabledIds.size > 0 && (
-                      <button
-                        type="button"
-                        disabled={saving}
-                        onClick={handleResetDefaults}
-                        className="text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
-                      >
-                        <RotateCcw className="w-3 h-3 stroke-[1.6]" />
-                        <span>{isBn ? 'সব চালু করুন' : 'Enable All'}</span>
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={toggleDefaultGridLayout}
+                      aria-label={
+                        isSingleColDefaults
+                          ? isBn
+                            ? '২×১ গ্রিডে দেখান'
+                            : 'Switch to 2x1 grid'
+                          : isBn
+                          ? '১×১ তালিকায় দেখান'
+                          : 'Switch to 1x1 list'
+                      }
+                      title={
+                        isSingleColDefaults
+                          ? isBn
+                            ? '২×১ গ্রিডে দেখান'
+                            : 'Switch to 2x1 grid'
+                          : isBn
+                          ? '১×১ তালিকায় দেখান'
+                          : 'Switch to 1x1 list'
+                      }
+                      className="w-7 h-7 flex items-center justify-center bg-transparent text-slate-500 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white cursor-pointer transition-colors touch-press"
+                    >
+                      {isSingleColDefaults ? (
+                        <Grid2x2 className="w-4 h-4 stroke-[1.65]" />
+                      ) : (
+                        <Grid3x3 className="w-4 h-4 stroke-[1.65]" />
+                      )}
+                    </button>
                   </div>
 
                   {filteredDefaultTags.length === 0 ? (
-                    <div className="p-4 rounded-2xl surface-subcard border text-center text-xs text-slate-500 dark:text-slate-400">
+                    <div className="p-3 rounded-2xl surface-subcard border text-center text-xs text-slate-500 dark:text-slate-400">
                       {isBn ? 'খোঁজা অনুযায়ী কোনো ডিফল্ট ট্যাগ মেলেনি' : 'No matching default tags'}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className={`grid ${isSingleColDefaults ? 'grid-cols-1' : 'grid-cols-2'} gap-1.5 sm:gap-2`}>
                       {filteredDefaultTags.map((item) => {
                         const isEnabled = !disabledIds.has(item.id.toLowerCase());
                         const isShared = sharedDefaultSet.has(item.id.toLowerCase());
@@ -1359,29 +1319,27 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                             }}
                             aria-checked={isEnabled}
                             aria-disabled={saving}
-                            className={`p-3 rounded-2xl border flex items-center justify-between gap-2 text-left transition-colors cursor-pointer touch-press ${
+                            className={`min-h-[52px] px-2.5 py-2 rounded-xl border flex items-center justify-between gap-1.5 text-left transition-colors cursor-pointer touch-press ${
                               isEnabled
                                 ? 'surface-subcard hover:bg-slate-900/[0.04] dark:hover:bg-white/[0.06]'
-                                : 'bg-slate-900/[0.015] dark:bg-white/[0.015] border-slate-900/[0.05] dark:border-white/[0.05] opacity-60'
+                                : 'bg-transparent border-slate-900/[0.06] dark:border-white/[0.06] opacity-55'
                             }`}
                           >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <div className="w-8 h-8 rounded-xl bg-white/75 dark:bg-white/[0.06] border border-slate-900/[0.07] dark:border-white/[0.08] flex items-center justify-center shrink-0">
-                                <IconComp className="w-4 h-4 stroke-[1.6]" style={{ color: item.color }} />
-                              </div>
-                              <div className="min-w-0">
-                                <span className="text-xs font-bold text-slate-950 dark:text-white truncate block">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <IconComp className="w-4 h-4 stroke-[1.65] shrink-0" style={{ color: item.color }} />
+                              <div className="min-w-0 flex flex-col justify-center">
+                                <span className="text-xs font-semibold text-slate-950 dark:text-white truncate block leading-tight">
                                   {isBn ? item.bn : item.en}
                                 </span>
                                 {canShare && isShared && (
-                                  <span className="text-[9.5px] font-bold text-emerald-600 dark:text-emerald-400 block leading-tight">
+                                  <span className="text-[9.5px] font-semibold text-emerald-600 dark:text-emerald-400 block leading-tight mt-0.5">
                                     {isBn ? 'শেয়ার্ড' : 'Shared'}
                                   </span>
                                 )}
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-1.5 shrink-0">
+                            <div className="flex items-center gap-1 shrink-0">
                               {canShare && (
                                 <button
                                   type="button"
@@ -1393,7 +1351,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                                   title={isBn ? 'বাকি ও আদায় উভয়ে শেয়ার করুন' : 'Share in both Due & Payment'}
                                   aria-label={`Share ${item.en} in both Due and Payment`}
                                   aria-pressed={isShared}
-                                  className={`w-7 h-7 flex items-center justify-center cursor-pointer transition-colors bg-transparent ${
+                                  className={`w-6 h-6 flex items-center justify-center cursor-pointer transition-colors bg-transparent ${
                                     isShared
                                       ? 'text-emerald-600 dark:text-emerald-400'
                                       : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'
@@ -1404,16 +1362,16 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                               )}
 
                               <div
-                                className={`w-10 h-6 shrink-0 flex items-center rounded-full p-0.5 transition-colors ${
+                                className={`w-8 h-[18px] shrink-0 flex items-center rounded-full p-0.5 transition-colors ${
                                   isEnabled
                                     ? 'bg-slate-950 dark:bg-white'
                                     : 'bg-slate-900/15 dark:bg-white/15'
                                 }`}
                               >
                                 <div
-                                  className={`w-5 h-5 rounded-full shadow-xs transition-transform ${
+                                  className={`w-3.5 h-3.5 rounded-full shadow-xs transition-transform ${
                                     isEnabled
-                                      ? 'translate-x-4 bg-white dark:bg-slate-950'
+                                      ? 'translate-x-3.5 bg-white dark:bg-slate-950'
                                       : 'translate-x-0 bg-white dark:bg-slate-200'
                                   }`}
                                 />
@@ -1448,7 +1406,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                 aria-modal="true"
                 className="w-full max-w-sm rounded-3xl glass-modal border shadow-2xl p-5 space-y-4 text-center"
               >
-                <div className="w-12 h-12 rounded-2xl bg-rose-500/12 border border-rose-500/25 mx-auto flex items-center justify-center text-rose-600 dark:text-rose-400">
+                <div className="w-12 h-12 rounded-2xl surface-subcard border border-rose-500/25 mx-auto flex items-center justify-center">
                   {deleteConfirmTag.logoDataUrl ? (
                     <img
                       src={deleteConfirmTag.logoDataUrl}
@@ -1456,8 +1414,18 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                       className="w-7 h-7 object-contain"
                       draggable={false}
                     />
+                  ) : deleteConfirmTag.iconName ? (
+                    (() => {
+                      const DeleteCustomIcon = getCustomTagIconComponent(deleteConfirmTag.iconName);
+                      return (
+                        <DeleteCustomIcon
+                          className="w-5 h-5 stroke-[1.75]"
+                          style={{ color: deleteConfirmTag.color || '#059669' }}
+                        />
+                      );
+                    })()
                   ) : (
-                    <Trash2 className="w-5 h-5 stroke-[1.75]" />
+                    <Trash2 className="w-5 h-5 stroke-[1.75] text-rose-600 dark:text-rose-400" />
                   )}
                 </div>
 

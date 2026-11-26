@@ -101,8 +101,8 @@ export const triggerHaptic = (type: HapticType = 'single') => {
   // 2. Standard Web Vibration API (Android Chrome, etc.)
   const intensity = type === 'level3' ? 3 : parseInt(localStorage.getItem('haptic_intensity') || '3', 10);
 
-  // Scaled crisp native-like vibration durations (in ms), tuned 20% softer across all 5 levels:
-  // Level 1: 2.4ms, Level 2: 6.4ms, Level 3: 12.8ms, Level 4: 22.4ms, Level 5: 40ms
+  // Scaled crisp native-like vibration durations (in ms), lowered by 25% across all 5 levels:
+  // Level 1: 1.8ms, Level 2: 4.8ms, Level 3: 9.6ms, Level 4: 16.8ms, Level 5: 30ms
   const baseDuration =
     (intensity === 1
       ? 3
@@ -112,7 +112,7 @@ export const triggerHaptic = (type: HapticType = 'single') => {
       ? 16
       : intensity === 4
       ? 28
-      : 50) * 0.8;
+      : 50) * 0.6;
 
   let pattern: number | number[];
 
@@ -133,10 +133,10 @@ export const triggerHaptic = (type: HapticType = 'single') => {
   } else if (type === 'soft') {
     pattern = Math.max(1, Math.round(baseDuration * 0.65));
   } else if (type === 'medium') {
-    pattern = Math.max(8, Math.round(baseDuration * 1.25));
+    pattern = Math.max(6, Math.round(baseDuration * 1.25));
   } else if (type === 'punchy') {
     // Punchy, satisfying tactile snap for gesture thresholds / critical release points
-    pattern = Math.max(10, Math.round(baseDuration * 1.4));
+    pattern = Math.max(8, Math.round(baseDuration * 1.4));
   } else if (type === 'double') {
     const pulse = Math.max(1, Math.round(baseDuration));
     pattern = [pulse, 35, pulse];
