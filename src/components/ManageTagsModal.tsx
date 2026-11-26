@@ -643,21 +643,21 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                     closeDraftToManageList();
                   }}
                   aria-label={isBn ? 'ফিরে যান' : 'Back to tags'}
-                  className="w-8 h-8 rounded-full surface-subcard border flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.1] transition-colors cursor-pointer shrink-0 touch-press"
+                  className="w-9 h-9 sm:w-8 sm:h-8 rounded-full surface-subcard border flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.1] transition-colors cursor-pointer shrink-0 touch-press"
                 >
-                  <ArrowLeft className="w-4 h-4 stroke-[1.75]" />
+                  <ArrowLeft className="w-4.5 h-4.5 sm:w-4 sm:h-4 stroke-[1.75]" />
                 </button>
               ) : (
                 <div
-                  className="w-8 h-8 rounded-full surface-subcard border flex items-center justify-center shrink-0"
+                  className="w-9 h-9 sm:w-8 sm:h-8 rounded-full surface-subcard border flex items-center justify-center shrink-0"
                   aria-hidden="true"
                 >
-                  <GraphStar className="w-4 h-4 stroke-[1.6] text-slate-950 dark:text-white" />
+                  <GraphStar className="w-4.5 h-4.5 sm:w-4 sm:h-4 stroke-[1.6] text-slate-950 dark:text-white" />
                 </div>
               )}
 
               <div className="min-w-0 flex items-center gap-2.5">
-                <h3 className="font-display text-base sm:text-[17px] font-bold text-slate-950 dark:text-white tracking-tight truncate">
+                <h3 className="font-display text-[17px] font-bold text-slate-950 dark:text-white tracking-tight truncate">
                   {draft
                     ? draft.id
                       ? isBn
@@ -672,7 +672,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                 </h3>
                 {!draft && (
                   <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold tabular-nums shrink-0 ${
+                    className={`px-2 py-0.5 rounded-full text-[11px] sm:text-[10px] font-mono font-semibold tabular-nums shrink-0 ${
                       counts.enabledCount >= limits.maxEnabled
                         ? 'bg-amber-500/12 text-amber-700 dark:text-amber-300'
                         : 'surface-subcard text-slate-600 dark:text-slate-300'
@@ -690,16 +690,16 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                 triggerHaptic('medium');
                 closeModalCleanly();
               }}
-              className="w-8 h-8 rounded-full bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-600 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer shrink-0 touch-press"
+              className="w-9 h-9 sm:w-8 sm:h-8 rounded-full bg-slate-900/[0.05] hover:bg-slate-900/[0.1] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] text-slate-600 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer shrink-0 touch-press"
               aria-label="Close"
             >
-              <X className="w-4 h-4 stroke-[1.5]" />
+              <X className="w-4.5 h-4.5 sm:w-4 sm:h-4 stroke-[1.5]" />
             </button>
           </div>
 
           {/* Clean Streamlined Switcher + Search/Action Row */}
           {!draft && (
-            <div className="px-5 py-3 border-b border-slate-900/[0.06] dark:border-white/[0.06] space-y-2.5 shrink-0">
+            <div className="px-5 py-3.5 sm:py-3 border-b border-slate-900/[0.06] dark:border-white/[0.06] space-y-3 sm:space-y-2.5 shrink-0">
               <div className="relative grid grid-cols-2 p-0.5 rounded-full bg-slate-900/[0.05] dark:bg-white/[0.05] border border-slate-900/[0.07] dark:border-white/[0.08]">
                 <div
                   aria-hidden="true"
@@ -714,7 +714,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                     triggerHaptic('tick');
                     setActiveTab('due');
                   }}
-                  className={`relative z-10 py-1.5 px-3 rounded-full text-xs font-bold cursor-pointer transition-colors ${
+                  className={`relative z-10 py-2 sm:py-1.5 px-3 rounded-full text-[13px] sm:text-xs font-bold cursor-pointer transition-colors ${
                     activeTab === 'due'
                       ? 'text-white dark:text-slate-950'
                       : 'text-slate-600 dark:text-slate-300'
@@ -728,7 +728,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                     triggerHaptic('tick');
                     setActiveTab('payment');
                   }}
-                  className={`relative z-10 py-1.5 px-3 rounded-full text-xs font-bold cursor-pointer transition-colors ${
+                  className={`relative z-10 py-2 sm:py-1.5 px-3 rounded-full text-[13px] sm:text-xs font-bold cursor-pointer transition-colors ${
                     activeTab === 'payment'
                       ? 'text-white dark:text-slate-950'
                       : 'text-slate-600 dark:text-slate-300'
@@ -740,22 +740,22 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
 
               <div className="flex items-center gap-2">
                 <div className="relative flex-1 min-w-0">
-                  <Search className="w-3.5 h-3.5 stroke-[1.75] text-slate-400 dark:text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Search className="w-4 h-4 sm:w-3.5 sm:h-3.5 stroke-[1.75] text-slate-400 dark:text-slate-500 absolute left-3.5 sm:left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder={isBn ? 'ট্যাগ খুঁজুন...' : 'Search tags...'}
-                    className="w-full h-9 pl-8.5 pr-8 rounded-full border border-slate-900/[0.08] dark:border-white/[0.09] bg-slate-900/[0.03] dark:bg-white/[0.04] text-xs font-medium text-slate-950 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--accent-color)]/35 transition-shadow"
+                    className="w-full h-10 sm:h-9 pl-9.5 sm:pl-8.5 pr-8 rounded-full border border-slate-900/[0.08] dark:border-white/[0.09] bg-slate-900/[0.03] dark:bg-white/[0.04] text-[13px] sm:text-xs font-medium text-slate-950 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--accent-color)]/35 transition-shadow"
                   />
                   {searchQuery && (
                     <button
                       type="button"
                       onClick={() => setSearchQuery('')}
                       aria-label={isBn ? 'খোঁজা মুছুন' : 'Clear search'}
-                      className="w-6 h-6 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-white absolute right-1.5 top-1/2 -translate-y-1/2 cursor-pointer"
+                      className="w-7 h-7 sm:w-6 sm:h-6 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-white absolute right-1.5 top-1/2 -translate-y-1/2 cursor-pointer"
                     >
-                      <X className="w-3 h-3 stroke-[1.75]" />
+                      <X className="w-3.5 h-3.5 sm:w-3 sm:h-3 stroke-[1.75]" />
                     </button>
                   )}
                 </div>
@@ -763,9 +763,9 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                   type="button"
                   disabled={saving}
                   onClick={openCreateForm}
-                  className="h-9 px-3.5 rounded-full bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors touch-press disabled:opacity-50 shrink-0"
+                  className="h-10 sm:h-9 px-4 sm:px-3.5 rounded-full bg-slate-950 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-slate-950 text-[13px] sm:text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors touch-press disabled:opacity-50 shrink-0"
                 >
-                  <Plus className="w-3.5 h-3.5 stroke-[2]" />
+                  <Plus className="w-4 h-4 sm:w-3.5 sm:h-3.5 stroke-[2]" />
                   <span>{isBn ? 'নতুন ট্যাগ' : 'Create Tag'}</span>
                 </button>
               </div>
@@ -1141,12 +1141,12 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                     <button
                       type="button"
                       onClick={counts.totalCount < limits.maxTotal ? openCreateForm : undefined}
-                      className="w-full px-3.5 py-3 rounded-2xl surface-subcard border-2 border-dashed !border-slate-900/35 dark:!border-white/35 flex items-center justify-between gap-3 text-left hover:bg-slate-900/[0.03] dark:hover:bg-white/[0.04] transition-colors cursor-pointer"
+                      className="w-full px-4 py-3.5 sm:px-3.5 sm:py-3 rounded-2xl surface-subcard border-2 border-dashed !border-slate-900/35 dark:!border-white/35 flex items-center justify-between gap-3 text-left hover:bg-slate-900/[0.03] dark:hover:bg-white/[0.04] transition-colors cursor-pointer"
                     >
-                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400 truncate">
+                      <span className="text-[13px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 truncate">
                         {isBn ? 'কোনো কাস্টম ট্যাগ নেই, নতুন যোগ করুন' : 'No custom tags yet — add with icon or logo'}
                       </span>
-                      <Plus className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 shrink-0" />
+                      <Plus className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-slate-500 dark:text-slate-400 shrink-0" />
                     </button>
                   ) : filteredCustomTags.length === 0 ? (
                     <div className="p-3 rounded-2xl surface-subcard border text-center text-xs text-slate-500 dark:text-slate-400">
@@ -1158,44 +1158,44 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                         return (
                           <div
                             key={tag.id}
-                            className={`px-3 py-2.5 flex items-center justify-between gap-2.5 transition-opacity ${
+                            className={`px-3.5 py-3 sm:px-3 sm:py-2.5 flex items-center justify-between gap-2.5 transition-opacity ${
                               tag.enabled ? 'opacity-100' : 'opacity-60'
                             }`}
                           >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <div className="w-8 h-8 rounded-xl border border-slate-900/[0.07] dark:border-white/[0.09] bg-white/75 dark:bg-white/[0.05] flex items-center justify-center shrink-0 overflow-hidden p-0.5">
+                            <div className="flex items-center gap-3 sm:gap-2.5 min-w-0">
+                              <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-xl border border-slate-900/[0.07] dark:border-white/[0.09] bg-white/75 dark:bg-white/[0.05] flex items-center justify-center shrink-0 overflow-hidden p-0.5">
                                 {tag.logoDataUrl ? (
                                   <img
                                     src={tag.logoDataUrl}
                                     alt={tag.name}
-                                    className="w-5.5 h-5.5 object-contain"
+                                    className="w-6 h-6 sm:w-5.5 sm:h-5.5 object-contain"
                                     draggable={false}
                                   />
                                 ) : (
                                   (() => {
                                     const TagCustomIcon = getCustomTagIconComponent(tag.iconName);
-                                    return <TagCustomIcon className="w-4 h-4 stroke-[1.6]" style={{ color: tag.color }} />;
+                                    return <TagCustomIcon className="w-4.5 h-4.5 sm:w-4 sm:h-4 stroke-[1.6]" style={{ color: tag.color }} />;
                                   })()
                                 )}
                               </div>
                               <div className="min-w-0">
-                                <div className="text-xs font-bold text-slate-950 dark:text-white truncate">
+                                <div className="text-[13px] sm:text-xs font-bold text-slate-950 dark:text-white truncate">
                                   {tag.name}
                                 </div>
                                 {tag.shared && (
-                                  <div className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 leading-tight">
+                                  <div className="text-[11px] sm:text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 leading-tight">
                                     {isBn ? 'শেয়ার্ড' : 'Shared'}
                                   </div>
                                 )}
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-0.5 shrink-0">
+                            <div className="flex items-center gap-1 sm:gap-0.5 shrink-0">
                               <button
                                 type="button"
                                 disabled={saving}
                                 onClick={() => handleToggleCustomTagShared(tag)}
-                                className={`w-7 h-7 flex items-center justify-center cursor-pointer transition-colors bg-transparent ${
+                                className={`w-9 h-9 sm:w-7 sm:h-7 flex items-center justify-center cursor-pointer transition-colors bg-transparent ${
                                   tag.shared
                                     ? 'text-emerald-600 dark:text-emerald-400'
                                     : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'
@@ -1204,16 +1204,16 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                                 aria-label={`Share ${tag.name} in both Due and Payment`}
                                 aria-pressed={Boolean(tag.shared)}
                               >
-                                <Link className="w-3.5 h-3.5 stroke-[1.75]" />
+                                <Link className="w-4 h-4 sm:w-3.5 sm:h-3.5 stroke-[1.75]" />
                               </button>
                               <button
                                 type="button"
                                 onClick={() => openEditForm(tag)}
-                                className="w-8 h-8 rounded-full hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.08] flex items-center justify-center text-slate-500 dark:text-slate-300 cursor-pointer transition-colors"
+                                className="w-9 h-9 sm:w-8 sm:h-8 rounded-full hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.08] flex items-center justify-center text-slate-500 dark:text-slate-300 cursor-pointer transition-colors"
                                 title={isBn ? 'সম্পাদনা' : 'Edit'}
                                 aria-label={`Edit ${tag.name}`}
                               >
-                                <Pencil className="w-3.5 h-3.5 stroke-[1.6]" />
+                                <Pencil className="w-4 h-4 sm:w-3.5 sm:h-3.5 stroke-[1.6]" />
                               </button>
                               <button
                                 type="button"
@@ -1222,11 +1222,11 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                                   pushTagsHistory('delete');
                                   setDeleteConfirmTag(tag);
                                 }}
-                                className="w-8 h-8 rounded-full hover:bg-rose-500/12 flex items-center justify-center text-rose-600 dark:text-rose-400 cursor-pointer transition-colors"
+                                className="w-9 h-9 sm:w-8 sm:h-8 rounded-full hover:bg-rose-500/12 flex items-center justify-center text-rose-600 dark:text-rose-400 cursor-pointer transition-colors"
                                 title={isBn ? 'মুছুন' : 'Delete'}
                                 aria-label={`Delete ${tag.name}`}
                               >
-                                <Trash2 className="w-3.5 h-3.5 stroke-[1.6]" />
+                                <Trash2 className="w-4 h-4 sm:w-3.5 sm:h-3.5 stroke-[1.6]" />
                               </button>
                               <button
                                 type="button"
@@ -1235,14 +1235,14 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                                 aria-label={tag.name}
                                 disabled={saving}
                                 onClick={() => handleToggleCustomTag(tag)}
-                                className={`w-9 h-5 shrink-0 flex items-center rounded-full p-0.5 cursor-pointer transition-colors ml-1 ${
+                                className={`w-10 h-6 sm:w-9 sm:h-5 shrink-0 flex items-center rounded-full p-0.5 cursor-pointer transition-colors ml-1 ${
                                   tag.enabled
                                     ? 'bg-slate-950 dark:bg-white'
                                     : 'bg-slate-900/15 dark:bg-white/15'
                                 }`}
                               >
                                 <div
-                                  className={`w-4 h-4 rounded-full shadow-xs transition-transform ${
+                                  className={`w-5 h-5 sm:w-4 sm:h-4 rounded-full shadow-xs transition-transform ${
                                     tag.enabled
                                       ? 'translate-x-4 bg-white dark:bg-slate-950'
                                       : 'translate-x-0 bg-white dark:bg-slate-200'
@@ -1257,10 +1257,10 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                   )}
                 </div>
 
-                {/* Default Tags Section (Clean 2-Column Adaptive Grid for Compact Visibility) */}
+                {/* Default Tags Section (Clean Adaptive Grid/List) */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2 px-0.5">
-                    <span className={isBn ? 'text-[11px] font-bold text-slate-500 dark:text-slate-400' : 'micro-mono-label font-semibold'}>
+                    <span className={isBn ? 'text-xs sm:text-[11px] font-bold text-slate-500 dark:text-slate-400' : 'micro-mono-label font-semibold'}>
                       {isBn ? 'ডিফল্ট ট্যাগ' : 'Default Tags'} ({formatNumber(defaultTags.length, lang)})
                     </span>
                     <button
@@ -1284,12 +1284,12 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                           ? '১×১ তালিকায় দেখান'
                           : 'Switch to 1x1 list'
                       }
-                      className="w-7 h-7 flex items-center justify-center bg-transparent text-slate-500 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white cursor-pointer transition-colors touch-press"
+                      className="w-9 h-9 sm:w-7 sm:h-7 -mr-1.5 sm:mr-0 flex items-center justify-center bg-transparent text-slate-500 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white cursor-pointer transition-colors touch-press"
                     >
                       {isSingleColDefaults ? (
-                        <Grid2x2 className="w-4 h-4 stroke-[1.65]" />
+                        <Grid2x2 className="w-4.5 h-4.5 sm:w-4 sm:h-4 stroke-[1.65]" />
                       ) : (
-                        <Grid3x3 className="w-4 h-4 stroke-[1.65]" />
+                        <Grid3x3 className="w-4.5 h-4.5 sm:w-4 sm:h-4 stroke-[1.65]" />
                       )}
                     </button>
                   </div>
@@ -1299,7 +1299,7 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                       {isBn ? 'খোঁজা অনুযায়ী কোনো ডিফল্ট ট্যাগ মেলেনি' : 'No matching default tags'}
                     </div>
                   ) : (
-                    <div className={`grid ${isSingleColDefaults ? 'grid-cols-1' : 'grid-cols-2'} gap-1.5 sm:gap-2`}>
+                    <div className={`grid ${isSingleColDefaults ? 'grid-cols-1 gap-2' : 'grid-cols-2 gap-2'}`}>
                       {filteredDefaultTags.map((item) => {
                         const isEnabled = !disabledIds.has(item.id.toLowerCase());
                         const isShared = sharedDefaultSet.has(item.id.toLowerCase());
@@ -1319,27 +1319,42 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                             }}
                             aria-checked={isEnabled}
                             aria-disabled={saving}
-                            className={`min-h-[52px] px-2.5 py-2 rounded-xl border flex items-center justify-between gap-1.5 text-left transition-colors cursor-pointer touch-press ${
+                            className={`${
+                              isSingleColDefaults
+                                ? 'min-h-[56px] sm:min-h-[52px] px-3.5 py-2.5 sm:px-3 sm:py-2 rounded-2xl sm:rounded-xl gap-2.5'
+                                : 'min-h-[54px] sm:min-h-[52px] px-2.5 py-2 rounded-xl gap-1.5'
+                            } border flex items-center justify-between text-left transition-colors cursor-pointer touch-press ${
                               isEnabled
                                 ? 'surface-subcard hover:bg-slate-900/[0.04] dark:hover:bg-white/[0.06]'
                                 : 'bg-transparent border-slate-900/[0.06] dark:border-white/[0.06] opacity-55'
                             }`}
                           >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <IconComp className="w-4 h-4 stroke-[1.65] shrink-0" style={{ color: item.color }} />
+                            <div className={`flex items-center min-w-0 ${isSingleColDefaults ? 'gap-3 sm:gap-2.5' : 'gap-2'}`}>
+                              <IconComp
+                                className={`${isSingleColDefaults ? 'w-4.5 h-4.5 sm:w-4 sm:h-4' : 'w-4 h-4'} stroke-[1.65] shrink-0`}
+                                style={{ color: item.color }}
+                              />
                               <div className="min-w-0 flex flex-col justify-center">
-                                <span className="text-xs font-semibold text-slate-950 dark:text-white truncate block leading-tight">
+                                <span
+                                  className={`${
+                                    isSingleColDefaults ? 'text-[13px] sm:text-xs' : 'text-xs'
+                                  } font-semibold text-slate-950 dark:text-white truncate block leading-tight`}
+                                >
                                   {isBn ? item.bn : item.en}
                                 </span>
                                 {canShare && isShared && (
-                                  <span className="text-[9.5px] font-semibold text-emerald-600 dark:text-emerald-400 block leading-tight mt-0.5">
+                                  <span
+                                    className={`${
+                                      isSingleColDefaults ? 'text-[10.5px] sm:text-[9.5px]' : 'text-[9.5px]'
+                                    } font-semibold text-emerald-600 dark:text-emerald-400 block leading-tight mt-0.5`}
+                                  >
                                     {isBn ? 'শেয়ার্ড' : 'Shared'}
                                   </span>
                                 )}
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-1 shrink-0">
+                            <div className={`flex items-center shrink-0 ${isSingleColDefaults ? 'gap-1.5 sm:gap-1' : 'gap-1'}`}>
                               {canShare && (
                                 <button
                                   type="button"
@@ -1351,27 +1366,33 @@ export const ManageTagsModal: React.FC<ManageTagsModalProps> = ({
                                   title={isBn ? 'বাকি ও আদায় উভয়ে শেয়ার করুন' : 'Share in both Due & Payment'}
                                   aria-label={`Share ${item.en} in both Due and Payment`}
                                   aria-pressed={isShared}
-                                  className={`w-6 h-6 flex items-center justify-center cursor-pointer transition-colors bg-transparent ${
+                                  className={`${
+                                    isSingleColDefaults ? 'w-9 h-9 sm:w-7 sm:h-7' : 'w-7 h-7 sm:w-6 sm:h-6'
+                                  } flex items-center justify-center cursor-pointer transition-colors bg-transparent ${
                                     isShared
                                       ? 'text-emerald-600 dark:text-emerald-400'
                                       : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'
                                   }`}
                                 >
-                                  <Link className="w-3.5 h-3.5 stroke-[1.75]" />
+                                  <Link className={`${isSingleColDefaults ? 'w-4 h-4 sm:w-3.5 sm:h-3.5' : 'w-4 h-4 sm:w-3.5 sm:h-3.5'} stroke-[1.75]`} />
                                 </button>
                               )}
 
                               <div
-                                className={`w-8 h-[18px] shrink-0 flex items-center rounded-full p-0.5 transition-colors ${
+                                className={`${
+                                  isSingleColDefaults ? 'w-10 h-6 sm:w-8 sm:h-[18px]' : 'w-8 h-[18px]'
+                                } shrink-0 flex items-center rounded-full p-0.5 transition-colors ${
                                   isEnabled
                                     ? 'bg-slate-950 dark:bg-white'
                                     : 'bg-slate-900/15 dark:bg-white/15'
                                 }`}
                               >
                                 <div
-                                  className={`w-3.5 h-3.5 rounded-full shadow-xs transition-transform ${
+                                  className={`${
+                                    isSingleColDefaults ? 'w-5 h-5 sm:w-3.5 sm:h-3.5' : 'w-3.5 h-3.5'
+                                  } rounded-full shadow-xs transition-transform ${
                                     isEnabled
-                                      ? 'translate-x-3.5 bg-white dark:bg-slate-950'
+                                      ? `${isSingleColDefaults ? 'translate-x-4 sm:translate-x-3.5' : 'translate-x-3.5'} bg-white dark:bg-slate-950`
                                       : 'translate-x-0 bg-white dark:bg-slate-200'
                                   }`}
                                 />
