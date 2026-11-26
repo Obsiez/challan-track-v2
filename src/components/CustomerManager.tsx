@@ -30,7 +30,7 @@ import { cleanBangladeshiPhone } from '../lib/phoneUtils';
 import { StaggerReveal, SpotlightCard, ScrollParallaxStage, ClientCardStage } from './MotionPrimitives';
 import ModalPortal, { useModalScrollLock } from './ModalPortal';
 import LoadingSpinner from './LoadingSpinner';
-import { TagIcon, TagPickerBar, getTagDefaultDescription, getTagMeta, EXPENSE_TAGS, PAYMENT_TAGS, useHorizontalDragWheelScroll } from '../lib/tagSystem';
+import { TagIcon, TagPickerBar, getTagDefaultDescription, getTagMeta, isTagDisabled, useTagConfig, EXPENSE_TAGS, PAYMENT_TAGS, useHorizontalDragWheelScroll } from '../lib/tagSystem';
 import { OptimizedPhotoResult } from '../lib/imageOptimizer';
 import ContactPhotoCropModal from './ContactPhotoCropModal';
 
@@ -722,6 +722,7 @@ const CustomerManager = React.memo(function CustomerManager({
   exportArchivedStatements
 }: CustomerManagerProps) {
  const t = translations[lang];
+ const liveTagConfig = useTagConfig();
 
  const [showExtraBalanceCards, setShowExtraBalanceCards] = useState(false);
  const [showMonthlyCycle, setShowMonthlyCycle] = useState(false);
@@ -1727,27 +1728,43 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     };
   }, [selectedCustomer, selectedCustomerAllTransactions]);
 
-  const activeCycleTransactions = useMemo(() => {
+  const [tagFilterLimit, setTagFilterLimit] = useState(5);
+
+  React.useEffect(() => {
+    setTagFilterLimit(5);
+  }, [selectedCustomerId, ledgerTagFilter, cardCycleTab]);
+
+  // Full unfiltered transactions for this customer/cycle so tag sorting scans even the 1000th entry
+  const fullCycleTransactions = useMemo(() => {
     if (selectedCustomer?.accountType === 'credit_card' && creditCardCycleData) {
       return cardCycleTab === 'unbilled'
         ? creditCardCycleData.unbilledTxs
         : creditCardCycleData.billedTxs;
     }
-    return selectedCustomerTransactions;
-  }, [selectedCustomer?.accountType, creditCardCycleData, cardCycleTab, selectedCustomerTransactions]);
+    return selectedCustomerAllTransactions;
+  }, [selectedCustomer?.accountType, creditCardCycleData, cardCycleTab, selectedCustomerAllTransactions]);
 
   const availableLedgerTags = useMemo(() => {
     const seen = new Set<string>();
     const list: string[] = [];
-    for (let i = 0; i < activeCycleTransactions.length; i++) {
-      const tag = activeCycleTransactions[i].tag;
-      if (tag && !seen.has(tag)) {
-        seen.add(tag);
-        list.push(tag);
-      }
+    for (let i = 0; i < fullCycleTransactions.length; i++) {
+      const tx = fullCycleTransactions[i];
+      const tag = tx.tag;
+      if (!tag || seen.has(tag)) continue;
+      const meta = getTagMeta(tag, tx.type);
+      if (!meta || meta.enabled === false || isTagDisabled(tag, tx.type)) continue;
+      seen.add(tag);
+      list.push(tag);
     }
     return list;
-  }, [activeCycleTransactions]);
+  }, [fullCycleTransactions, liveTagConfig]);
+
+  // Clear active sort tag cleanly if the user disabled or deleted it
+  React.useEffect(() => {
+    if (ledgerTagFilter && !availableLedgerTags.includes(ledgerTagFilter)) {
+      setLedgerTagFilter(null);
+    }
+  }, [ledgerTagFilter, availableLedgerTags]);
 
   const ledgerTagScrollRef = useRef<HTMLDivElement>(null);
   const {
@@ -1757,10 +1774,17 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
     handlers: ledgerTagScrollHandlers,
   } = useHorizontalDragWheelScroll(ledgerTagScrollRef, availableLedgerTags.length);
 
-  const groupedTransactions = useMemo(() => {
-    const sourceTxs = ledgerTagFilter
-      ? activeCycleTransactions.filter(tx => tx.tag === ledgerTagFilter)
-      : activeCycleTransactions;
+  const { groupedTransactions, filteredTotalCount, displayedCount } = useMemo(() => {
+    const matchedTxs = ledgerTagFilter
+      ? fullCycleTransactions.filter((tx) => tx.tag === ledgerTagFilter)
+      : fullCycleTransactions;
+
+    const totalMatched = matchedTxs.length;
+    const activeLimit = ledgerTagFilter ? tagFilterLimit : customerTxLimit;
+    const sourceTxs =
+      selectedCustomer?.accountType === 'credit_card'
+        ? matchedTxs
+        : matchedTxs.slice(0, activeLimit);
 
     const groups: Record<string, { dayMs: number; items: Array<{ tx: Transaction; txMs: number; createdMs: number; idx: number }> }> = {};
     for (let i = 0; i < sourceTxs.length; i++) {
@@ -1778,7 +1802,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
       groups[dayKey].items.push({ tx, txMs, createdMs, idx: i });
     }
 
-    return Object.entries(groups)
+    const grouped = Object.entries(groups)
       .sort((a, b) => b[1].dayMs - a[1].dayMs)
       .map(([dayKey, group]) => ({
         dateStr: dayKey,
@@ -1794,7 +1818,13 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
           })
           .map(item => item.tx),
       }));
-  }, [activeCycleTransactions, ledgerTagFilter]);
+
+    return {
+      groupedTransactions: grouped,
+      filteredTotalCount: totalMatched,
+      displayedCount: sourceTxs.length,
+    };
+  }, [fullCycleTransactions, ledgerTagFilter, tagFilterLimit, customerTxLimit, selectedCustomer?.accountType]);
 
   const activeCustomerArchives = useMemo(() => {
     if (!selectedCustomerId || archivedStatements.length === 0) return [];
@@ -2491,7 +2521,11 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10 pt-1">
  {isEditingCustomer ? (
- <form
+ <motion.form
+   key="edit-customer-form"
+   initial={{ opacity: 0, y: -8, scale: 0.985 }}
+   animate={{ opacity: 1, y: 0, scale: 1 }}
+   transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
    onSubmit={async (e) => {
      e.preventDefault();
      triggerHaptic('single');
@@ -2702,39 +2736,60 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
        {lang === 'bn' ? 'বাতিল' : 'Cancel'}
      </button>
    </div>
- </form>
+ </motion.form>
  ) : (
- <div className="flex items-start gap-3.5 min-w-0">
- {selectedCustomer.photoUrl && !detailAvatarError ? (
-   <div className="p-[2px] rounded-full contact-avatar-ring shrink-0 mt-0.5">
-     <img
-       src={selectedCustomer.photoUrl}
-       alt={selectedCustomer.name}
-       decoding="async"
-       onError={() => setDetailAvatarError(true)}
-       className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover block"
-       draggable={false}
-     />
-   </div>
- ) : (
-   <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center font-display font-bold text-base sm:text-lg shrink-0 mt-0.5 ${
-     selectedCustomer.outstandingDue > 0
-       ? 'bg-ledger-red-subtle text-ledger-red'
-       : selectedCustomer.outstandingDue < 0
-       ? 'bg-ledger-green-subtle text-ledger-green'
-       : 'bg-slate-900/[0.06] dark:bg-white/[0.08] text-slate-600 dark:text-slate-300'
-   }`}>
-     {selectedCustomer.name
-       .split(' ')
-       .map(n => n[0])
-       .filter(Boolean)
-       .slice(0, 2)
-       .join('')
-       .toUpperCase() || 'C'}
-   </div>
- )}
- <div className="min-w-0 flex-1">
- <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-slate-950 dark:text-white truncate pr-28">{selectedCustomer.name}</h2>
+ <motion.div
+   key="view-customer-info"
+   initial={{ opacity: 0, y: 6 }}
+   animate={{ opacity: 1, y: 0 }}
+   transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+   className="min-w-0 flex-1 sm:flex sm:items-start sm:gap-3.5"
+ >
+   {/* Desktop Left Avatar (shown on sm+ side-by-side layout; on mobile only inline beside name if photo exists) */}
+   {selectedCustomer.photoUrl && !detailAvatarError ? (
+     <div className="hidden sm:block p-[2px] rounded-full contact-avatar-ring shrink-0 mt-0.5">
+       <img
+         src={selectedCustomer.photoUrl}
+         alt={selectedCustomer.name}
+         decoding="async"
+         onError={() => setDetailAvatarError(true)}
+         className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover block"
+         draggable={false}
+       />
+     </div>
+   ) : (
+     <div className={`hidden sm:flex w-12 h-12 sm:w-14 sm:h-14 rounded-full items-center justify-center font-display font-bold text-base sm:text-lg shrink-0 mt-0.5 ${
+       selectedCustomer.outstandingDue > 0
+         ? 'bg-ledger-red-subtle text-ledger-red'
+         : selectedCustomer.outstandingDue < 0
+         ? 'bg-ledger-green-subtle text-ledger-green'
+         : 'bg-slate-900/[0.06] dark:bg-white/[0.08] text-slate-600 dark:text-slate-300'
+     }`}>
+       {selectedCustomer.name
+         .split(' ')
+         .map(n => n[0])
+         .filter(Boolean)
+         .slice(0, 2)
+         .join('')
+         .toUpperCase() || 'C'}
+     </div>
+   )}
+   <div className="min-w-0 flex-1">
+     <div className="flex items-center gap-2.5 pr-28">
+       {selectedCustomer.photoUrl && !detailAvatarError && (
+         <div className="sm:hidden p-[1.5px] rounded-full contact-avatar-ring shrink-0">
+           <img
+             src={selectedCustomer.photoUrl}
+             alt={selectedCustomer.name}
+             decoding="async"
+             onError={() => setDetailAvatarError(true)}
+             className="w-8 h-8 rounded-full object-cover block"
+             draggable={false}
+           />
+         </div>
+       )}
+       <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-slate-950 dark:text-white truncate">{selectedCustomer.name}</h2>
+     </div>
  {selectedCustomer.phone ? (
  <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-2 font-mono whitespace-nowrap">
  <Phone className="w-3.5 h-3.5 text-emerald-500 shrink-0 stroke-[1.5]" />
@@ -2785,7 +2840,7 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
    </p>
  )}
  </div>
- </div>
+ </motion.div>
  )}
  </div>
  {/* CURRENT BALANCE CARD + SUBTLE LEFT ELLIPSIS TOGGLE FOR TOTAL BILLED & TOTAL PAID */}
@@ -3812,10 +3867,17 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
               : t.duesVisibleHere}
           </p>
         </div>
-      ) : (
+      ) : (() => {
+        const isStandardLedger = selectedCustomer.accountType !== 'credit_card';
+        const activeLimit = ledgerTagFilter ? tagFilterLimit : customerTxLimit;
+        const showMoreVisible = isStandardLedger && filteredTotalCount > Math.max(5, displayedCount);
+        const showLessVisible = isStandardLedger && displayedCount > 5 && activeLimit > 5;
+        const hasLedgerFooter = showMoreVisible || showLessVisible;
+
+        return (
         <>
           <div className="divide-y divide-slate-900/[0.06] dark:divide-white/[0.06] transition-none">
-            {groupedTransactions.map(group => (
+            {groupedTransactions.map((group, groupIdx) => (
               <div key={group.dateStr} className="flex flex-col">
                 {/* Date or Tag Header Indicator */}
                 <div className="px-4 sm:px-5 py-2.5 bg-slate-900/[0.025] dark:bg-white/[0.03] border-b border-slate-900/[0.06] dark:border-white/[0.06] flex items-center justify-between transition-none">
@@ -3836,11 +3898,18 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                 
                 {/* Grouped Transactions List */}
                 <div className="flex flex-col divide-y divide-slate-900/[0.05] dark:divide-white/[0.05] transition-none">
-                  {group.items.map((tx: Transaction) => (
+                  {group.items.map((tx: Transaction, itemIdx: number) => {
+                    const isVeryLastVisibleRow =
+                      !hasLedgerFooter &&
+                      groupIdx === groupedTransactions.length - 1 &&
+                      itemIdx === group.items.length - 1;
+                    return (
                     <div 
                       key={tx.id} 
                       id={`tx-row-${tx.id}`}
                       className={`p-4 sm:px-5 flex flex-col hover:bg-slate-900/[0.02] dark:hover:bg-white/[0.02] transition-[background-color,box-shadow] duration-150 group cursor-default ${
+                        isVeryLastVisibleRow ? 'rounded-b-[27px]' : ''
+                      } ${
                         highlightedTxId === tx.id 
                           ? 'ring-2 ring-inset ring-amber-500/80 dark:ring-amber-400/80 bg-amber-500/10' 
                           : recentlyEditedTxId === tx.id
@@ -3915,50 +3984,54 @@ const [editingTx, setEditingTx] = useState<Transaction | null>(null);
                         </div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ))}
           </div>
 
-          {(() => {
-            const showMoreVisible = hasMoreTxs && selectedCustomer.accountType !== 'credit_card';
-            const showLessVisible = customerTxLimit > 5 && selectedCustomer.accountType !== 'credit_card';
-            if (!showMoreVisible && !showLessVisible) return null;
-
-            return (
-              <div className="p-3.5 text-center flex justify-center gap-2.5 border-t border-slate-900/[0.06] dark:border-white/[0.06] bg-slate-900/[0.015] dark:bg-white/[0.015]">
-                {showMoreVisible && (
-                  <button 
-                    type="button"
-                    onClick={() => {
-                      triggerHaptic('single');
+          {hasLedgerFooter && (
+            <div className="p-3.5 text-center flex justify-center gap-2.5 border-t border-slate-900/[0.06] dark:border-white/[0.06] bg-slate-900/[0.015] dark:bg-white/[0.015]">
+              {showMoreVisible && (
+                <button 
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic('single');
+                    if (ledgerTagFilter) {
+                      setTagFilterLimit((prev) => prev + 10);
+                    } else {
                       loadMoreTransactions();
-                    }}
-                    className="surface-glass-interactive flex items-center justify-center gap-1.5 px-5 py-2 border border-slate-200/80 dark:border-white/[0.1] text-slate-800 dark:text-slate-200 text-xs font-bold rounded-full shadow-2xs touch-press transition-all cursor-pointer"
-                  >
-                    <span>{lang === 'bn' ? 'আরও দেখুন' : 'Show More'}</span>
-                    <ChevronDown className="w-3.5 h-3.5 stroke-[1.5]" />
-                  </button>
-                )}
-                {showLessVisible && (
-                  <button 
-                    type="button"
-                    onClick={() => {
-                      triggerHaptic('single');
+                    }
+                  }}
+                  className="surface-glass-interactive flex items-center justify-center gap-1.5 px-5 py-2 border border-slate-200/80 dark:border-white/[0.1] text-slate-800 dark:text-slate-200 text-xs font-bold rounded-full shadow-2xs touch-press transition-all cursor-pointer"
+                >
+                  <span>{lang === 'bn' ? 'আরও দেখুন' : 'Show More'}</span>
+                  <ChevronDown className="w-3.5 h-3.5 stroke-[1.5]" />
+                </button>
+              )}
+              {showLessVisible && (
+                <button 
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic('single');
+                    if (ledgerTagFilter) {
+                      setTagFilterLimit(5);
+                    } else {
                       resetCustomerTxLimit();
-                    }}
-                    className="surface-glass-interactive flex items-center justify-center gap-1.5 px-5 py-2 border border-slate-200/80 dark:border-white/[0.1] text-slate-800 dark:text-slate-200 text-xs font-bold rounded-full shadow-2xs touch-press transition-all cursor-pointer"
-                  >
-                    <span>{lang === 'bn' ? 'কম দেখুন' : 'Show Less'}</span>
-                    <ChevronUp className="w-3.5 h-3.5 stroke-[1.5]" />
-                  </button>
-                )}
-              </div>
-            );
-          })()}
+                    }
+                  }}
+                  className="surface-glass-interactive flex items-center justify-center gap-1.5 px-5 py-2 border border-slate-200/80 dark:border-white/[0.1] text-slate-800 dark:text-slate-200 text-xs font-bold rounded-full shadow-2xs touch-press transition-all cursor-pointer"
+                >
+                  <span>{lang === 'bn' ? 'কম দেখুন' : 'Show Less'}</span>
+                  <ChevronUp className="w-3.5 h-3.5 stroke-[1.5]" />
+                </button>
+              )}
+            </div>
+          )}
         </>
-      )}
+        );
+      })()}
     </div>
 
     {/* ARCHIVED STATEMENTS STORED ON THIS CUSTOMER'S PROFILE */}

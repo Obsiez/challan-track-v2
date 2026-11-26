@@ -434,6 +434,42 @@ export function getTagCounts(config: UserTagConfig, type: 'due' | 'payment') {
   };
 }
 
+export function isTagDisabled(tagId?: string | null, type?: 'due' | 'payment'): boolean {
+  if (!tagId) return false;
+  const normalized = tagId.toLowerCase().trim();
+  if (!normalized) return false;
+
+  const isDueDefaultDisabled = currentTagConfig.disabledDueTags.some(
+    (id) => id.toLowerCase() === normalized
+  );
+  const isPaymentDefaultDisabled = currentTagConfig.disabledPaymentTags.some(
+    (id) => id.toLowerCase() === normalized
+  );
+
+  const customDue = customDueMap[normalized];
+  const customPayment = customPaymentMap[normalized];
+
+  if (type === 'due') {
+    if (customDue) return !customDue.enabled;
+    if (EXPENSE_DEFAULT_MAP[normalized]) return isDueDefaultDisabled;
+    if (customPayment) return !customPayment.enabled;
+    if (PAYMENT_DEFAULT_MAP[normalized]) return isPaymentDefaultDisabled;
+    return false;
+  }
+  if (type === 'payment') {
+    if (customPayment) return !customPayment.enabled;
+    if (PAYMENT_DEFAULT_MAP[normalized]) return isPaymentDefaultDisabled;
+    if (customDue) return !customDue.enabled;
+    if (EXPENSE_DEFAULT_MAP[normalized]) return isDueDefaultDisabled;
+    return false;
+  }
+  if (customDue) return !customDue.enabled;
+  if (customPayment) return !customPayment.enabled;
+  if (EXPENSE_DEFAULT_MAP[normalized]) return isDueDefaultDisabled;
+  if (PAYMENT_DEFAULT_MAP[normalized]) return isPaymentDefaultDisabled;
+  return false;
+}
+
 export function getTagMeta(tagId?: string | null, type?: 'due' | 'payment'): TagMeta | null {
   if (!tagId) return null;
   const normalized = tagId.toLowerCase().trim();
@@ -748,7 +784,8 @@ export const TagIcon: React.FC<TagIconProps> = ({
 }) => {
   useTagConfig();
   const meta = getTagMeta(tag, type);
-  if (meta) {
+  const disabled = isTagDisabled(tag, type);
+  if (meta && meta.enabled !== false && !disabled) {
     if (meta.logoDataUrl) {
       return (
         <img
